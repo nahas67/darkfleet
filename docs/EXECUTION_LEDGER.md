@@ -87,3 +87,22 @@
 - Correlation: 12 components × 200 AIS in **12.6 ms** (target <2s).
 - 44/44 pytest; ruff + strict mypy clean.
 - Status: ✅ VERIFIED.
+
+## CP6 — Evidence + storage + cache + job system (2026-10-01)
+
+- `pipeline.py`: the single authoritative scan; stages streamed via callback at
+  the moment work completes. 14 real transitions, 0 timers, 0 percentages.
+- `evidence.py` / `observability.py`: full provenance (SAR, config hash, mask,
+  filter, CFAR, AIS provider, matching weights) + structured measured logs.
+- `storage/cache.py` + `storage/runs.py` (subagent): content-addressed cache with
+  REAL hit/miss counters, sha256-verified reads (corrupt = MISS), RunStore with
+  the DEMO/REAL+synthetic isolation guard; survives restart.
+- `jobs/` (subagent): canonical 15-state machine, strictly-next transitions with
+  escape-to-FAILED, threaded runner, per-transition persistence, `subscribe()`
+  seeded queue for SSE.
+- `demo.py`: DEMO synthesis ported to Python (TS engine now unreferenced by the
+  backend; retirement recorded in REMOVALS after full parity).
+- DEMO scan measured: 101 detected px → 12 components → 6 AIS obs → 4 matched,
+  8 unmatched, 2 AIS-only, 96 ms end to end. Logs show only real events.
+- 123/123 pytest · ruff clean · strict mypy clean (32 files).
+- Status: ✅ VERIFIED.

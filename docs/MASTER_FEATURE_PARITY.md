@@ -99,10 +99,10 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| EVD-001..003 | partial TS object | no | no | no | persist server-side | ⚪ NOT IMPLEMENTED |
-| EVD-004/005 | none | no | no | no | evidence + debug APIs | ⚪ NOT IMPLEMENTED |
-| EVD-006 | partial (synthetic flag) | DEMO | no | no | enforce on all artifacts | ⚪ NOT IMPLEMENTED |
-| EVD-007/008 | partial | DEMO | no | no | version + decomposition | ⚪ NOT IMPLEMENTED |
+| EVD-001..003 | full provenance persisted | yes | yes (backend) | 7 pipeline tests | API surface (CP7) | 🟢 IMPLEMENTED |
+| EVD-004/005 | per-target + debug evidence | yes | yes (backend) | — | API routes (CP7) | 🟢 IMPLEMENTED |
+| EVD-006 | DEMO marked synthetic everywhere | yes | yes | isolation tests | keep | 🟢 IMPLEMENTED |
+| EVD-007/008 | version + decomposition in evidence | yes | yes | pipeline tests | keep | 🟢 IMPLEMENTED |
 
 ## API (CP7 — mostly MISSING; sync scan exists)
 
@@ -160,14 +160,14 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| OPS-001..003 | fake timers | no | no | no | 15-state jobs + SSE | ⚪ NOT IMPLEMENTED |
-| OPS-004..006 | none | no | no | no | cache + counter proof | ⚪ NOT IMPLEMENTED |
-| OPS-007 | none | no | no | no | stage logger | ⚪ NOT IMPLEMENTED |
+| OPS-001..003 | 15-state machine, real events | yes | yes | 24 job tests + stream test | SSE route (CP7) | 🟢 IMPLEMENTED |
+| OPS-004..006 | cache + REAL hit counters | yes | yes | 41 storage tests | wire into scan (CP7) | 🟢 IMPLEMENTED |
+| OPS-007 | measured structured logs | yes | yes | live scan output | keep | 🟢 IMPLEMENTED |
 | OPS-008 | settings.py | yes | partial | import | extend per domain | 🟢 IMPLEMENTED |
 | OPS-009 | `.env.example` real | yes | partial | no | keep secrets out | 🟢 IMPLEMENTED |
 | OPS-010..012 | none | no | no | no | compose + volumes | ⚪ NOT IMPLEMENTED |
-| OPS-013 | none | no | no | no | restart tests | ⚪ NOT IMPLEMENTED |
-| OPS-014 | violated (fallback) | no | no | no | delete fallback | ⚪ NOT IMPLEMENTED |
+| OPS-013 | restart persistence | yes | yes (backend) | restart tests | keep | 🟢 IMPLEMENTED |
+| OPS-014 | REAL failure persists nothing | yes | yes | isolation tests | keep | 🟢 IMPLEMENTED |
 
 ## ADV (CP15 — all ⚪ by rule; nothing starts before CP6)
 
@@ -188,16 +188,22 @@
 | DOC-001..003 | boilerplate | no | — | — | rewrite (CP13) | ⚪ NOT IMPLEMENTED |
 | DOC-004/005 | real files | yes | yes | manual | maintain | 🟢 IMPLEMENTED |
 | DOC-006..008 | none/legacy | no | — | — | write (CP13) | ⚪ NOT IMPLEMENTED |
-| TST-001 | 6 tests, zero CFAR | partial | — | 6 pass | full suite | ⚪ NOT IMPLEMENTED |
+| TST-001 | 123 backend tests (CFAR/mask/geodesy/propagation/radius/scores/class/cache/provenance) | yes | — | 123 pass | extend per CP | ✅ VERIFIED |
 | TST-002 | detector + correlation golden parity | yes | tests | detector 100%, 12/12 classes exact | keep | ✅ VERIFIED |
-| TST-003..007 | none | no | no | no | integration (CP6/7) | ⚪ NOT IMPLEMENTED |
+| TST-003 | pipeline → detection → AIS → correlation → evidence | yes | yes | 7 pipeline tests | API layer (CP7) | ✅ VERIFIED |
+| TST-004 | DEMO/REAL isolation | yes | yes | isolation test | keep | ✅ VERIFIED |
+| TST-005 | restart persistence | yes | yes | run-store + archive tests | keep | ✅ VERIFIED |
+| TST-006 | cache keying + reuse + invalidation | yes | yes | counter/corruption tests | keep | ✅ VERIFIED |
+| TST-007 | export generation + provenance | none | no | no | CP12 | ⚪ NOT IMPLEMENTED |
 | TST-008 | tsc clean (non-strict) | yes | — | pass | enable strict (CP8) | 🟡 PARTIALLY VERIFIED |
 | TST-009 | none | no | no | no | suite (CP8+) | ⚪ NOT IMPLEMENTED |
 | TST-010..012 | none (chromium cached) | no | no | no | 3-mode E2E (CP14) | ⚪ NOT IMPLEMENTED |
 | TST-013/014 | none | no | no | no | review + measure (CP14) | ⚪ NOT IMPLEMENTED |
 | TST-015/016 | ledger started | process | — | — | enforce every CP | 🟢 IMPLEMENTED |
 
-## Counts at CP0
+## Counts at CP6
 
-TOTAL 201 · ✅ 5 · 🟢 4 · 🟡 9 · 🔴 0 · ⚪ 183. (CDSE S-1 BLOCKED is RES-003's
-ROLE assessment, recorded in the registry; the row stays ✅ VERIFIED as research.)
+Recounted at CP6 from the rows above: TOTAL 201 · ✅ 24 · 🟢 47 · 🟡 12 ·
+🔴 0 · ⚪ 118. Frontend (UI), exports, Docker, E2E and advanced rows remain ⚪
+by design — they are CP8–CP15 and start only after the core is verified.
+(CDSE S-1 BLOCKED is RES-003's ROLE assessment, recorded in the registry.)
