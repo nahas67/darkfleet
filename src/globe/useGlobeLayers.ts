@@ -23,8 +23,8 @@ import type { RegisteredLayer } from './registry.ts';
 import { createGlobeLayers } from './layers.ts';
 import type { CreateLayerOptions } from './layers.ts';
 import { appStore, isLayerEnabled, useStoreState } from '../app/state.ts';
-import type { AppState, AppStore, LayerId } from '../app/state.ts';
-import type { AisOnlyTarget, ScanResult, VesselTarget } from '../types/api.ts';
+import type { AppState, AppStore } from '../app/state.ts';
+import type { AisOnlyTarget, LayerId, ScanResult, VesselTarget } from '../types/api.ts';
 import type { DebugLayerResponse } from '../app/useApi.ts';
 
 /** Layers this hook feeds with backend payloads. */
@@ -100,7 +100,10 @@ export function syncGlobeLayers(
     registry.setOpacity(id, state.layers[id].opacity);
   }
 
-  const enabled = (id: LayerId): boolean => isLayerEnabled(state, id);
+  // A layer is pushed only when the state declares it AND the capability gate
+  // plus visibility allow it.
+  const enabled = (id: LayerId): boolean =>
+    Boolean(state.layers[id]) && isLayerEnabled(state, id);
   const { scan = null, ais = null, raster = null, landMask = null, cfarDebug = null } = payloads;
   const targets: VesselTarget[] = scan?.targets ?? [];
   const aisOnly: AisOnlyTarget[] = scan?.ais_only ?? [];

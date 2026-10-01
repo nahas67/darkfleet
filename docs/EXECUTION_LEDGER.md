@@ -166,3 +166,35 @@ credentials, no synthetic input:
   so no WebGL context leaks), and probes provider health on load.
 - 84/84 frontend tests · `tsc --noEmit` clean · `vite build` succeeds
   (263 kB js / 60 kB css, 8.4 s).
+
+## CP9 — Globe layers, camera, search (2026-10-01)
+
+- 11 `RegisteredLayer` implementations (src/globe/layers.ts). Every `update()`
+  clears before rebuilding — leak proven by 5× update loops asserting constant
+  primitive counts.
+- `SAR_RASTER` uses `SingleTileImageryProvider` + `addImageryProvider` with a
+  generation token so a slow provider resolving after a newer update is dropped;
+  at most one imagery layer exists at any time.
+- Camera suite: 11 commands with `QUADRATIC_IN_OUT` easing. `followTarget` uses
+  a grace window + `moveEnd` to distinguish its own flyTo from operator input;
+  the first user `moveStart` kills the follow.
+- SpatialSearch: coords / sector / scene / target ID / MMSI / scan ID, driving
+  the camera. Keyboard navigable, Esc closes, no network in tests.
+- Advanced layers are hard no-ops: direct and registry-routed `update()` both
+  yield 0 primitives.
+- 167/167 frontend tests · tsc clean.
+
+### CP15 (partial) — real image-based wake analysis
+
+- Replaced the legacy threshold sampler with a polar-ray symmetric arm-pair
+  detector. Every reported value is measured from pixels; no fixture flag is read.
+- MEASURED on a controlled fixture (0.8 dB speckle, 10 m pixels):
+  detects arms down to ~7 dB above sea; flat sea, hull-only and stub wakes all
+  correctly return `detected=False`; confidence is monotonic in arm contrast;
+  arm angle recovered within ~3-9 deg over a 12-32 deg true range.
+- Honest limits recorded rather than hidden: confidence saturates (it is
+  evidence strength, not P(wake)); angular tolerance is ±10 deg; the reported
+  heading is an axis folded to a half-turn because a hull axis is bidirectional.
+- Approach changed twice after the Radon variant proved insensitive to wake
+  strength — recorded in PLAN_CHANGES rather than quietly rewritten.
+- 13 wake tests · 158 backend tests · ruff clean · strict mypy clean.

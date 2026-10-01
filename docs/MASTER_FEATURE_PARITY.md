@@ -189,7 +189,7 @@
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
 | ADV-001..003 | none | no | no | no | after CP6 | ⚪ NOT IMPLEMENTED |
-| ADV-004/005 | crude sampler (not real) | DEMO | no | no | Radon pipeline | ⚪ NOT IMPLEMENTED |
+| ADV-004/005 | **real image-based polar-ray arm pair** | yes | 13 tests on synthetic wakes | 🟡 | angular tolerance ±10° documented | 🟡 PARTIALLY VERIFIED |
 | ADV-006 | none | no | no | no | where supported | ⚪ NOT IMPLEMENTED |
 | ADV-007/008 | none | no | no | no | adapter only | ⚪ NOT IMPLEMENTED |
 | ADV-009/010 | proximity pairs only | DEMO | no | no | pattern engine | ⚪ NOT IMPLEMENTED |

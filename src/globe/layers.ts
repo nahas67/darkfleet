@@ -326,7 +326,7 @@ export abstract class CesiumEntityLayer implements RegisteredLayer {
   readonly config: LayerConfig;
   private entities: Entity[] = [];
   private tints: TintRef[] = [];
-  private visible: boolean;
+  protected visible: boolean;
 
   constructor(config: LayerConfig) {
     this.config = { ...config };

@@ -148,12 +148,15 @@ export function buildSearchRows(query: ParsedQuery, data: SearchData): SearchRow
 
   const rows: SearchRow[] = [];
 
-  if (query.kind === 'COORD') {
+  if (query.kind === 'COORD' && typeof query.lat === 'number' && typeof query.lon === 'number') {
+    const { lat, lon } = query;
     rows.push({
-      key: `COORD:${query.lat},${query.lon}`,
+      key: `COORD:${lat},${lon}`,
       kind: 'COORD',
-      title: `Fly to ${query.lat.toFixed(4)}, ${query.lon.toFixed(4)}`,
+      title: `Fly to ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
       detail: 'Framed from the query as a camera viewport, not as survey data',
+      lat,
+      lon,
     });
     return rows;
   }
@@ -265,8 +268,9 @@ export function runSearchRow(
   ctx: { viewer?: Viewer | null; store?: AppStore },
 ): SearchOutcome {
   const { viewer, store } = ctx;
-  if (row.kind === 'COORD' && viewer) {
-    const bbox = coordBbox(row.lat ?? 0, row.lon ?? 0);
+  if (row.kind === 'COORD' && typeof row.lat === 'number' && typeof row.lon === 'number') {
+    if (!viewer) return { action: 'NONE' };
+    const bbox = coordBbox(row.lat, row.lon);
     return flyToAOI(viewer, bbox)
       ? { action: 'FLY_TO_AOI', bbox }
       : { action: 'NONE' };
@@ -314,8 +318,6 @@ export function searchKeyAction(key: string): SearchKeyAction {
       return { type: 'MOVE', delta: 1 };
     case 'ArrowUp':
       return { type: 'MOVE', delta: -1 };
-    case 'Home':
-      return { type: 'MOVE', delta: -Number.MAX_SAFE_INTEGER };
     case 'Enter':
       return { type: 'ACTIVATE' };
     case 'Escape':
@@ -525,6 +527,8 @@ export function SpatialSearch({
             id={searchOptionId(index)}
             role="option"
             aria-selected={index === active}
+            tabIndex={-1}
+            onClick={() => activate(index)}
             data-df-search-row={row.kind}
             className={[
               'flex w-full cursor-pointer items-center gap-2 rounded-[6px] border px-2 py-1.5 text-left text-[10px] transition',
@@ -533,30 +537,30 @@ export function SpatialSearch({
                 : 'border-transparent hover:bg-[var(--df-accent-soft)]',
             ].join(' ')}
           >
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={() => activate(index)}
-              aria-label={`${row.title} — ${row.kind.toLowerCase()}`}
-              className="flex w-full items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
-            >
-              {kindIcon(row.kind)}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-[var(--df-text)]">{row.title}</span>
-                <span className="block truncate font-mono text-[9px] text-[var(--df-text-dim)]">
-                  {row.detail}
-                </span>
+            {kindIcon(row.kind)}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-mono text-[var(--df-text)]">{row.title}</span>
+              <span className="block truncate font-mono text-[9px] text-[var(--df-text-dim)]">
+                {row.detail}
               </span>
-            </button>
+            </span>
           </li>
         ))}
       </ul>
 
-      {rows.length === 0 && (
-        <p data-df-search-empty role="status" className="font-mono text-[10px] text-[var(--df-text-dim)]">
-          {queried
-            ? `No match for "${query.trim()}". Nothing is searched, so nothing is shown.`
-            : 'Enter lat,lon, a sector, a scene id, a target id, a 9-digit MMSI or a scan id.'}
+      {rows.length === 0 && queried && (
+        <p
+          data-df-search-empty
+          role="status"
+          className="font-mono text-[10px] text-[var(--df-text-dim)]"
+        >
+          No match for &quot;{query.trim()}&quot;. Nothing was searched, so nothing is shown.
+        </p>
+      )}
+
+      {rows.length === 0 && !queried && (
+        <p data-df-search-hint className="font-mono text-[10px] text-[var(--df-text-dim)]">
+          Enter lat,lon, a sector, a scene id, a target id, a 9-digit MMSI or a scan id.
         </p>
       )}
 
