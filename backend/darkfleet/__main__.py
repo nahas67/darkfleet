@@ -39,12 +39,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     application = create_app(settings)
 
     if args.check:
-        for route in sorted(
-            (route for route in application.routes if getattr(route, "path", "").startswith("/api")),
-            key=lambda item: getattr(item, "path", ""),
-        ):
-            methods = ",".join(sorted(getattr(route, "methods", []) or []))
-            print(f"{methods:<8} {getattr(route, 'path', '')}")
+        # Read the OpenAPI schema: an included router is one app.routes entry, so
+        # iterating app.routes directly would not list the endpoints.
+        schema = application.openapi()
+        operations = {
+            path: ",".join(sorted(method.upper() for method in methods))
+            for path, methods in schema.get("paths", {}).items()
+        }
+        for path in sorted(operations):
+            print(f"{operations[path]:<12} {path}")
+        print(f"{len(operations)} endpoint(s) under the OpenAPI schema")
         return 0
 
     import uvicorn

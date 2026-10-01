@@ -108,13 +108,18 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| API-001/002 | legacy sync scan | DEMO | no | no | job-based rebuild | ⚪ NOT IMPLEMENTED |
-| API-003..006 | cache-get only | DEMO | no | no | full job API | ⚪ NOT IMPLEMENTED |
-| API-007 | env-var check only | no | no | no | real probing | ⚪ NOT IMPLEMENTED |
-| API-008/009 | none | no | no | no | new endpoints | ⚪ NOT IMPLEMENTED |
-| API-010 | client-side only | DEMO | no | no | server exports | ⚪ NOT IMPLEMENTED |
-| API-011 | TS types only | no | no | no | Pydantic + mirror | ⚪ NOT IMPLEMENTED |
-| API-012 | 503 block (honest but dead-end) | no | no | no | capability errors | ⚪ NOT IMPLEMENTED |
+| API-001 | POST /api/scans → 202 + DF-#### id | yes | live DEMO scan | 17 API tests | keep | ✅ VERIFIED |
+| API-002 | GET /api/scans/{id} (no rerun) | yes | live | tests | keep | ✅ VERIFIED |
+| API-003 | GET /api/scans/{id}/targets | yes | live (12 targets) | tests | keep | ✅ VERIFIED |
+| API-004 | GET /api/scans/{id}/events (SSE) | yes | live (43 lines) | tests | keep | ✅ VERIFIED |
+| API-005 | GET /api/scenes (3 DEMO scenes) | yes | live | tests | keep | ✅ VERIFIED |
+| API-006 | GET /api/targets/{id} | yes | live | tests | keep | ✅ VERIFIED |
+| API-007 | GET /api/providers/health — LIVE probes | yes | live PC AVAILABLE 2784ms, EarthSearch DEGRADED (GCP) | tests | keep | ✅ VERIFIED |
+| API-008 | GET /api/evidence/{target_id} | yes | live | tests | keep | ✅ VERIFIED |
+| API-009 | GET /api/debug/{scan_id}/{layer} | yes | live | tests | keep | ✅ VERIFIED |
+| API-010 | exports geojson/kml/json; png/pdf 501 CP12 | partial | live (3 formats) | tests | PNG+PDF at CP12 | 🟡 PARTIALLY VERIFIED |
+| API-011 | Pydantic contracts + TS mirror (api.ts) | yes | live (422 on bad bbox) | tests | keep | ✅ VERIFIED |
+| API-012 | REAL fail → explicit status, no DEMO fallback | yes | live 400 UNKNOWN_PROVIDER | tests | keep | ✅ VERIFIED |
 
 ## UI (CP8–CP11 — legacy works but is replaced; dead parts unwired)
 

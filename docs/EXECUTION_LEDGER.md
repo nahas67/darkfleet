@@ -122,3 +122,24 @@ credentials, no synthetic input:
   records the exact WorldCover clip used
 - First scan exposed two real defects, both fixed: `resolution_m` was recorded
   as null, and an unknown-provider guard wrongly blocked valid discovery.
+
+## CP7 — Complete backend API (2026-10-01)
+
+10 endpoints under FastAPI with lifespan, CORS and uniform error rendering.
+- DEMO scan → 202 + `DF-0001`; polled to COMPLETE through all 15 stages in
+  order; stage history persisted and replayable without rerunning.
+- Live provider health probe (NOT env-var inference): Planetary Computer
+  **AVAILABLE** 2784 ms; EarthSearch **DEGRADED** with the GCP caveat surfaced;
+  latency + last_check + error reported per provider, no secrets.
+- Evidence, targets, debug layers, SSE (43 lines, terminal-terminated),
+  geojson/kml/json exports all verified live. PNG/PDF return **501 with
+  `planned_in: CP12`** — no stub file, no fake bytes.
+- Isolation verified live: REAL with an unknown provider → **400
+  UNKNOWN_PROVIDER / NOT_CONFIGURED**, zero synthetic content. Malformed bbox →
+  422.
+- Three integration defects found by exercising the API rather than its tests:
+  pipeline re-emitted QUEUED and SEARCHING_SCENE, both illegal in the 15-state
+  machine (adapter now drops the duplicate QUEUED and merges repeats); and
+  scans had to be persisted *before* the terminal transition so a COMPLETE job
+  can never be read before its evidence hits disk.
+- 140/140 pytest · ruff clean · strict mypy clean (37 files).

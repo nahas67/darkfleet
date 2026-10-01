@@ -1404,40 +1404,42 @@ def debug_layer(
             detail={"available": list((record.get("debug") or {}).get("layers", []))},
         )
     notes: list[str] = []
-    if array.ndim == 2:
-        if layer == "normalized":
-            notes.append(
-                "normalized reports the calibrated dB grid (raw_db); the pipeline emits no "
-                "separate radiometric-normalisation artifact."
-            )
-        if array.dtype.kind == "f":
-            notes.append("non-finite pixels are excluded from the statistics and counted in nan_count.")
+    if layer in _LAYER_COLUMNS:
+        columns = list(_LAYER_COLUMNS[layer])
+        rows = min(int(array.shape[0]), limit)
         return DebugLayerResponse(
             scan_id=scan_id,
             layer=layer,
-            kind="array",
-            source=_LAYER_SOURCE.get(layer),
+            kind="table",
+            source="targets",
             shape=[int(value) for value in array.shape],
             dtype=str(array.dtype),
-            stats=_array_stats(array),
-            grid_size=grid,
-            grid=_downsample(array, grid) if grid else None,
-            notes=notes,
+            columns=columns,
+            rows=int(array.shape[0]),
+            row_limit=rows,
+            truncated=rows < int(array.shape[0]),
+            notes=[
+                f"one row per target; full values live in GET /api/scans/{scan_id}/targets"
+            ],
         )
-    columns = list(_LAYER_COLUMNS.get(layer, ()))
-    rows = min(int(array.shape[0]), limit)
+    if layer == "normalized":
+        notes.append(
+            "normalized reports the calibrated dB grid (raw_db); the pipeline emits no "
+            "separate radiometric-normalisation artifact."
+        )
+    if array.dtype.kind == "f":
+        notes.append("non-finite pixels are excluded from the statistics and counted in nan_count.")
     return DebugLayerResponse(
         scan_id=scan_id,
         layer=layer,
-        kind="table",
-        source="targets",
+        kind="array",
+        source=_LAYER_SOURCE.get(layer),
         shape=[int(value) for value in array.shape],
         dtype=str(array.dtype),
-        columns=columns,
-        rows=int(array.shape[0]),
-        row_limit=rows,
-        truncated=rows < int(array.shape[0]),
-        notes=[f"values are summary rows; full values live in GET /api/scans/{scan_id}/targets"],
+        stats=_array_stats(array),
+        grid_size=grid if array.ndim == 2 else None,
+        grid=_downsample(array, grid) if grid and array.ndim == 2 else None,
+        notes=notes,
     )
 
 
