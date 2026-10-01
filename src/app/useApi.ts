@@ -278,7 +278,8 @@ export function createApiClient(fetchImpl?: FetchLike): ApiClient {
         `${API_BASE}/scans/${encodeURIComponent(scanId)}/targets`,
       ),
 
-    getScenes: (query = {}) => requestJson<SceneListResponse>(doFetch, scenesUrl(query)),
+    getScenes: (query = {}) =>
+      requestJson<SceneListResponse>(doFetch, scenesUrl(query)),
 
     getProvidersHealth: () =>
       requestJson<HealthResponse>(doFetch, `${API_BASE}/providers/health`),
