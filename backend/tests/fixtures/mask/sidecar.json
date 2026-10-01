@@ -1,0 +1,11 @@
+{
+ "tile_href": "https://esa-worldcover.s3.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N00E102_Map.tif",
+ "version": "ESA WorldCover v200 2021",
+ "bbox": [
+  103.65,
+  1.1,
+  104.05,
+  1.4
+ ],
+ "fetch_s": 7.9
+}

@@ -27,8 +27,8 @@
 | SAR-105 | chain + AOI reprojection | yes | no | 12/12 tests | keep | 🟢 IMPLEMENTED |
 | SAR-106 | classifier (GCP proven) | partial | no | GCP control | warp path remains | 🟡 PARTIALLY VERIFIED |
 | SAR-107 | enforced in read path | yes | no | refusal test | keep | 🟢 IMPLEMENTED |
-| SAR-108 | none | no | no | no | GRD branch (CP2) | ⚪ NOT IMPLEMENTED |
-| SAR-109 | linear read only | partial | no | no | log/dB branch (CP2) | 🟡 PARTIALLY VERIFIED |
+| SAR-108 | GRD branch + LUT refusal | yes | no | refusal test | EarthSearch path (CP6) | 🟢 IMPLEMENTED |
+| SAR-109 | RTC linear→dB live-read | yes (live window) | no | live + unit | keep | 🟢 IMPLEMENTED |
 | SAR-110 | partial (TS provenance) | DEMO | no | no | persist raster meta (CP6) | ⚪ NOT IMPLEMENTED |
 | SAR-111 | 32648 fixture test | yes | no | 12/12 tests | keep | 🟢 IMPLEMENTED |
 | SAR-112 | 4 COGs + sidecar | yes | tests | 12/12 tests | keep | 🟢 IMPLEMENTED |
@@ -37,16 +37,16 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| SAR-201 | none | no | no | no | implement | ⚪ NOT IMPLEMENTED |
-| SAR-202 | none | no | no | no | per-product branches | ⚪ NOT IMPLEMENTED |
-| SAR-203 | legacy-TS only | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
-| SAR-204 | synthetic masks only | no | no | no | WorldCover tiles | ⚪ NOT IMPLEMENTED |
-| SAR-205 | legacy buffer (unused real data) | no | no | no | real buffer | ⚪ NOT IMPLEMENTED |
-| SAR-206 | none | no | no | no | port exceptions (WPI) | ⚪ NOT IMPLEMENTED |
-| SAR-207 | none | no | no | no | version+hash in evidence | ⚪ NOT IMPLEMENTED |
-| SAR-208 | none | no | no | no | debug layer | ⚪ NOT IMPLEMENTED |
-| SAR-209 | misused as mask-adjacent | no | no | no | label coarse-viz only | ⚪ NOT IMPLEMENTED |
-| SAR-210 | none | no | no | no | alignment tests | ⚪ NOT IMPLEMENTED |
+| SAR-201 | `valid_data_mask` | yes | no | 22/22 | keep | 🟢 IMPLEMENTED |
+| SAR-202 | RTC+GRD branches | yes | no | LUT-refusal test | keep | 🟢 IMPLEMENTED |
+| SAR-203 | `linear_to_db` eps-guarded | yes | no | spot -3.0103 dB | keep | 🟢 IMPLEMENTED |
+| SAR-204 | WorldCover clip 59.2% water | yes | tests | point-verified | keep | 🟢 IMPLEMENTED |
+| SAR-205 | metre buffer → px dilation | yes | tests | monotonic test | keep | 🟢 IMPLEMENTED |
+| SAR-206 | port carveback (GeoJSON) | yes | tests | carveback test | keep | 🟢 IMPLEMENTED |
+| SAR-207 | version+tile+buffer in evidence | yes | tests | sidecar test | keep | 🟢 IMPLEMENTED |
+| SAR-208 | mask array returned | yes | tests | keep | UI layer (CP11) | 🟢 IMPLEMENTED |
+| SAR-209 | NE documented coarse-only | yes | docs | — | keep | 🟢 IMPLEMENTED |
+| SAR-210 | reproject-onto-grid | yes | tests | alignment tests | keep | 🟢 IMPLEMENTED |
 
 ## SAR-300s (CP3 — ports of verified legacy math)
 

@@ -12,6 +12,8 @@
   EarthSearch GCP-referenced (210 GCPs, warp path); MarineCadastre = keyless
   historical AIS; WorldCover 10 m = primary mask; deterministic CV path.
 - 11 plan docs written; PLAN_LOCK.json populated; commit follows.
+- Status: ✅ VERIFIED.
+
 ## CP1 — Real raster + georeferencing (2026-10-01)
 
 - Fixture COGs generated (seeded): 4326 + 32648 + unreferenced + 4-GCP control.
@@ -20,4 +22,17 @@
 - LIVE PRIMARY PATH through shipped code: PC RTC search 2.7 s → SAS sign
   1.2 s → AFFINE/EPSG:32648/10 m/float32 → 332×334 window 2.0 s, TOTAL 8.3 s
   (< 10 s target); center lat 1.26499 lon 103.81499 inside AOI; 100% finite.
+- Status: ✅ VERIFIED.
+
+## CP2 — Preprocessing + real land mask (2026-10-01)
+
+- RTC branch (linear γ⁰→dB, eps-guarded) and GRD branch (DN→σ⁰ via LUT;
+  raises loudly without LUT; `denoised=False` flagged, never faked).
+- Real mask: WorldCover v200 N00E102 tile range-read live (7.5 s), 4800×3600
+  clip committed (976 KB): 59.2% water / 20.0% built-up / 13.6% tree —
+  geographically plausible for the Malacca AOI.
+- `build_land_mask`: nearest reproject → water-class!=80 land → metre buffer
+  dilation → port carveback (GeoJSON fix) + versioned provenance.
+- Point-verified: strait water open, island land excluded, harbour pier excluded.
+- 22/22 pytest; ruff + strict mypy clean.
 - Status: ✅ VERIFIED.
