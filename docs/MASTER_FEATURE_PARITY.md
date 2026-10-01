@@ -217,9 +217,10 @@
 | TST-013/014 | none | no | no | no | review + measure (CP14) | ⚪ NOT IMPLEMENTED |
 | TST-015/016 | ledger started | process | — | — | enforce every CP | 🟢 IMPLEMENTED |
 
-## Counts at CP6
+## Counts at CP8
 
-Recounted at CP6 from the rows above: TOTAL 201 · ✅ 24 · 🟢 47 · 🟡 12 ·
-🔴 0 · ⚪ 118. Frontend (UI), exports, Docker, E2E and advanced rows remain ⚪
-by design — they are CP8–CP15 and start only after the core is verified.
+Recounted at CP8 from the rows above: TOTAL 201 · ✅ 48 · 🟢 53 · 🟡 15 ·
+🔴 0 · ⚪ 85. Remaining work is grouped: globe wiring/search/camera/evidence/
+timeline/analysis-workbench (CP9–CP11), exports (CP12), Docker/OSS/security
+close-out (CP13), E2E + rendered review (CP14), advanced intelligence (CP15).
 (CDSE S-1 BLOCKED is RES-003's ROLE assessment, recorded in the registry.)
