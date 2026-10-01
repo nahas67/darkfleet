@@ -1,134 +1,203 @@
-# DarkFleet Master Feature Parity Matrix
+# Master Feature Parity Matrix (frozen CP0, 202 IDs)
 
-> Execution contract for the Master Recovery. Every requirement from the mission
-> prompt appears here exactly once. Statuses use only:
-> `✅ VERIFIED` · `🟢 IMPLEMENTED` · `🟡 PARTIALLY VERIFIED` · `🔴 BLOCKED` · `⚪ NOT IMPLEMENTED`
->
-> Last updated: Gates 0A + 0B complete. The final verdict is **calculated from
-> Gate 11 evidence, never pre-selected**.
+> Full requirement text: `MASTER_REQUIREMENTS.md`. Status values only:
+> `✅ 🟢 🟡 🔴 ⚪`. At CP0 nearly everything is ⚪ — that is the honest start.
 
-## Provider capability ledger (measured 2026-10-01, no credentials in environment)
+## RES (CP0)
 
-| Provider | Discovery | Asset access | Georeferencing | Analysis-ready | Role |
-|---|---|---|---|---|---|
-| Planetary Computer `sentinel-1-rtc` | anon HTTP 200 | anon-equivalent today: unsigned read HTTP 409 → free SAS token endpoint HTTP 200 → range-read OK (512² window, 11.6 s) | AFFINE, EPSG:32648, 10 m COG, float32, 6 overviews | YES | **PRIMARY** |
-| Planetary Computer `sentinel-1-grd` | anon HTTP 200 | same SAS mechanism (read untested) | per-item (likely GCP-native) | PARTIAL | SECONDARY |
-| CDSE STAC (`stac.dataspace.copernicus.eu/v1`) | anon, but **no Sentinel-1 collections** (exactly 10 IDs: `ccm-*`, `clms_*`); prior HTTP 400 was `CollectionInQuerryDoesNotExist` (wrong ID), prior 404 was wrong ID — **not** auth | n/a for S-1; CCM-SAR downloads credentialed | n/a | NO | 🔴 BLOCKED for S-1 |
-| EarthSearch `sentinel-1-grd` | anon HTTP 200, 70 scenes over Singapore Strait | anon public S3 | **GCP (210 GCPs, EPSG:4326)**, no affine, no RPCs | NO (warp required) | SECONDARY via GCP warp path |
-| AISStream | — | needs free API key | n/a (point observations) | n/a | live provider (Gate 4) |
-| AISHub | endpoint reachable | needs free username key | n/a | n/a | live provider (Gate 4) |
-| Global Fishing Watch API | — | HTTP 401 without key | n/a | n/a | adapter where configured (Gate 4) |
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| RES-001 | probe scripts | yes (512² read) | partial (model only) | manual | wire into API (CP1) | 🟡 PARTIALLY VERIFIED |
+| RES-002 | probe | search only | model only | manual | test SAS read (CP1) | 🟡 PARTIALLY VERIFIED |
+| RES-003 | probe | yes (absence proven) | registry | manual | keep gated | ✅ VERIFIED |
+| RES-004 | probe | yes (210 GCPs) | model only | manual | warp path (CP1) | 🟡 PARTIALLY VERIFIED |
+| RES-005 | registry | yes | no | no | adapters (CP4) | ✅ VERIFIED |
+| RES-006 | registry | yes | no | no | mask/refs (CP2/CP9) | ✅ VERIFIED |
+| RES-007 | registry | yes | no | no | deterministic path (CP3/CP15) | ✅ VERIFIED |
+| RES-008 | this repo | yes | yes | review | maintain | ✅ VERIFIED |
 
-`SarAsset` georeferencing states: `AFFINE_GEOREFERENCED` · `GCP_GEOREFERENCED` ·
-`UNREFERENCED`. Asset accessibility and georeferencing are **separate** capability
-states. `UNREFERENCED` (neither affine nor usable GCP/geolocation metadata) fails
-explicitly — never silently mis-georeferenced.
+## SAR-100s (CP1 — all ⚪, no implementation yet)
 
-## Key
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| SAR-101 | none (`/api/stac/scenes` missing) | no | no | no | provider router | ⚪ NOT IMPLEMENTED |
+| SAR-102 | none | no | no | no | capability check | ⚪ NOT IMPLEMENTED |
+| SAR-103 | none | no | no | no | asset selection | ⚪ NOT IMPLEMENTED |
+| SAR-104 | manual probe only | no | no | no | `read_window` + tests | ⚪ NOT IMPLEMENTED |
+| SAR-105 | none | no | no | no | chain + dual-CRS tests | ⚪ NOT IMPLEMENTED |
+| SAR-106 | none | no | no | no | GCP warp + tests | ⚪ NOT IMPLEMENTED |
+| SAR-107 | model exists | no | no | no | enforce in read path | ⚪ NOT IMPLEMENTED |
+| SAR-108 | none | no | no | no | GRD branch | ⚪ NOT IMPLEMENTED |
+| SAR-109 | none | no | no | no | RTC branch | ⚪ NOT IMPLEMENTED |
+| SAR-110 | partial (TS provenance) | DEMO | no | no | persist raster meta | ⚪ NOT IMPLEMENTED |
+| SAR-111 | none | no | no | no | 32648 fixture test | ⚪ NOT IMPLEMENTED |
+| SAR-112 | golden JSON only | no | no | no | COG generator | ⚪ NOT IMPLEMENTED |
 
-- **Existing**: did the inherited repo have it? (`legacy-TS` = TypeScript implementation,
-  `dead` = present but unmounted/uncalled, `partial` = incomplete)
-- **Working**: did it actually work? **Final status** is the only column that changes.
+## SAR-200s (CP2 — all ⚪)
 
-## A. Deterministic pipeline (backend authority)
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| SAR-201 | none | no | no | no | implement | ⚪ NOT IMPLEMENTED |
+| SAR-202 | none | no | no | no | per-product branches | ⚪ NOT IMPLEMENTED |
+| SAR-203 | legacy-TS only | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
+| SAR-204 | synthetic masks only | no | no | no | WorldCover tiles | ⚪ NOT IMPLEMENTED |
+| SAR-205 | legacy buffer (unused real data) | no | no | no | real buffer | ⚪ NOT IMPLEMENTED |
+| SAR-206 | none | no | no | no | port exceptions (WPI) | ⚪ NOT IMPLEMENTED |
+| SAR-207 | none | no | no | no | version+hash in evidence | ⚪ NOT IMPLEMENTED |
+| SAR-208 | none | no | no | no | debug layer | ⚪ NOT IMPLEMENTED |
+| SAR-209 | misused as mask-adjacent | no | no | no | label coarse-viz only | ⚪ NOT IMPLEMENTED |
+| SAR-210 | none | no | no | no | alignment tests | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| A1 | Python FastAPI backend as single detector/correlation authority | No | No | No | No | Create `backend/`; retire 3 TS copies after parity proof | ⚪ NOT IMPLEMENTED |
-| A2 | REAL STAC scene search (PC RTC primary, capability-based selection) | No (`/api/stac/scenes` expected, never implemented) | No | No | No | Implement provider router; anon search verified by probe, wire into API | ⚪ NOT IMPLEMENTED |
-| A3 | CDSE Sentinel-1 path | No | No | No | No | Capability-gated; no S-1 collections on public STAC → BLOCKED unless OData/S3 creds added | 🔴 BLOCKED |
-| A4 | EarthSearch GRD + GCP warp path | No | No | No | No | Implement GCP→GeoTIFF warp; 210-GCP asset verified on disk | ⚪ NOT IMPLEMENTED |
-| A5 | Remote windowed raster read (no full-scene download) | No | No | No | No | rasterio `from_bounds` in source CRS; PC range-read verified manually | ⚪ NOT IMPLEMENTED |
-| A6 | Georeferencing chain + tests (AOI→source→window→pixel→WGS84, non-WGS84) | No | No | No | No | Implement; fixture pixel→known coord is a hard gate | ⚪ NOT IMPLEMENTED |
-| A7 | GRD vs RTC preprocessing branches | No | No | No | No | GRD: DN→σ⁰→denoise→terrain→dB. RTC: linear γ⁰→log | ⚪ NOT IMPLEMENTED |
-| A8 | Real land/water mask + buffer + exceptions + provenance | No (synthetic masks) | No | No | No | Real coastline source, declared resolution; Natural Earth coarse-viz only | ⚪ NOT IMPLEMENTED |
-| A9 | Speckle: none/median/lee (+refined_lee/frost architecture) | partial (median only, legacy-TS) | DEMO-only | No | No | Port; measure retention/displacement/area/FP/SNR on controlled fixtures — no sub-resolution promises | ⚪ NOT IMPLEMENTED |
-| A10 | CA-CFAR baseline (guard/train rings, power-domain) | legacy-TS | DEMO-only | No | No | Port to NumPy; golden-vector parity test before TS retirement | ⚪ NOT IMPLEMENTED |
-| A11 | Connected components + full extraction | legacy-TS | DEMO-only | No | No | Port; parity test | ⚪ NOT IMPLEMENTED |
-| A12 | True image-based wake analysis | No (crude threshold sampler `cfar.ts:329-370`) | — | No | No | Gate 10; retire `wakeVisible` fixture flag | ⚪ NOT IMPLEMENTED |
-| A13 | Multi-polarization VV/VH/combined | No | No | No | No | Gate 10, where source data permits | ⚪ NOT IMPLEMENTED |
-| A14 | ML detector interface (CFAR stays baseline) | No | No | No | No | Gate 10 adapter contract; no unvalidated weights | ⚪ NOT IMPLEMENTED |
+## SAR-300s (CP3 — ports of verified legacy math)
 
-## B. AIS + correlation
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| SAR-301 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
+| SAR-302 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
+| SAR-303 | type only (`'lee'` unreachable) | no | no | no | implement Lee | ⚪ NOT IMPLEMENTED |
+| SAR-304 | none | no | no | no | architect slots | ⚪ NOT IMPLEMENTED |
+| SAR-305 | none | no | no | no | fixture measurement suite | ⚪ NOT IMPLEMENTED |
+| SAR-306 | legacy-TS | DEMO | no | no | port to NumPy | ⚪ NOT IMPLEMENTED |
+| SAR-307 | legacy-TS (linear-power) | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
+| SAR-308 | none | no | no | no | morphology | ⚪ NOT IMPLEMENTED |
+| SAR-309 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
+| SAR-310 | legacy-TS | DEMO | no | no | port + footprint | ⚪ NOT IMPLEMENTED |
+| SAR-311 | violated (`correlation.ts:180`) | no | no | no | fix required | ⚪ NOT IMPLEMENTED |
+| SAR-312 | golden JSON ready | fixture | no | integrity 5/5 | parity suite | ⚪ NOT IMPLEMENTED |
+| SAR-313 | none | no | no | no | CP15 adapter | ⚪ NOT IMPLEMENTED |
+| SAR-314 | none | no | no | no | CP15 channels | ⚪ NOT IMPLEMENTED |
+| SAR-315 | none | no | no | no | small-target tests | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| B1 | AIS adapters: AISStream, AISHub, GFW, local import | No | No | No | No | Implement; AISStream is a required live provider | ⚪ NOT IMPLEMENTED |
-| B2 | Live collector → same Parquet/DuckDB archive | No | No | No | No | Live feed persists forward; live data is not the historical store | ⚪ NOT IMPLEMENTED |
-| B3 | `data/ais/YYYY/MM/DD/*.parquet` + DuckDB AOI/time/MMSI/dedup/coverage/freshness | No (in-memory `Map`, `server.ts:41`) | No | No | No | Implement; restart must not lose archive | ⚪ NOT IMPLEMENTED |
-| B4 | Dead-reckoning propagation + Δt + uncertainty, recorded | legacy-TS (spherical) | DEMO-only | No | No | Port; upgrade distance to ellipsoidal geodesic | ⚪ NOT IMPLEMENTED |
-| B5 | All distances geodesic (metres), never raw degrees | No (haversine mislabeled WGS-84) | — | No | No | pyproj.Geod everywhere | ⚪ NOT IMPLEMENTED |
-| B6 | Dynamic match radius, actual radius persisted per candidate | legacy-TS | DEMO-only | No | No | Port + persist | ⚪ NOT IMPLEMENTED |
-| B7 | Score decomposition backend (spatial/temporal/heading/size/composite) | legacy-TS | DEMO-only | No | No | Port; weights in config | ⚪ NOT IMPLEMENTED |
-| B8 | All 7 canonical classifications reachable; `AIS_ONLY` emitted | partial (4 of 7 dead) | DEMO-only | No | No | Implement `SEA_CLUTTER`, `LOW_CONFIDENCE`, `UNRESOLVED`, emit `AIS_ONLY` | ⚪ NOT IMPLEMENTED |
-| B9 | Apparent footprint + uncertainty (replace `pixels × spacing` exact length) | No (`correlation.ts:180` exact) | — | No | No | Fix required | ⚪ NOT IMPLEMENTED |
-| B10 | Neutral language; no intent/illegality inference | partial (types clean; UI copy leaks) | — | No | No | Neutralize 4 UI strings; keep FABRICATED-INTENT ban in AI path | ⚪ NOT IMPLEMENTED |
+## AIS (CP4 — all ⚪; MISSING today)
 
-## C. Jobs, evidence, cache, API, observability
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| AIS-001..003 | none | no | no | no | adapters (keys = external block) | ⚪ NOT IMPLEMENTED |
+| AIS-004 | none | no | no | no | MarineCadastre ingest (keyless) | ⚪ NOT IMPLEMENTED |
+| AIS-005 | none | no | no | no | file importers | ⚪ NOT IMPLEMENTED |
+| AIS-006 | none | no | no | no | pyais wiring | ⚪ NOT IMPLEMENTED |
+| AIS-007..009 | TS shape only | DEMO | no | no | normalize+dedup | ⚪ NOT IMPLEMENTED |
+| AIS-010..013 | none (in-memory Map) | no | no | no | Parquet+DuckDB+restart | ⚪ NOT IMPLEMENTED |
+| AIS-014..016 | none | no | no | no | collector+metadata | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| C1 | 15-state job machine + real events/SSE (no `setTimeout`) | No (6 fake timers, `App.tsx:212-217`) | No | No | No | Replace; no invented percentages | ⚪ NOT IMPLEMENTED |
-| C2 | REST: scans, targets, events, scenes, providers/health, target by ID | partial (sync scan + cache get) | DEMO-only | No | No | Full job API | ⚪ NOT IMPLEMENTED |
-| C3 | Deterministic cache + correct invalidation | No | No | No | No | Key: scene+AOI+config-hash+algo-version; prove reuse by counter | ⚪ NOT IMPLEMENTED |
-| C4 | Evidence/provenance persisted (not React state) | partial (provenance object, ephemeral) | No | No | No | Persist full record incl. mask version, filter/CFAR config, AIS used, scores, uncertainty | ⚪ NOT IMPLEMENTED |
-| C5 | Exports ×5 with provenance (GeoJSON/KML/JSON/PNG/PDF) | partial (3 of 5, TS) | DEMO-only | No | No | Add PNG snapshot + PDF report; DEMO marked synthetic | ⚪ NOT IMPLEMENTED |
-| C6 | Structured operational logs of real events | No | No | No | No | Stage logger; measured messages only | ⚪ NOT IMPLEMENTED |
-| C7 | Real provider health probing (`AVAILABLE/DEGRADED/UNAVAILABLE/AUTH_REQUIRED/RATE_LIMITED`) | No (env-var check only) | No | No | No | Probe endpoints; never expose secrets | ⚪ NOT IMPLEMENTED |
-| C8 | Typed configuration (STAC/SAR/mask/CFAR/AIS/match/storage/cache/API/FE/logging) | No | No | No | No | pydantic-settings; env overrides; sane defaults | 🟢 IMPLEMENTED |
-| C9 | DEMO/REAL strict isolation (no silent fallback) | No (`App.tsx:238-246` silent fallback) | No | No | No | Delete fallback; REAL failure raises explicitly | ⚪ NOT IMPLEMENTED |
+## COR (CP5 — ports of legacy math + dead-state implementation)
 
-## D. Spatial product (Cesium-first)
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| COR-001/002 | legacy-TS (spherical) | DEMO | no | no | port + uncertainty | ⚪ NOT IMPLEMENTED |
+| COR-003 | violated (haversine) | no | no | no | pyproj.Geod | ⚪ NOT IMPLEMENTED |
+| COR-004/005 | legacy-TS | DEMO | no | no | port + persist radius | ⚪ NOT IMPLEMENTED |
+| COR-006..008 | legacy-TS | DEMO | no | no | port + persist backend | ⚪ NOT IMPLEMENTED |
+| COR-009 | none | no | no | no | missing-input guards | ⚪ NOT IMPLEMENTED |
+| COR-010 | legacy-TS | DEMO | no | no | port greedy 1-to-1 | ⚪ NOT IMPLEMENTED |
+| COR-011/012 | 4 of 7 dead | no | no | no | implement 3 + emit AIS_ONLY | ⚪ NOT IMPLEMENTED |
+| COR-013/014 | types clean, copy leaks | no | no | no | neutralize UI-022 | ⚪ NOT IMPLEMENTED |
+| COR-015 | legacy-TS pairs | DEMO | no | no | port neutral | ⚪ NOT IMPLEMENTED |
+| COR-016 | legacy-TS | DEMO | no | no | port with uncertainty | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| D1 | Full-screen Cesium default, no legacy dashboard frame | partial (secondary view) | Yes (behind toggle) | No | No | Promote; remove 2D-default | ⚪ NOT IMPLEMENTED |
-| D2 | Authoritative LayerRegistry, 12 canonical layers, leak-free rescans | dead (`layerRegistry.ts`, zero importers) | No | No | No | Wire; dispose contract + leak test | ⚪ NOT IMPLEMENTED |
-| D3 | SpatialSearch wired (coords/sector/scene/target/MMSI/scan ID → camera) | dead (zero importers) | No | No | No | Wire + add scan-ID path | ⚪ NOT IMPLEMENTED |
-| D4 | Camera suite (11 commands), easing, no nav override | partial (4 of 5 presets + `isWebGLAvailable` uncalled) | — | No | No | Wire all; WebGL fallback | ⚪ NOT IMPLEMENTED |
-| D5 | Scene browser (Sentinel-1 pass discovery) | partial (scenario `<select>`) | DEMO-only | No | No | Real browser over provider search | ⚪ NOT IMPLEMENTED |
-| D6 | View modes WORLD/SAR/SAR_CONTRAST/CORRELATION/ANALYSIS | No (`DisplayMode` dead type) | No | No | No | Implement | ⚪ NOT IMPLEMENTED |
-| D7 | Target selection (click/hover/next/prev/focus/release) | partial (`onFocus` dead) | — | No | No | Merge TargetCard↔Inspector; wire focus | ⚪ NOT IMPLEMENTED |
-| D8 | Evidence workspace (why UNMATCHED without source) | No | No | No | No | New deep-trace surface | ⚪ NOT IMPLEMENTED |
-| D9 | Acquisition-time timeline (no fake playback) | No | No | No | No | New | ⚪ NOT IMPLEMENTED |
-| D10 | CFAR workbench preserved + extended (lee, kernel/min/max, recompute signaling, before/after) | Yes (modal) | Yes | partial | No | Preserve; add missing controls | 🟡 PARTIALLY VERIFIED |
-| D11 | Telemetry merged + bidirectional sync + filters + **sorting** | partial (no sorting; one-way sync) | Yes | partial | No | Merge pair; add sorting + camera-fly | 🟡 PARTIALLY VERIFIED |
-| D12 | 2D Raster Workbench preserved (3 colormaps, 3 heatmaps, graticule, scale bar, dB probe, AOI box-select) | Yes (default view) | Yes | Yes | No | Demote to ANALYSIS surface; keep every feature | 🟡 PARTIALLY VERIFIED |
-| D13 | Debug `?debug=true` + toggle, 14 layers | No | No | No | No | New | ⚪ NOT IMPLEMENTED |
-| D14 | Exports menu (5 formats via API) | partial (3 client-side) | Yes | partial | No | Rewire to backend; add PNG/PDF | ⚪ NOT IMPLEMENTED |
-| D15 | Settings / provider configuration | No | No | No | No | New | ⚪ NOT IMPLEMENTED |
-| D16 | Advanced slots present but `NOT_AVAILABLE` hidden/disabled (multipass, wake, ML, temporal) | No | No | No | No | Registry slots only; **no fabricated tracks/geometry/output** before Gate 10 | ⚪ NOT IMPLEMENTED |
+## EVD (CP6 — all ⚪; provenance object exists but ephemeral)
 
-## E. Verification, docs, OSS
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| EVD-001..003 | partial TS object | no | no | no | persist server-side | ⚪ NOT IMPLEMENTED |
+| EVD-004/005 | none | no | no | no | evidence + debug APIs | ⚪ NOT IMPLEMENTED |
+| EVD-006 | partial (synthetic flag) | DEMO | no | no | enforce on all artifacts | ⚪ NOT IMPLEMENTED |
+| EVD-007/008 | partial | DEMO | no | no | version + decomposition | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| E1 | Backend unit suite (transforms/mask/CFAR/components/geodesic/propagation/radius/scores/classification/cache/provenance) | No (6 tests, zero CFAR) | — | — | No | Full suite; golden parity | ⚪ NOT IMPLEMENTED |
-| E2 | Backend integration (fixture→detect; archive→query; detect+AIS→corr; jobs; exports; DEMO/REAL isolation; restart) | No | — | — | No | New; tiny local fixtures, no full-scene downloads | ⚪ NOT IMPLEMENTED |
-| E3 | Frontend tests (shell/mode/search/scenes/scan/layers/targets/timeline/evidence/workbench/telemetry/exports/errors/keyboard) | No (vitest not even installed) | — | — | No | Add vitest (Gate 0B) + suite before Gate 7 | ⚪ NOT IMPLEMENTED |
-| E4 | Playwright E2E in **3 modes**: DEMO success · REAL success (if provider accessible) · REAL-unavailable (explicit error, no synthetics, no fallback) | No (chromium cached ✅) | — | — | No | New; DEMO E2E is never REAL verification | ⚪ NOT IMPLEMENTED |
-| E5 | Rendered review 1920×1080 / 1440×900 / 1280×720 / 1024×768 + fixes | No | — | — | No | Screenshots + defect fixes | ⚪ NOT IMPLEMENTED |
-| E6 | Performance measured (SAR window <10 s, detector <5 s, corr <2 s, 60 FPS target) | No | — | — | No | Measure; label measured-vs-target | ⚪ NOT IMPLEMENTED |
-| E7 | Keyboard/ARIA/reduced-motion/non-colour status/parallel list | No | — | — | No | New | ⚪ NOT IMPLEMENTED |
-| E8 | README + docs set + metadata.json + Makefile + CONTRIBUTING + SECURITY + LICENSE + REMOVALS.md | No (AI Studio boilerplate) | — | — | — | Rewrite all | ⚪ NOT IMPLEMENTED |
-| E9 | Docker Compose (api+web, healthchecks, persistent volumes) | No | — | — | — | New | ⚪ NOT IMPLEMENTED |
+## API (CP7 — mostly MISSING; sync scan exists)
 
-## F. Advanced (Gate 10 only, after core verification)
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| API-001/002 | legacy sync scan | DEMO | no | no | job-based rebuild | ⚪ NOT IMPLEMENTED |
+| API-003..006 | cache-get only | DEMO | no | no | full job API | ⚪ NOT IMPLEMENTED |
+| API-007 | env-var check only | no | no | no | real probing | ⚪ NOT IMPLEMENTED |
+| API-008/009 | none | no | no | no | new endpoints | ⚪ NOT IMPLEMENTED |
+| API-010 | client-side only | DEMO | no | no | server exports | ⚪ NOT IMPLEMENTED |
+| API-011 | TS types only | no | no | no | Pydantic + mirror | ⚪ NOT IMPLEMENTED |
+| API-012 | 503 block (honest but dead-end) | no | no | no | capability errors | ⚪ NOT IMPLEMENTED |
 
-| # | Feature | Existing | Working | Integrated | Tested | Required action | Final status |
-|---|---|---|---|---|---|---|---|
-| F1 | Multi-pass persistence / track hypotheses | No | No | No | No | After Gate 6; never identity-from-geometry | ⚪ NOT IMPLEMENTED |
-| F2 | Real wake analysis (candidate/direction/length/heading-consistency/confidence + provenance) | No | No | No | No | After Gate 6 | ⚪ NOT IMPLEMENTED |
-| F3 | Multi-polarization VV/VH/combined | No | No | No | No | Where data permits | ⚪ NOT IMPLEMENTED |
-| F4 | ML detector interface | No | No | No | No | Adapter; validated models only | ⚪ NOT IMPLEMENTED |
-| F5 | Temporal intelligence (hypotheses, not conclusions) | partial (proximity pairs only) | DEMO-only | No | No | After Gate 6 | ⚪ NOT IMPLEMENTED |
-| F6 | Optional evidence-constrained AI (OBSERVED/HYPOTHESES/UNKNOWNS/CONFIDENCE) | partial (`analyze-ai` exists) | DEMO-only | partial | No | Constrain; validate model IDs; failure must not break analysis | ⚪ NOT IMPLEMENTED |
+## UI (CP8–CP11 — legacy works but is replaced; dead parts unwired)
 
-## Intentional removals (see `docs/REMOVALS.md`)
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| UI-001 | secondary view | behind toggle | no | no | promote to default | ⚪ NOT IMPLEMENTED |
+| UI-002..004 | dead shell parts | no | no | no | new shell | ⚪ NOT IMPLEMENTED |
+| UI-005/006 | dead registry | no | no | no | wire 12 layers | ⚪ NOT IMPLEMENTED |
+| UI-007 | dead search | no | no | no | wire + scan-ID | ⚪ NOT IMPLEMENTED |
+| UI-008 | scenario select only | DEMO | partial | no | real browser | ⚪ NOT IMPLEMENTED |
+| UI-009 | header button | DEMO | partial | no | dock + job events | ⚪ NOT IMPLEMENTED |
+| UI-010 | dead type | no | no | no | 5 modes | ⚪ NOT IMPLEMENTED |
+| UI-011 | partial (focus dead) | partial | no | no | wire all 6 ops | ⚪ NOT IMPLEMENTED |
+| UI-012 | legacy inspector | yes | partial | no | merge + tabs | 🟡 PARTIALLY VERIFIED |
+| UI-013 | none | no | no | no | real timeline | ⚪ NOT IMPLEMENTED |
+| UI-014 | legacy table | yes | one-way | no | merge + sort + bidi | 🟡 PARTIALLY VERIFIED |
+| UI-015 | legacy modal | yes | partial | no | extend (lee/kernel/min/max) | 🟡 PARTIALLY VERIFIED |
+| UI-016 | legacy 2D default | yes | yes | no | demote to ANALYSIS | 🟡 PARTIALLY VERIFIED |
+| UI-017 | none | no | no | no | 13 layers + ?debug | ⚪ NOT IMPLEMENTED |
+| UI-018 | 3 client-side | yes | partial | no | tray + backend + PNG/PDF | ⚪ NOT IMPLEMENTED |
+| UI-019/020 | none/env-check | no | no | no | settings + probed health | ⚪ NOT IMPLEMENTED |
+| UI-021 | partial (SIMULATION bug) | no | no | no | unmistakable mode | ⚪ NOT IMPLEMENTED |
+| UI-022 | 4 leaking strings | — | no | no | neutralize | ⚪ NOT IMPLEMENTED |
+| UI-023/024 | none | no | no | no | keyboard + a11y | ⚪ NOT IMPLEMENTED |
+| UI-025 | none | no | no | no | 4-resolution review | ⚪ NOT IMPLEMENTED |
+| UI-026 | 4 presets uncalled | no | no | no | wire 11 | ⚪ NOT IMPLEMENTED |
+| UI-027/028 | partial/no refs | partial/no | no | no | links + EEZ/ports/lanes | ⚪ NOT IMPLEMENTED |
+| UI-029/030 | none | no | no | no | slots, hidden | ⚪ NOT IMPLEMENTED |
+| UI-031..033 | globe managers | behind toggle | no | no | wire | ⚪ NOT IMPLEMENTED |
+| UI-034/035 | CSS hides chrome, keeps credits | yes | no | no | keep + zero spam | 🟡 PARTIALLY VERIFIED |
+| UI-036 | none | no | no | no | measure FPS | ⚪ NOT IMPLEMENTED |
+| UI-037..040 | — | — | — | — | enforced at CP8+ | ⚪ NOT IMPLEMENTED |
 
-| Old behavior | Disposition |
-|---|---|
-| `App.tsx:runLocalScan` + `server.ts` inline pipeline (3rd + 2nd TS copies) | Remove after Python parity; DEMO preserved server-side |
-| `App.tsx:238-246` silent REAL→DEMO fallback | Remove unconditionally (spec-forbidden anti-pattern) |
-| `App.tsx:212-217` + `:253-256` fake timer stages | Replace with real job events |
-| Type-only duplicates after merge (TargetCard↔Inspector, TelemetryOverlay↔Table) | Merge, keep superior surface, record migration |
+## EXP (CP12)
+
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| EXP-001..003 | legacy-TS | DEMO | client-side | no | server-side + provenance | ⚪ NOT IMPLEMENTED |
+| EXP-004/005 | none | no | no | no | PNG + PDF | ⚪ NOT IMPLEMENTED |
+| EXP-006 | partial | DEMO | no | no | enforce all | ⚪ NOT IMPLEMENTED |
+
+## OPS (CP6/CP13)
+
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| OPS-001..003 | fake timers | no | no | no | 15-state jobs + SSE | ⚪ NOT IMPLEMENTED |
+| OPS-004..006 | none | no | no | no | cache + counter proof | ⚪ NOT IMPLEMENTED |
+| OPS-007 | none | no | no | no | stage logger | ⚪ NOT IMPLEMENTED |
+| OPS-008 | settings.py | yes | partial | import | extend per domain | 🟢 IMPLEMENTED |
+| OPS-009 | `.env.example` real | yes | partial | no | keep secrets out | 🟢 IMPLEMENTED |
+| OPS-010..012 | none | no | no | no | compose + volumes | ⚪ NOT IMPLEMENTED |
+| OPS-013 | none | no | no | no | restart tests | ⚪ NOT IMPLEMENTED |
+| OPS-014 | violated (fallback) | no | no | no | delete fallback | ⚪ NOT IMPLEMENTED |
+
+## ADV (CP15 — all ⚪ by rule; nothing starts before CP6)
+
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| ADV-001..003 | none | no | no | no | after CP6 | ⚪ NOT IMPLEMENTED |
+| ADV-004/005 | crude sampler (not real) | DEMO | no | no | Radon pipeline | ⚪ NOT IMPLEMENTED |
+| ADV-006 | none | no | no | no | where supported | ⚪ NOT IMPLEMENTED |
+| ADV-007/008 | none | no | no | no | adapter only | ⚪ NOT IMPLEMENTED |
+| ADV-009/010 | proximity pairs only | DEMO | no | no | pattern engine | ⚪ NOT IMPLEMENTED |
+| ADV-011/012 | unconstrained `analyze-ai` | DEMO | partial | no | constrain + validate | ⚪ NOT IMPLEMENTED |
+
+## SEC/DOC/TST (CP13/CP14/ongoing)
+
+| ID | Existing | Working | Integrated | Tested | Action | Status |
+|---|---|---|---|---|---|---|
+| SEC-001..008 | none | no | no | no | review at CP13 | ⚪ NOT IMPLEMENTED |
+| DOC-001..003 | boilerplate | no | — | — | rewrite (CP13) | ⚪ NOT IMPLEMENTED |
+| DOC-004/005 | real files | yes | yes | manual | maintain | 🟢 IMPLEMENTED |
+| DOC-006..008 | none/legacy | no | — | — | write (CP13) | ⚪ NOT IMPLEMENTED |
+| TST-001 | 6 tests, zero CFAR | partial | — | 6 pass | full suite | ⚪ NOT IMPLEMENTED |
+| TST-002 | fixture ready | fixture | no | integrity 5/5 | parity suite (CP3) | ⚪ NOT IMPLEMENTED |
+| TST-003..007 | none | no | no | no | integration (CP6/7) | ⚪ NOT IMPLEMENTED |
+| TST-008 | tsc clean (non-strict) | yes | — | pass | enable strict (CP8) | 🟡 PARTIALLY VERIFIED |
+| TST-009 | none | no | no | no | suite (CP8+) | ⚪ NOT IMPLEMENTED |
+| TST-010..012 | none (chromium cached) | no | no | no | 3-mode E2E (CP14) | ⚪ NOT IMPLEMENTED |
+| TST-013/014 | none | no | no | no | review + measure (CP14) | ⚪ NOT IMPLEMENTED |
+| TST-015/016 | ledger started | process | — | — | enforce every CP | 🟢 IMPLEMENTED |
+
+## Counts at CP0
+
+TOTAL 201 · ✅ 5 · 🟢 4 · 🟡 9 · 🔴 0 · ⚪ 183. (CDSE S-1 BLOCKED is RES-003's
+ROLE assessment, recorded in the registry; the row stays ✅ VERIFIED as research.)

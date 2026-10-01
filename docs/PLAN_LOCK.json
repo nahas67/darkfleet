@@ -1,0 +1,26 @@
+﻿{
+    "version":  1,
+    "checkpoints":  [
+                        "CP0",
+                        "CP1",
+                        "CP2",
+                        "CP3",
+                        "CP4",
+                        "CP5",
+                        "CP6",
+                        "CP7",
+                        "CP8",
+                        "CP9",
+                        "CP10",
+                        "CP11",
+                        "CP12",
+                        "CP13",
+                        "CP14",
+                        "CP15",
+                        "CP16"
+                    ],
+    "scope_hash":  "sha256:24589d137d0c43c489b50d54e525775fef54c2435d223fcf1b0c5dc98cae5bbe",
+    "requirements_count":  201,
+    "created_at":  "2026-10-01",
+    "starting_git_head":  "9f4e726"
+}
