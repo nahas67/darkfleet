@@ -126,9 +126,12 @@
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
 | UI-001 | secondary view | behind toggle | no | no | promote to default | ⚪ NOT IMPLEMENTED |
-| UI-002..004 | dead shell parts | no | no | no | new shell | ⚪ NOT IMPLEMENTED |
-| UI-005/006 | dead registry | no | no | no | wire 12 layers | ⚪ NOT IMPLEMENTED |
-| UI-007 | dead search | no | no | no | wire + scan-ID | ⚪ NOT IMPLEMENTED |
+| UI-002 | dead BrandMark/MissionStatus | no | no | no | new top bar (CP8) | ⚪ NOT IMPLEMENTED |
+| UI-003 | dead LeftRail (236 ln) | no | no | no | new icon rail (CP8) | ⚪ NOT IMPLEMENTED |
+| UI-004 | dead CommandDock (344 ln) | no | no | no | new dock (CP8) | ⚪ NOT IMPLEMENTED |
+| UI-005 | no layer surface | no | no | no | floating Layers (CP8) | ⚪ NOT IMPLEMENTED |
+| UI-006 | **new authoritative registry + 8 tests** | yes | yes (tests) | yes | CP9 globe wiring | 🟢 IMPLEMENTED |
+| UI-007 | dead search | no | no | no | wire + scan-ID (CP9) | ⚪ NOT IMPLEMENTED |
 | UI-008 | scenario select only | DEMO | partial | no | real browser | ⚪ NOT IMPLEMENTED |
 | UI-009 | header button | DEMO | partial | no | dock + job events | ⚪ NOT IMPLEMENTED |
 | UI-010 | dead type | no | no | no | 5 modes | ⚪ NOT IMPLEMENTED |
@@ -147,7 +150,8 @@
 | UI-025 | none | no | no | no | 4-resolution review | ⚪ NOT IMPLEMENTED |
 | UI-026 | 4 presets uncalled | no | no | no | wire 11 | ⚪ NOT IMPLEMENTED |
 | UI-027/028 | partial/no refs | partial/no | no | no | links + EEZ/ports/lanes | ⚪ NOT IMPLEMENTED |
-| UI-029/030 | none | no | no | no | slots, hidden | ⚪ NOT IMPLEMENTED |
+| UI-029 | wake layer slot, registry refuses update | yes | yes (tested) | partial | real geometry CP15 | 🟡 PARTIALLY VERIFIED |
+| UI-030 | multipass slot, registry refuses update | yes | yes (tested) | partial | real tracks CP15 | 🟡 PARTIALLY VERIFIED |
 | UI-031..033 | globe managers | behind toggle | no | no | wire | ⚪ NOT IMPLEMENTED |
 | UI-034/035 | CSS hides chrome, keeps credits | yes | no | no | keep + zero spam | 🟡 PARTIALLY VERIFIED |
 | UI-036 | none | no | no | no | measure FPS | ⚪ NOT IMPLEMENTED |
@@ -200,8 +204,9 @@
 | TST-005 | restart persistence | yes | yes | run-store + archive tests | keep | ✅ VERIFIED |
 | TST-006 | cache keying + reuse + invalidation | yes | yes | counter/corruption tests | keep | ✅ VERIFIED |
 | TST-007 | export generation + provenance | none | no | no | CP12 | ⚪ NOT IMPLEMENTED |
-| TST-008 | tsc clean (non-strict) | yes | — | pass | enable strict (CP8) | 🟡 PARTIALLY VERIFIED |
-| TST-009 | none | no | no | no | suite (CP8+) | ⚪ NOT IMPLEMENTED |
+| TST-008 | tsc clean; vitest wired w/ proxy | yes | — | 14 pass | strict at CP8 | 🟡 PARTIALLY VERIFIED |
+| TST-009 | registry + shell suites | partial | — | 8 registry pass | rest CP9–CP11 | 🟡 PARTIALLY VERIFIED |
+| TST-009x | remaining frontend suites (search/scenes/evidence/timeline/telemetry/modes/errors/keyboard) | no | no | no | CP9–CP11 | ⚪ NOT IMPLEMENTED |
 | TST-010..012 | none (chromium cached) | no | no | no | 3-mode E2E (CP14) | ⚪ NOT IMPLEMENTED |
 | TST-013/014 | none | no | no | no | review + measure (CP14) | ⚪ NOT IMPLEMENTED |
 | TST-015/016 | ledger started | process | — | — | enforce every CP | 🟢 IMPLEMENTED |
