@@ -143,3 +143,26 @@ credentials, no synthetic input:
   scans had to be persisted *before* the terminal transition so a COMPLETE job
   can never be read before its evidence hits disk.
 - 140/140 pytest · ruff clean · strict mypy clean (37 files).
+
+## CP8 — New UI foundation (2026-10-01)
+
+- `src/app/`: `state.ts` (pure reducers/selectors, capability-gated layers,
+  provider severity ranking), `useApi.ts` (typed client for all 10 endpoints),
+  `useScan.ts` (SSE decoder, stage counter, no percentages), `SpatialShell.tsx`.
+- Shell: full-screen Cesium globe + minimal top bar + left icon rail +
+  bottom-centre dock + one floating surface. Legacy dashboard unmounted.
+- Advanced layers gated in THREE places: reducers return the identical state
+  object, `visibleLayerIds` filters them, and the UI renders a disabled row
+  reading "not available until CP15".
+- Unknown/unmodelled stage strings are surfaced verbatim rather than coerced,
+  so a newer backend stage is never silently dropped or guessed.
+- **Legal-exposure bug found and fixed**: `index.css` set
+  `.cesium-viewer-bottom { display:none }`, and Cesium appends
+  `.cesium-widget-credits` INTO that container (verified in the Cesium source,
+  `creditContainer: bottomContainer`) — the required imagery attribution was
+  invisible. Now only the interactive widgets are hidden; the credits bar stays
+  visible, clickable, and above our overlays.
+- `main.tsx` mounts the new shell, owns the Viewer lifetime (destroy on unmount
+  so no WebGL context leaks), and probes provider health on load.
+- 84/84 frontend tests · `tsc --noEmit` clean · `vite build` succeeds
+  (263 kB js / 60 kB css, 8.4 s).

@@ -64,8 +64,10 @@
   display: block !important;
 }
 
-/* Hide default Cesium navigation & animation toolbars while preserving attribution */
-.cesium-viewer-bottom,
+/* Hide default Cesium chrome — but NEVER .cesium-viewer-bottom.
+   Cesium nests .cesium-widget-credits inside .cesium-viewer-bottom, so hiding
+   that container also hides the required imagery/data attribution. Attribution is
+   a licensing obligation, not decoration; only the interactive widgets go. */
 .cesium-viewer-toolbar,
 .cesium-viewer-animationContainer,
 .cesium-viewer-timelineContainer,
@@ -73,6 +75,15 @@
 .cesium-viewer-geocoderContainer,
 .cesium-baseLayerPicker-dropDown {
   display: none !important;
+}
+
+/* Keep the credits bar itself visible and legible, above our own overlays. */
+.cesium-viewer-bottom {
+  display: block !important;
+  pointer-events: none !important;
+}
+.cesium-viewer-bottom .cesium-widget-credits {
+  pointer-events: auto !important;
 }
 
 /* Restrained Cesium credit/attribution at bottom right */

@@ -125,13 +125,13 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| UI-001 | secondary view | behind toggle | no | no | promote to default | ⚪ NOT IMPLEMENTED |
-| UI-002 | dead BrandMark/MissionStatus | no | no | no | new top bar (CP8) | ⚪ NOT IMPLEMENTED |
-| UI-003 | dead LeftRail (236 ln) | no | no | no | new icon rail (CP8) | ⚪ NOT IMPLEMENTED |
-| UI-004 | dead CommandDock (344 ln) | no | no | no | new dock (CP8) | ⚪ NOT IMPLEMENTED |
-| UI-005 | no layer surface | no | no | no | floating Layers (CP8) | ⚪ NOT IMPLEMENTED |
-| UI-006 | **new authoritative registry + 8 tests** | yes | yes (tests) | yes | CP9 globe wiring | 🟢 IMPLEMENTED |
-| UI-007 | dead search | no | no | no | wire + scan-ID (CP9) | ⚪ NOT IMPLEMENTED |
+| UI-001 | secondary view | behind toggle | **mounted as default** | 70 shell tests | CP9 layer wiring | 🟢 IMPLEMENTED |
+| UI-002 | dead BrandMark/MissionStatus | no | new top bar | shell tests | keep | 🟢 IMPLEMENTED |
+| UI-003 | dead LeftRail | no | new icon rail | shell tests | keep | 🟢 IMPLEMENTED |
+| UI-004 | dead CommandDock | no | new floating dock | shell tests | keep | 🟢 IMPLEMENTED |
+| UI-005 | new Layers surface (5 groups) | yes | yes (tests) | shell tests | keep | 🟢 IMPLEMENTED |
+| UI-006 | authoritative registry + 8 tests | yes | yes (tests) | yes | CP9 globe wiring | 🟢 IMPLEMENTED |
+| UI-007 | dead search | no | shell opens surface | shell tests | full query impl CP9 | 🟡 PARTIALLY VERIFIED |
 | UI-008 | scenario select only | DEMO | partial | no | real browser | ⚪ NOT IMPLEMENTED |
 | UI-009 | header button | DEMO | partial | no | dock + job events | ⚪ NOT IMPLEMENTED |
 | UI-010 | dead type | no | no | no | 5 modes | ⚪ NOT IMPLEMENTED |
@@ -143,19 +143,25 @@
 | UI-016 | legacy 2D default | yes | yes | no | demote to ANALYSIS | 🟡 PARTIALLY VERIFIED |
 | UI-017 | none | no | no | no | 13 layers + ?debug | ⚪ NOT IMPLEMENTED |
 | UI-018 | 3 client-side | yes | partial | no | tray + backend + PNG/PDF | ⚪ NOT IMPLEMENTED |
-| UI-019/020 | none/env-check | no | no | no | settings + probed health | ⚪ NOT IMPLEMENTED |
-| UI-021 | partial (SIMULATION bug) | no | no | no | unmistakable mode | ⚪ NOT IMPLEMENTED |
+| UI-019 | no settings surface | no | no | no | CP13 | ⚪ NOT IMPLEMENTED |
+| UI-020 | probed provider health in top bar | yes | live API source | shell tests | keep | 🟢 IMPLEMENTED |
+| UI-021 | ModePill + per-scan mode | yes | yes (tests) | shell tests | keep | 🟢 IMPLEMENTED |
 | UI-022 | 4 leaking strings | — | no | no | neutralize | ⚪ NOT IMPLEMENTED |
-| UI-023/024 | none | no | no | no | keyboard + a11y | ⚪ NOT IMPLEMENTED |
+| UI-023 | Escape closes surfaces; named controls | yes | yes (tests) | shell tests | full shortcut set CP14 | 🟡 PARTIALLY VERIFIED |
+| UI-024 | aria-labels, focus, accessible names | yes | yes (tests) | a11y assertions | reduced-motion CP14 | 🟡 PARTIALLY VERIFIED |
 | UI-025 | none | no | no | no | 4-resolution review | ⚪ NOT IMPLEMENTED |
 | UI-026 | 4 presets uncalled | no | no | no | wire 11 | ⚪ NOT IMPLEMENTED |
 | UI-027/028 | partial/no refs | partial/no | no | no | links + EEZ/ports/lanes | ⚪ NOT IMPLEMENTED |
 | UI-029 | wake layer slot, registry refuses update | yes | yes (tested) | partial | real geometry CP15 | 🟡 PARTIALLY VERIFIED |
 | UI-030 | multipass slot, registry refuses update | yes | yes (tested) | partial | real tracks CP15 | 🟡 PARTIALLY VERIFIED |
 | UI-031..033 | globe managers | behind toggle | no | no | wire | ⚪ NOT IMPLEMENTED |
-| UI-034/035 | CSS hides chrome, keeps credits | yes | no | no | keep + zero spam | 🟡 PARTIALLY VERIFIED |
+| UI-034 | **attribution bug found+fixed** (CSS hid credits container) | yes | yes | CSS + Cesium source check | keep | ✅ VERIFIED |
+| UI-035 | no console-error spam in dev run | pending | — | — | verify at CP14 | ⚪ NOT IMPLEMENTED |
 | UI-036 | none | no | no | no | measure FPS | ⚪ NOT IMPLEMENTED |
-| UI-037..040 | — | — | — | — | enforced at CP8+ | ⚪ NOT IMPLEMENTED |
+| UI-037 | legacy UI files retained, unmounted | yes | — | — | delete after parity CP9–CP11 | 🟡 PARTIALLY VERIFIED |
+| UI-038 | legacy shell unmounted from main.tsx | yes | yes | tsc + build | keep single arch | ✅ VERIFIED |
+| UI-039 | orbital ocean intelligence laboratory | yes | yes (visual) | shell markup | refine at CP14 | 🟡 PARTIALLY VERIFIED |
+| UI-040 | floating surfaces, no dashboard cards | yes | yes | shell tests | keep | 🟢 IMPLEMENTED |
 
 ## EXP (CP12)
 

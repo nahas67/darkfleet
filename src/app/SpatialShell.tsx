@@ -1,0 +1,1102 @@
+﻿/**
+ * DarkFleet vNext spatial shell â€” the ONE product surface.
+ *
+ * Layout contract:
+ *  - The full-screen Cesium globe is the only primary viewport. There is no
+ *    dashboard frame and no 2D fallback.
+ *  - A minimal top bar carries the wordmark, the DEMO/REAL mode pill, live
+ *    SAR/AIS provider status and the UTC clock.
+ *  - A compact left icon rail (SEARCH / LAYERS / SAR / AIS / CORRELATE /
+ *    ANALYTICS / MORE) and a bottom-centre command dock (SEARCH / SCAN / TIME /
+ *    LAYERS / VIEW) each open a single floating contextual surface.
+ *
+ * Honesty rules enforced here:
+ *  - Cesium attribution is never hidden; no rule in this file touches
+ *    `.cesium-widget-credits` (see `src/index.css`, which only restyles it).
+ *  - The mode pill always reflects store state, and each scan is labelled with
+ *    the runtime mode the BACKEND reported for that job.
+ *  - Layers the registry marks NOT_AVAILABLE are rendered disabled with a
+ *    reason. They are never made visible and never emitted.
+ *  - No progress percentage, invented stage, or client-side analytics.
+ *
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity,
+  BarChart3,
+  Clock,
+  Download,
+  EyeOff,
+  GitCompare,
+  Globe,
+  Layers,
+  MoreHorizontal,
+  Radar,
+  RefreshCw,
+  Search,
+  Settings,
+  Ship,
+  SlidersHorizontal,
+  Sparkles,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
+import type { LayerId, ProvidersHealth, ProviderHealthEntry, RuntimeMode } from '../types/api.ts';
+import {
+  ADVANCED_LAYER_IDS,
+  appStore,
+  formatUtc,
+  providerLabel,
+  providerTone,
+  summarizeProviders,
+  unavailableLayers,
+  visibleLayerGroups,
+} from './state.ts';
+import type {
+  AppState,
+  AppStore,
+  LayerGroupId,
+  ProviderSummary,
+  SurfaceId,
+} from './state.ts';
+import { createApiClient, scanExportUrl, toProvidersHealth } from './useApi.ts';
+import type { ApiClient, ScanTargetsResponse, SceneListResponse } from './useApi.ts';
+import { stageLabel, stagePosition, useScan } from './useScan.ts';
+import type { ScanState } from './useScan.ts';
+
+type IconComponent = React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+
+interface RailEntry {
+  readonly id: SurfaceId;
+  readonly label: string;
+  readonly Icon: IconComponent;
+}
+
+/** Left rail order is fixed by the shell spec. */
+const RAIL_ENTRIES: readonly RailEntry[] = [
+  { id: 'SEARCH', label: 'Spatial search', Icon: Search },
+  { id: 'LAYERS', label: 'Display layers', Icon: Layers },
+  { id: 'SAR', label: 'SAR imagery', Icon: Radar },
+  { id: 'AIS', label: 'AIS contacts', Icon: Ship },
+  { id: 'CORRELATE', label: 'Correlate', Icon: GitCompare },
+  { id: 'ANALYTICS', label: 'Analytics', Icon: BarChart3 },
+  { id: 'MORE', label: 'More tools', Icon: MoreHorizontal },
+];
+
+/** Bottom-centre command dock order is fixed by the shell spec. */
+const DOCK_ENTRIES: readonly RailEntry[] = [
+  { id: 'SEARCH', label: 'Search scenes', Icon: Search },
+  { id: 'SCAN', label: 'Run scan', Icon: Sparkles },
+  { id: 'TIME', label: 'Timeline', Icon: Clock },
+  { id: 'LAYERS', label: 'Display layers', Icon: SlidersHorizontal },
+  { id: 'VIEW', label: 'Camera view', Icon: Globe },
+];
+
+const SURFACE_HEADINGS: Readonly<Record<SurfaceId, string>> = {
+  SEARCH: 'Spatial search',
+  LAYERS: 'Layers',
+  SAR: 'SAR',
+  AIS: 'AIS',
+  CORRELATE: 'Correlate',
+  ANALYTICS: 'Analytics',
+  MORE: 'More',
+  SCAN: 'Scan',
+  TIME: 'Timeline',
+  VIEW: 'View',
+};
+
+// ------------------------------------------------------------------ shell
+
+export interface SpatialShellProps {
+  /** Injectable store. Defaults to the process store; tests pass their own. */
+  readonly store?: AppStore;
+  /** Injectable API client. Defaults to a real fetch-backed client. */
+  readonly client?: ApiClient;
+  /** Wall clock in ms. Injected so the UTC readout is deterministic in tests. */
+  readonly now?: () => number;
+  /**
+   * Cesium mount point. The shell owns the container; the caller renders the
+   * globe into it. Rendered last so chrome always paints above the globe.
+   */
+  readonly children?: React.ReactNode;
+  readonly onViewerReady?: (viewer: unknown) => void;
+}
+
+export function SpatialShell({
+  store = appStore,
+  client: clientProp,
+  now = Date.now,
+  children,
+  onViewerReady,
+}: SpatialShellProps): React.ReactElement {
+  const [state, setState] = useState<AppState>(() => store.getState());
+  const [clockMs, setClockMs] = useState(() => now());
+
+  useEffect(() => store.subscribe(() => setState(store.getState())), [store]);
+
+  // 1 Hz UTC readout; the top bar is the only clock surface.
+  useEffect(() => {
+    const id = setInterval(() => setClockMs(now()), 1000);
+    return () => clearInterval(id);
+  }, [now]);
+
+  // Escape closes whatever surface is open. Bound at the shell root so it
+  // works regardless of which control holds focus.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') store.closeSurface();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [store]);
+
+  // Provider health is a live probe, never a hardcoded "online". The result is
+  // written to the store so the top bar and every source-health surface read the
+  // same real state.
+  const client = useMemo(() => clientProp ?? createApiClient(), [clientProp]);
+  const [refreshProviders, setRefreshProviders] = useState(0);
+  const providers = state.providers;
+  const providersError = state.providersError;
+
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .getProvidersHealth()
+      .then((response) => {
+        if (cancelled) return;
+        store.setProviders(toProvidersHealth(response), response.checked_at, null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // A failed probe is an unknown state, never a fallback to "online".
+        store.setProviders(
+          null,
+          null,
+          err instanceof Error ? err.message : 'Provider health unavailable.',
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, store, refreshProviders]);
+
+  const scan = useScan({ client });
+  useEffect(() => {
+    if (scan.state.scanId) store.setActiveScanId(scan.state.scanId);
+  }, [scan.state.scanId, store]);
+
+  const openSurface = state.openSurface;
+  const toggle = useCallback((id: SurfaceId) => store.toggleSurface(id), [store]);
+  const close = useCallback(() => store.closeSurface(), [store]);
+
+  const sar = summarizeProviders(providers?.sar);
+  const ais = summarizeProviders(providers?.ais);
+
+  return (
+    <div className="fixed inset-0 h-full w-full overflow-hidden bg-[var(--df-bg)] text-[var(--df-text)]">
+      {/* 1. Globe: the single primary viewport, full bleed. */}
+      <div className="absolute inset-0 z-0" data-df-globe-container>
+        {children}
+      </div>
+
+      {/* 2. Minimal top bar. */}
+      <TopBar
+        mode={state.mode}
+        onModeChange={(mode) => store.setMode(mode)}
+        sar={sar}
+        ais={ais}
+        clockMs={clockMs}
+        onOpenSettings={() => store.toggleSurface('MORE')}
+      />
+
+      {/* 3. Compact left icon rail. */}
+      <LeftRail entries={RAIL_ENTRIES} openSurface={openSurface} onSelect={toggle} />
+
+      {/* 4. Bottom-centre floating command dock. */}
+      <CommandDock entries={DOCK_ENTRIES} openSurface={openSurface} onSelect={toggle} />
+
+      {/* 5. Exactly one floating contextual surface at a time. */}
+      {openSurface && (
+        <FloatingSurface title={SURFACE_HEADINGS[openSurface]} onClose={close}>
+          <SurfaceBody
+            surface={openSurface}
+            state={state}
+            store={store}
+            client={client}
+            providers={providers}
+            providersError={providersError}
+            scan={scan.state}
+            onRefreshProviders={() => setRefreshProviders((n) => n + 1)}
+            onViewerReady={onViewerReady}
+          />
+        </FloatingSurface>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------- top bar
+
+interface TopBarProps {
+  mode: RuntimeMode;
+  onModeChange: (mode: RuntimeMode) => void;
+  sar: ProviderSummary;
+  ais: ProviderSummary;
+  clockMs: number;
+  onOpenSettings: () => void;
+}
+
+function TopBar({ mode, onModeChange, sar, ais, clockMs, onOpenSettings }: TopBarProps) {
+  return (
+    <header
+      className="pointer-events-auto absolute inset-x-0 top-0 z-30 flex items-center gap-3 px-4 py-2"
+      role="banner"
+    >
+      <div className="df-glass flex items-center gap-2 rounded-[var(--df-control-radius)] px-3 py-1.5">
+        <span className="font-mono text-sm font-semibold tracking-[0.22em] text-[var(--df-accent)]">
+          DARKFLEET
+        </span>
+        <ModePill mode={mode} onModeChange={onModeChange} />
+      </div>
+
+      <div className="ml-auto flex items-center gap-2">
+        <ProviderBadge kind="SAR" summary={sar} />
+        <ProviderBadge kind="AIS" summary={ais} />
+        <time
+          className="df-glass rounded-[var(--df-control-radius)] px-2.5 py-1.5 font-mono text-xs tabular-nums text-[var(--df-text-secondary)]"
+          data-df-utc-clock
+        >
+          {formatUtc(clockMs)}
+        </time>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="Settings and source health"
+          aria-pressed={false}
+          className="df-glass rounded-[var(--df-control-radius)] p-2 text-[var(--df-text-secondary)] transition hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
+        >
+          <Settings className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/**
+ * Runtime mode pill. DEMO is loud on purpose: synthetic data must never be
+ * mistakable for real observations (UI-021).
+ */
+export function ModePill({
+  mode,
+  onModeChange,
+}: {
+  mode: RuntimeMode;
+  onModeChange?: (mode: RuntimeMode) => void;
+}) {
+  const isDemo = mode === 'DEMO';
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onModeChange?.('DEMO')}
+        aria-pressed={isDemo}
+        aria-label="Runtime mode: DEMO, synthetic data"
+        data-df-mode="DEMO"
+        className={[
+          'rounded-[6px] px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.16em] transition',
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
+          isDemo
+            ? 'bg-[var(--df-warning)] text-black'
+            : 'text-[var(--df-text-dim)] hover:text-[var(--df-text-secondary)]',
+        ].join(' ')}
+      >
+        DEMO
+      </button>
+      <button
+        type="button"
+        onClick={() => onModeChange?.('REAL')}
+        aria-pressed={!isDemo}
+        aria-label="Runtime mode: REAL, live provider data"
+        data-df-mode="REAL"
+        className={[
+          'rounded-[6px] px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.16em] transition',
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
+          isDemo
+            ? 'text-[var(--df-text-dim)] hover:text-[var(--df-text-secondary)]'
+            : 'bg-[var(--df-success)] text-black',
+        ].join(' ')}
+      >
+        REAL
+      </button>
+    </div>
+  );
+}
+
+const TONE_CLASS: Record<'ok' | 'warn' | 'bad' | 'idle', string> = {
+  ok: 'text-[var(--df-success)]',
+  warn: 'text-[var(--df-warning)]',
+  bad: 'text-[var(--df-danger)]',
+  idle: 'text-[var(--df-text-dim)]',
+};
+
+function ProviderBadge({ kind, summary }: { kind: 'SAR' | 'AIS'; summary: ProviderSummary }) {
+  const tone = providerTone(summary.state);
+  return (
+    <div
+      className="df-glass flex items-center gap-1.5 rounded-[var(--df-control-radius)] px-2.5 py-1.5"
+      data-df-provider={kind}
+      // The full probe detail is the accessible name; the visible text is short.
+      title={summary.detail}
+    >
+      <span className="font-mono text-[9px] tracking-[0.18em] text-[var(--df-text-dim)]">
+        {kind}
+      </span>
+      <span className={`font-mono text-[10px] font-semibold ${TONE_CLASS[tone]}`}>
+        {providerLabel(summary.state)}
+      </span>
+      <span className="sr-only">{summary.detail}</span>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------- left rail
+
+interface NavProps {
+  entries: readonly RailEntry[];
+  openSurface: SurfaceId | null;
+  onSelect: (id: SurfaceId) => void;
+}
+
+function LeftRail({ entries, openSurface, onSelect }: NavProps) {
+  return (
+    <nav
+      aria-label="Primary tools"
+      data-df-rail
+      className="df-glass pointer-events-auto absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-[10px] p-1"
+    >
+      {entries.map(({ id, label, Icon }) => {
+        const active = openSurface === id;
+        return (
+          <RailButton
+            key={id}
+            id={id}
+            label={label}
+            active={active}
+            onSelect={onSelect}
+            Icon={Icon}
+          />
+        );
+      })}
+    </nav>
+  );
+}
+
+function CommandDock({ entries, openSurface, onSelect }: NavProps) {
+  return (
+    <div
+      data-df-dock
+      className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center"
+    >
+      <div
+        role="toolbar"
+        aria-label="Command dock"
+        className="df-glass pointer-events-auto flex items-center gap-1 rounded-[12px] p-1"
+      >
+        {entries.map(({ id, label, Icon }) => {
+          const active = openSurface === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onSelect(id)}
+              aria-label={label}
+              aria-pressed={active}
+              data-df-dock-item={id}
+              className={[
+                'rounded-[8px] p-2 transition',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
+                active
+                  ? 'bg-[var(--df-accent-soft)] text-[var(--df-accent)]'
+                  : 'text-[var(--df-text-secondary)] hover:bg-[var(--df-accent-soft)] hover:text-[var(--df-accent)]',
+              ].join(' ')}
+            >
+              <Icon className="h-4 w-4" aria-hidden />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RailButton({
+  id,
+  label,
+  active,
+  onSelect,
+  Icon,
+}: {
+  id: SurfaceId;
+  label: string;
+  active: boolean;
+  onSelect: (id: SurfaceId) => void;
+  Icon: IconComponent;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      aria-label={label}
+      aria-pressed={active}
+      data-df-rail-item={id}
+      className={[
+        'rounded-[8px] p-2 transition',
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
+        active
+          ? 'bg-[var(--df-accent-soft)] text-[var(--df-accent)]'
+          : 'text-[var(--df-text-secondary)] hover:bg-[var(--df-accent-soft)] hover:text-[var(--df-accent)]',
+      ].join(' ')}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </button>
+  );
+}
+
+// -------------------------------------------------------- floating surface
+
+function FloatingSurface({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Move focus into the surface so keyboard users land inside it.
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-40">
+      <div
+        ref={ref}
+        role="dialog"
+        aria-label={title}
+        tabIndex={-1}
+        data-df-surface={title}
+        className="df-glass-strong pointer-events-auto absolute left-[4.75rem] top-[4.5rem] max-h-[calc(100vh-9rem)] w-[22rem] overflow-y-auto rounded-[var(--df-panel-radius)] p-4 shadow-2xl focus:outline-none"
+      >
+        <div className="mb-3 flex items-center justify-between border-b border-[var(--df-border)] pb-2">
+          <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--df-accent)]">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+            className="rounded-[6px] p-1 text-[var(--df-text-dim)] transition hover:text-[var(--df-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ surface bodies
+
+interface SurfaceBodyProps {
+  surface: SurfaceId;
+  state: AppState;
+  store: AppStore;
+  client: ApiClient;
+  providers: ProvidersHealth | null;
+  providersError: string | null;
+  scan: ScanState;
+  onRefreshProviders: () => void;
+  onViewerReady?: (viewer: unknown) => void;
+}
+
+function SurfaceBody(props: SurfaceBodyProps) {
+  switch (props.surface) {
+    case 'LAYERS':
+      return <LayersSurface state={props.state} store={props.store} />;
+    case 'SEARCH':
+      return <SceneBrowser client={props.client} />;
+    case 'TIME':
+      return <TimelineSurface />;
+    case 'SCAN':
+      return <ScanSurface scan={props.scan} store={props.store} />;
+    case 'SAR':
+      return <SarSurface state={props.state} providers={props.providers} />;
+    case 'AIS':
+      return <AisSurface state={props.state} providers={props.providers} />;
+    case 'CORRELATE':
+      return <CorrelateSurface state={props.state} providers={props.providers} />;
+    case 'ANALYTICS':
+      return <AnalyticsSurface state={props.state} scan={props.scan} />;
+    case 'MORE':
+    case 'VIEW':
+      return (
+        <SettingsSurface
+          state={props.state}
+          providers={props.providers}
+          providersError={props.providersError}
+          onRefreshProviders={props.onRefreshProviders}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+function GroupHeading({ group }: { group: LayerGroupId }) {
+  return (
+    <h3 className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+      {group}
+    </h3>
+  );
+}
+
+/**
+ * Layers surface. Groups follow the registry's own declaration order and the
+ * NOT_AVAILABLE layers get an explicit, visibly disabled row.
+ */
+function LayersSurface({ state, store }: { state: AppState; store: AppStore }) {
+  const groups = visibleLayerGroups(state);
+  const blocked = unavailableLayers(state);
+  return (
+    <div data-df-layers className="space-y-4">
+      {groups.map(({ group, items }) => (
+        <section key={group}>
+          <GroupHeading group={group} />
+          <ul className="space-y-1.5">
+            {items.map((layer) => (
+              <li key={layer.id} data-df-layer={layer.id}>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-[var(--df-text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={layer.visible}
+                      onChange={(event) =>
+                        store.setLayerVisible(layer.id as LayerId, event.target.checked)
+                      }
+                      aria-label={`Toggle layer ${layer.title}`}
+                      className="h-3 w-3 shrink-0 accent-[var(--df-accent)]"
+                    />
+                    <span className="truncate">{layer.title}</span>
+                  </label>
+                  {layer.supportsOpacity ? (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="sr-only">{layer.title} opacity</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={layer.opacity}
+                        onChange={(event) =>
+                          store.setLayerOpacity(layer.id as LayerId, Number(event.target.value))
+                        }
+                        aria-label={`${layer.title} opacity`}
+                        className="h-1 w-16 accent-[var(--df-accent)]"
+                      />
+                    </span>
+                  ) : (
+                    <span
+                      className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-[var(--df-text-dim)]"
+                      title="This layer has no opacity control"
+                    >
+                      n/a
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
+      {blocked.length > 0 && (
+        <section data-df-layers-unavailable>
+          <h3 className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-warning)]">
+            Not available
+          </h3>
+          <ul className="space-y-1">
+            {blocked.map((layer) => (
+              <li key={layer.id} className="flex items-center gap-2" data-df-layer={layer.id}>
+                <button
+                  type="button"
+                  disabled
+                  aria-label={`${layer.title} â€” not available until CP15`}
+                  title={`${layer.title} is not available until CP15 (${layer.source})`}
+                  className="flex w-full cursor-not-allowed items-center gap-2 rounded-[6px] px-1 py-0.5 text-left text-[11px] text-[var(--df-text-dim)] line-through"
+                >
+                  <EyeOff className="h-3 w-3 shrink-0" aria-hidden />
+                  <span className="truncate">{layer.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[10px] leading-snug text-[var(--df-text-dim)]">
+            These layers are declared but unimplemented. They cannot be enabled and no data is
+            rendered for them.
+          </p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** Scene browser: a real `GET /api/scenes` call, nothing invented. */
+function SceneBrowser({ client }: { client?: ApiClient }) {
+  const resolved = useMemo(() => client ?? createApiClient(), [client]);
+  const [scenes, setScenes] = useState<SceneListResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const search = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    resolved
+      .getScenes()
+      .then((response) => setScenes(response))
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : 'Scene query failed.'),
+      )
+      .finally(() => setLoading(false));
+  }, [resolved]);
+
+  useEffect(search, [search]);
+
+  return (
+    <div data-df-scene-browser className="space-y-3">
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Scenes come from the backend provider probe. DEMO results are labelled synthetic.
+      </p>
+      {error && (
+        <p className="flex items-start gap-1.5 text-[10px] text-[var(--df-danger)]">
+          <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+          {error}
+        </p>
+      )}
+      {loading && <p className="font-mono text-[10px] text-[var(--df-text-dim)]">Queryingâ€¦</p>}
+      {!loading && !scenes && !error && (
+        <p className="font-mono text-[10px] text-[var(--df-text-dim)]">No scene query run yet.</p>
+      )}
+      {scenes && (
+        <>
+          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
+            {scenes.count} scenes Â· {scenes.provider} Â· {scenes.status}
+          </p>
+          <ul className="space-y-1.5">
+            {scenes.scenes.map((scene) => (
+              <li
+                key={scene.id}
+                className="rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 text-[10px]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-[var(--df-text)]">
+                    {scene.platform} {scene.product}
+                  </span>
+                  <span
+                    className={[
+                      'shrink-0 font-mono text-[9px] font-bold tracking-wider',
+                      scene.synthetic ? 'text-[var(--df-warning)]' : 'text-[var(--df-success)]',
+                    ].join(' ')}
+                  >
+                    {scene.synthetic ? 'DEMO' : 'REAL'}
+                  </span>
+                </div>
+                <p className="mt-0.5 font-mono text-[9px] text-[var(--df-text-dim)]">
+                  {scene.id} Â· {scene.acquisition_time}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={search}
+        disabled={loading}
+        className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 font-mono text-[10px] text-[var(--df-text-secondary)] transition hover:border-[var(--df-border-active)] hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)] disabled:opacity-40"
+      >
+        <RefreshCw className="h-3 w-3" aria-hidden />
+        Refresh scenes
+      </button>
+    </div>
+  );
+}
+
+/** Timeline is a declared placeholder: disabled with a stated reason. */
+function TimelineSurface() {
+  return (
+    <div data-df-timeline className="space-y-2">
+      <button
+        type="button"
+        disabled
+        aria-label="Timeline playback â€” not available until CP15"
+        title="Temporal playback is not implemented yet"
+        className="flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border)] px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]"
+      >
+        <Clock className="h-3 w-3" aria-hidden />
+        Not available
+      </button>
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Temporal playback ships with the multi-pass work in CP15. The backend exposes no timeline
+        endpoint yet, so no time control is offered here rather than faking one.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Scan surface. Renders the stage names the backend actually streamed plus a
+ * stage COUNTER read off the fixed pipeline. No percentage, no progress bar.
+ */
+export function ScanSurface({ scan, store }: { scan: ScanState; store: AppStore }) {
+  const position = stagePosition(scan.stage);
+  const busy = scan.connection === 'CONNECTING' || scan.connection === 'STREAMING';
+  return (
+    <div data-df-scan className="space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[10px] text-[var(--df-text-dim)]">
+          {scan.scanId ?? 'no scan'}
+        </span>
+        {scan.runtimeMode && (
+          <span
+            data-df-scan-mode={scan.runtimeMode}
+            className={[
+              'rounded-[4px] px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-[0.14em]',
+              scan.runtimeMode === 'DEMO'
+                ? 'bg-[var(--df-warning)] text-black'
+                : 'bg-[var(--df-success)] text-black',
+            ].join(' ')}
+          >
+            {scan.runtimeMode}
+            {scan.synthetic ? ' Â· SYNTHETIC' : ''}
+          </span>
+        )}
+      </div>
+
+      <p className="font-mono text-[11px] text-[var(--df-text)]" data-df-scan-stage>
+        {scan.stage ? stageLabel(scan.stage) : 'Idle'}
+        {position && (
+          <span className="ml-2 text-[10px] text-[var(--df-text-dim)]">
+            stage {position.index} of {position.total}
+          </span>
+        )}
+      </p>
+
+      <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
+        stream: {scan.connection}
+      </p>
+
+      {scan.error && (
+        <p className="flex items-start gap-1.5 text-[10px] text-[var(--df-danger)]">
+          <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+          {scan.error}
+        </p>
+      )}
+
+      {scan.unknownStages.length > 0 && (
+        <p className="text-[10px] text-[var(--df-warning)]">
+          Unrecognised stage from backend: {scan.unknownStages.join(', ')}
+        </p>
+      )}
+
+      {scan.history.length > 0 && (
+        <ol className="space-y-1 border-l border-[var(--df-border)] pl-2">
+          {scan.history.map((event, index) => (
+            <li key={`${event.stage}-${index}`} className="font-mono text-[10px] text-[var(--df-text-secondary)]">
+              <span className="text-[var(--df-accent)]">{stageLabel(event.stage)}</span>
+              {event.detail && <span className="ml-1.5 text-[var(--df-text-dim)]">{event.detail}</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Start a scan from the Scan command in the dock. Stage names above are streamed live from the
+        backend job.
+      </p>
+      {busy && <p className="font-mono text-[9px] text-[var(--df-text-dim)]">Job in flight.</p>}
+      <button
+        type="button"
+        onClick={() => {
+          store.setActiveScanId(null);
+        }}
+        className="w-full rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 font-mono text-[10px] text-[var(--df-text-secondary)] transition hover:border-[var(--df-border-active)] hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
+      >
+        Clear active scan reference
+      </button>
+    </div>
+  );
+}
+
+function ProviderList({
+  title,
+  entries,
+}: {
+  title: string;
+  entries: ProviderHealthEntry[] | undefined;
+}) {
+  const summary = summarizeProviders(entries);
+  if (!entries || entries.length === 0) {
+    return (
+      <div>
+        <h3 className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+          {title}
+        </h3>
+        <p className="text-[10px] text-[var(--df-text-dim)]">
+          No {title} provider has reported yet.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <h3 className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+        {title} Â· {providerLabel(summary.state)}
+      </h3>
+      <ul className="space-y-1">
+        {entries.map((entry) => (
+          <li key={entry.provider} className="text-[10px]">
+            <span className="font-mono text-[var(--df-text)]">{entry.provider}</span>
+            <span className={`ml-1.5 ${TONE_CLASS[providerTone(entry.status)]}`}>
+              {providerLabel(entry.status)}
+            </span>
+            {entry.message && (
+              <p className="mt-0.5 text-[10px] leading-snug text-[var(--df-text-dim)]">
+                {entry.message}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SarSurface({
+  state,
+  providers,
+}: {
+  state: AppState;
+  providers: ProvidersHealth | null;
+}) {
+  return (
+    <div data-df-sar className="space-y-3">
+      <ProviderList title="SAR" entries={providers?.sar} />
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Raster rendering is driven by the layer registry. Toggle it in Display layers.
+      </p>
+      <p className="font-mono text-[9px] text-[var(--df-text-dim)]">
+        active scan: {state.activeScanId ?? 'none'}
+      </p>
+    </div>
+  );
+}
+
+function AisSurface({
+  state,
+  providers,
+}: {
+  state: AppState;
+  providers: ProvidersHealth | null;
+}) {
+  return (
+    <div data-df-ais className="space-y-3">
+      <ProviderList title="AIS" entries={providers?.ais} />
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Association counts are computed by the backend and shown verbatim in Analytics; the frontend
+        derives none of them.
+      </p>
+      <p className="font-mono text-[9px] text-[var(--df-text-dim)]">
+        selected target: {state.selectedTargetId ?? 'none'}
+      </p>
+    </div>
+  );
+}
+
+function CorrelateSurface({
+  state,
+  providers,
+}: {
+  state: AppState;
+  providers: ProvidersHealth | null;
+}) {
+  return (
+    <div data-df-correlate className="space-y-3">
+      <ProviderList title="SAR" entries={providers?.sar} />
+      <ProviderList title="AIS" entries={providers?.ais} />
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Correlation runs in the backend. Use the Correlation links layer to show its output; the
+        client never recomputes a match.
+      </p>
+      <p className="font-mono text-[9px] text-[var(--df-text-dim)]">
+        active scan: {state.activeScanId ?? 'none'}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Analytics surface. Every number here is a passthrough from the backend's
+ * `counts` record; the frontend computes nothing (API-011).
+ */
+function AnalyticsSurface({ state, scan }: { state: AppState; scan: ScanState }) {
+  const [targets, setTargets] = useState<ScanTargetsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const client = useMemo(() => createApiClient(), []);
+  const scanId = scan.scanId ?? state.activeScanId;
+
+  useEffect(() => {
+    if (!scanId) {
+      setTargets(null);
+      return;
+    }
+    let cancelled = false;
+    client
+      .getScanTargets(scanId)
+      .then((response) => {
+        if (!cancelled) setTargets(response);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Target query failed.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, scanId]);
+
+  return (
+    <div data-df-analytics className="space-y-3">
+      {!scanId && (
+        <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+          No scan selected. Run a scan to see backend-computed counters.
+        </p>
+      )}
+      {error && <p className="text-[10px] text-[var(--df-danger)]">{error}</p>}
+      {targets && (
+        <>
+          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
+            {targets.scan_id} Â· {targets.runtime_mode}
+            {targets.synthetic ? ' Â· synthetic' : ''}
+          </p>
+          <dl className="space-y-0.5">
+            {Object.entries(targets.counts).map(([key, value]) => (
+              <div key={key} className="flex justify-between gap-2 text-[11px]">
+                <dt className="text-[var(--df-text-secondary)]">{key}</dt>
+                <dd className="font-mono tabular-nums text-[var(--df-text)]">{value}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between gap-2 border-t border-[var(--df-border)] pt-0.5 text-[11px]">
+              <dt className="text-[var(--df-text-secondary)]">ais_only</dt>
+              <dd className="font-mono tabular-nums text-[var(--df-text)]">
+                {targets.ais_only_count}
+              </dd>
+            </div>
+          </dl>
+          <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+            Values are read from the backend response as-is. Nothing here is derived in the browser.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SettingsSurface({
+  state,
+  providers,
+  providersError,
+  onRefreshProviders,
+}: {
+  state: AppState;
+  providers: ProvidersHealth | null;
+  providersError: string | null;
+  onRefreshProviders: () => void;
+}) {
+  return (
+    <div data-df-settings className="space-y-3">
+      <ProviderList title="SAR" entries={providers?.sar} />
+      <ProviderList title="AIS" entries={providers?.ais} />
+      {providersError && (
+        <p className="flex items-start gap-1.5 text-[10px] text-[var(--df-danger)]">
+          <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+          {providersError}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onRefreshProviders}
+        className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 font-mono text-[10px] text-[var(--df-text-secondary)] transition hover:border-[var(--df-border-active)] hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
+      >
+        <Activity className="h-3 w-3" aria-hidden />
+        Re-probe providers
+      </button>
+
+      <div className="space-y-1 border-t border-[var(--df-border)] pt-2">
+        <h3 className="font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+          Camera
+        </h3>
+        <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+          Camera presets are owned by the Cesium viewport. Drag, scroll and tilt directly on the
+          globe.
+        </p>
+        <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+          Cesium attribution stays visible in the bottom-right corner.
+        </p>
+      </div>
+
+      <div className="space-y-1 border-t border-[var(--df-border)] pt-2">
+        <h3 className="font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+          Export
+        </h3>
+        {state.activeScanId ? (
+          <div className="flex flex-wrap gap-1.5">
+            {(['json', 'csv', 'geojson'] as const).map((format) => (
+              <a
+                key={format}
+                href={scanExportUrl(state.activeScanId as string, format)}
+                className="flex items-center gap-1 rounded-[6px] border border-[var(--df-border)] px-2 py-1 font-mono text-[10px] text-[var(--df-text-secondary)] transition hover:border-[var(--df-border-active)] hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
+                aria-label={`Export scan as ${format.toUpperCase()}`}
+              >
+                <Download className="h-3 w-3" aria-hidden />
+                {format}
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-[var(--df-text-dim)]">
+            Exports appear once a scan exists.
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-1 border-t border-[var(--df-border)] pt-2">
+        <h3 className="font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
+          Gated features
+        </h3>
+        <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+          {ADVANCED_LAYER_IDS.length} analysis layers and timeline playback are declared but
+          unavailable until CP15. They cannot be enabled from this shell.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default SpatialShell;
