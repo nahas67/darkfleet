@@ -52,21 +52,21 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| SAR-301 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
-| SAR-302 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
-| SAR-303 | type only (`'lee'` unreachable) | no | no | no | implement Lee | ⚪ NOT IMPLEMENTED |
-| SAR-304 | none | no | no | no | architect slots | ⚪ NOT IMPLEMENTED |
-| SAR-305 | none | no | no | no | fixture measurement suite | ⚪ NOT IMPLEMENTED |
-| SAR-306 | legacy-TS | DEMO | no | no | port to NumPy | ⚪ NOT IMPLEMENTED |
-| SAR-307 | legacy-TS (linear-power) | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
-| SAR-308 | none | no | no | no | morphology | ⚪ NOT IMPLEMENTED |
-| SAR-309 | legacy-TS | DEMO | no | no | port | ⚪ NOT IMPLEMENTED |
-| SAR-310 | legacy-TS | DEMO | no | no | port + footprint | ⚪ NOT IMPLEMENTED |
-| SAR-311 | violated (`correlation.ts:180`) | no | no | no | fix required | ⚪ NOT IMPLEMENTED |
-| SAR-312 | golden JSON ready | fixture | no | integrity 5/5 | parity suite | ⚪ NOT IMPLEMENTED |
+| SAR-301 | `apply_speckle none` | yes | tests | 29/29 | keep | 🟢 IMPLEMENTED |
+| SAR-302 | median selection-exact | yes | tests | parity proof | keep | 🟢 IMPLEMENTED |
+| SAR-303 | Lee power-domain | yes | tests | effect suite | keep | 🟢 IMPLEMENTED |
+| SAR-304 | slots only | no | no | no | CP15 | ⚪ NOT IMPLEMENTED |
+| SAR-305 | retention/centroid/area/FP/bg measured | yes | tests | 4 tests | keep | 🟢 IMPLEMENTED |
+| SAR-306 | integral-image port | yes | tests | 100% mask | keep | 🟢 IMPLEMENTED |
+| SAR-307 | power-domain port | yes | tests | 100% mask | keep | 🟢 IMPLEMENTED |
+| SAR-308 | legacy had none; port matches | partial | tests | — | add opening post-parity w/ real data | ⚪ NOT IMPLEMENTED |
+| SAR-309 | scipy 8-connectivity, scan-order | yes | tests | 12/12 exact | keep | 🟢 IMPLEMENTED |
+| SAR-310 | full extraction port | yes | tests | 12/12 exact | keep | 🟢 IMPLEMENTED |
+| SAR-311 | footprint fields extracted | partial | tests | — | uncertainty model (CP5) | 🟡 PARTIALLY VERIFIED |
+| SAR-312 | detector parity 100% | yes | tests | TST-002 half | correlation parity (CP5) | 🟡 PARTIALLY VERIFIED |
 | SAR-313 | none | no | no | no | CP15 adapter | ⚪ NOT IMPLEMENTED |
 | SAR-314 | none | no | no | no | CP15 channels | ⚪ NOT IMPLEMENTED |
-| SAR-315 | none | no | no | no | small-target tests | ⚪ NOT IMPLEMENTED |
+| SAR-315 | retention measured (strong) | partial | tests | — | real small-target test (CP6) | 🟡 PARTIALLY VERIFIED |
 
 ## AIS (CP4 — all ⚪; MISSING today)
 
@@ -189,7 +189,7 @@
 | DOC-004/005 | real files | yes | yes | manual | maintain | 🟢 IMPLEMENTED |
 | DOC-006..008 | none/legacy | no | — | — | write (CP13) | ⚪ NOT IMPLEMENTED |
 | TST-001 | 6 tests, zero CFAR | partial | — | 6 pass | full suite | ⚪ NOT IMPLEMENTED |
-| TST-002 | fixture ready | fixture | no | integrity 5/5 | parity suite (CP3) | ⚪ NOT IMPLEMENTED |
+| TST-002 | detector 100%; correlation pending | partial | tests | parity proof | correlation parity (CP5) | 🟡 PARTIALLY VERIFIED |
 | TST-003..007 | none | no | no | no | integration (CP6/7) | ⚪ NOT IMPLEMENTED |
 | TST-008 | tsc clean (non-strict) | yes | — | pass | enable strict (CP8) | 🟡 PARTIALLY VERIFIED |
 | TST-009 | none | no | no | no | suite (CP8+) | ⚪ NOT IMPLEMENTED |

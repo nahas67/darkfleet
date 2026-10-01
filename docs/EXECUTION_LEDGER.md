@@ -36,3 +36,20 @@
 - Point-verified: strait water open, island land excluded, harbour pier excluded.
 - 22/22 pytest; ruff + strict mypy clean.
 - Status: ✅ VERIFIED.
+
+## CP3 — Filtering + CFAR + components (2026-10-01)
+
+- Ported: median (selection-exact), Lee (power-domain), CA-CFAR (integral-image,
+  legacy-exact geometry+rings+multiplier), components (scan-order labels,
+  weighted moments, 24×24 chips, legacy wake sampler kept for parity).
+- Real bugs caught: Float64Array JSON dump (re-dumped), `_box_sum` OOB on
+  borders (interior-only rewrite), GeoJSON rasterize, float32-vs-64 test tolerance.
+- PARITY: median selection 100%; CFAR mask 100% (0/97 differ); 12/12 components
+  field-exact (cx/cy millipixel, areas, axes, orient, dB, wake, bbox, clutter).
+- Detector timing: 8 ms on 180×180 (median+CFAR).
+- Filter effects measured: retention ≥3/3 all modes; centroid ≤2 px; background
+  std improves; no FP explosion. No sub-resolution promises.
+- Deferred honestly: morphology (legacy had none; adding it changes the mask —
+  post-parity with real data), refined-Lee/Frost slots, Radon wake (CP15).
+- 29/29 pytest; ruff + strict mypy clean.
+- Status: ✅ VERIFIED.

@@ -1,0 +1,112 @@
+"""Connected components + spatial moments + SAR chips, ported from the legacy.
+
+Label order matches scan order (like the legacy BFS), so DF-00k IDs are stable.
+Wake sampler is the legacy threshold sampler, kept for parity; Gate CP15
+replaces it with real Radon image analysis (ADV-004/005).
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+import numpy as np
+from scipy.ndimage import label
+
+CHIP = 24
+HALF_CHIP = CHIP // 2
+
+
+def _kelvin_sampler(
+    grid: np.ndarray, cx: float, cy: float, axis_deg: float, width: int, height: int
+) -> tuple[bool, float | None]:
+    rad = math.radians(axis_deg)
+    dx, dy = math.cos(rad), math.sin(rad)
+    d1 = d2 = 0
+    for step in range(8, 25, 3):
+        p1x, p1y = round(cx + dx * step), round(cy + dy * step)
+        p2x, p2y = round(cx - dx * step), round(cy - dy * step)
+        if 0 <= p1x < width and 0 <= p1y < height and (grid[p1y, p1x] < -20.5 or grid[p1y, p1x] > -13.0):
+            d1 += 1
+        if 0 <= p2x < width and 0 <= p2y < height and (grid[p2y, p2x] < -20.5 or grid[p2y, p2x] > -13.0):
+            d2 += 1
+    if d1 >= 3 and d1 > d2 + 1:
+        return True, (axis_deg + 180) % 360
+    if d2 >= 3 and d2 > d1 + 1:
+        return True, axis_deg
+    return False, None
+
+
+def extract_components(
+    mask: np.ndarray,
+    db: np.ndarray,
+    min_pixels: int = 3,
+    max_pixels: int = 1000,
+) -> list[dict[str, Any]]:
+    height, width = mask.shape
+    labeled, n = label(mask, structure=np.ones((3, 3), dtype=int))
+    out: list[dict[str, Any]] = []
+    for lab in range(1, n + 1):
+        ys, xs = np.nonzero(labeled == lab)
+        area = len(xs)
+        if area < min_pixels or area > max_pixels:
+            continue
+        vals = db[ys, xs].astype(np.float64)
+        weights = 10.0 ** ((vals + 30.0) / 10.0)
+        m00 = float(weights.sum())
+        cx = float((xs * weights).sum() / m00)
+        cy = float((ys * weights).sum() / m00)
+        dx = xs - cx
+        dy = ys - cy
+        mu20 = float((dx * dx * weights).sum() / m00)
+        mu02 = float((dy * dy * weights).sum() / m00)
+        mu11 = float((dx * dy * weights).sum() / m00)
+        common = math.sqrt(max(0.0, (mu20 - mu02) ** 2 + 4.0 * mu11**2))
+        major = max(1.5, 2.0 * math.sqrt(max(0.0, (mu20 + mu02 + common) / 2.0)))
+        minor = max(1.0, 2.0 * math.sqrt(max(0.0, (mu20 + mu02 - common) / 2.0)))
+        theta = 0.5 * math.atan2(2.0 * mu11, mu20 - mu02)
+        orient = (theta * 180.0 / math.pi) % 180.0
+
+        max_db = round(float(vals.max()), 1)
+        mean_db = round(float(vals.mean()), 1)
+
+        chip = np.full((CHIP, CHIP), -24.0)
+        corners: list[dict[str, float]] = []
+        for crow in range(CHIP):
+            py = math.floor(cy) - HALF_CHIP + crow
+            for ccol in range(CHIP):
+                px = math.floor(cx) - HALF_CHIP + ccol
+                if 0 <= px < width and 0 <= py < height:
+                    v = float(db[py, px])
+                    chip[crow, ccol] = v
+                    if v > -6.0 and len(corners) < 5:
+                        corners.append({"x": ccol, "y": crow, "intensity": v})
+        dist = np.hypot(
+            np.arange(CHIP)[None, :] - HALF_CHIP, np.arange(CHIP)[:, None] - HALF_CHIP
+        )
+        clutter_vals = chip[dist > 7]
+        clutter_mean = round(float(clutter_vals.mean()), 1)
+
+        wake, wake_hdg = _kelvin_sampler(db, cx, cy, round(orient), width, height)
+        out.append(
+            {
+                "cx": cx,
+                "cy": cy,
+                "area": area,
+                "major": major,
+                "minor": minor,
+                "orient": round(orient),
+                "maxDb": max_db,
+                "meanDb": mean_db,
+                "wake": wake,
+                "wakeHdg": wake_hdg,
+                "bbox": {
+                    "minX": xs.min().item(),
+                    "minY": ys.min().item(),
+                    "maxX": xs.max().item(),
+                    "maxY": ys.max().item(),
+                },
+                "clutterMeanDb": clutter_mean,
+            }
+        )
+    return out
