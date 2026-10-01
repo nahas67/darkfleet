@@ -6,3 +6,17 @@ coverage/
 *.log
 .env*
 !.env.example
+# Python backend
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# Local-first data (archives, scans, caches, credentials-adjacent state)
+data/ais/
+data/cache/
+data/scans/
+# Frontend
+# (package-lock.json is intentionally tracked once Gate 0B creates it)

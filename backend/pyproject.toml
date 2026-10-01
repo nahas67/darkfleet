@@ -1,0 +1,50 @@
+[project]
+name = "darkfleet"
+version = "3.0.0"
+description = "DarkFleet: correlate what satellite radar sees with what AIS reports."
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "DarkFleet" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "numpy>=1.26",
+    "rasterio>=1.3",
+    "pyproj>=3.6",
+    "shapely>=2.0",
+    "pystac-client>=0.8",
+    "duckdb>=1.1",
+    "pyarrow>=17.0",
+    "httpx>=0.27",
+    "websockets>=13.0",
+    "fpdf2>=2.7",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["darkfleet"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
