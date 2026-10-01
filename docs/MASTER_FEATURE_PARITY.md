@@ -72,13 +72,13 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| AIS-001..003 | none | no | no | no | adapters (keys = external block) | ⚪ NOT IMPLEMENTED |
-| AIS-004 | none | no | no | no | MarineCadastre ingest (keyless) | ⚪ NOT IMPLEMENTED |
-| AIS-005 | none | no | no | no | file importers | ⚪ NOT IMPLEMENTED |
-| AIS-006 | none | no | no | no | pyais wiring | ⚪ NOT IMPLEMENTED |
-| AIS-007..009 | TS shape only | DEMO | no | no | normalize+dedup | ⚪ NOT IMPLEMENTED |
-| AIS-010..013 | none (in-memory Map) | no | no | no | Parquet+DuckDB+restart | ⚪ NOT IMPLEMENTED |
-| AIS-014..016 | none | no | no | no | collector+metadata | ⚪ NOT IMPLEMENTED |
+| AIS-001..003 | collectors + refusal | code tested; live needs free keys | archive | refusal + normalize tests | keys = external block | 🟡 PARTIALLY VERIFIED |
+| AIS-004 | MarineCadastre normalizer + CSV import | yes | tests | row + file tests | live bulk ingest (CP6) | 🟢 IMPLEMENTED |
+| AIS-005 | CSV/JSON/NMEA/Parquet importers | yes | tests | file tests | keep | 🟢 IMPLEMENTED |
+| AIS-006 | pyais 3.x wired (asdict) | yes (real sentence) | tests | decode test | keep | 🟢 IMPLEMENTED |
+| AIS-007..009 | Pydantic + normalizers + dedup | yes | tests | validation + dedup tests | keep | 🟢 IMPLEMENTED |
+| AIS-010..013 | Parquet partitions + DuckDB | yes | tests | restart test | keep | 🟢 IMPLEMENTED |
+| AIS-014..016 | collectors → same archive; live≠history | yes | tests | refusal tests | keep | 🟢 IMPLEMENTED |
 
 ## COR (CP5 — ports of legacy math + dead-state implementation)
 

@@ -53,3 +53,19 @@
   post-parity with real data), refined-Lee/Frost slots, Radon wake (CP15).
 - 29/29 pytest; ruff + strict mypy clean.
 - Status: ✅ VERIFIED.
+
+## CP4 — AIS ingestion + persistence (2026-10-01)
+
+- Canonical Pydantic model (9-digit MMSI, lat/lon bounds, dimensions, source).
+- Normalizers: AISStream WS JSON, AISHub rows, MarineCadastre CSV, pyais NMEA
+  (asdict API), GFW events. Real `!AIVDM` sentence decoded in tests.
+- Archive: `data/ais/YYYY/MM/DD/part-<source>.parquet`, DuckDB AOI/time/MMSI/
+  source queries, time-ordered, dedup by mmsi|timestamp (in-memory seen-set
+  rebuilt from disk), coverage/freshness report.
+- Restart proven: new instance over same dir keeps data + dedup state.
+- Collectors (AISStream WS, AISHub poll, GFW events) persist into the same
+  archive; all raise `RealDataUnavailableError` without keys. Live runs are
+  externally blocked (free keys), code paths tested.
+- Bugs caught: pyais 3.x `.content`→`.asdict()`; DuckDB needs pytz (added to deps).
+- 39/39 pytest; ruff + strict mypy clean.
+- Status: ✅ VERIFIED.
