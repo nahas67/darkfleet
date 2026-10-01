@@ -62,8 +62,8 @@
 | SAR-308 | legacy had none; port matches | partial | tests | — | add opening post-parity w/ real data | ⚪ NOT IMPLEMENTED |
 | SAR-309 | scipy 8-connectivity, scan-order | yes | tests | 12/12 exact | keep | 🟢 IMPLEMENTED |
 | SAR-310 | full extraction port | yes | tests | 12/12 exact | keep | 🟢 IMPLEMENTED |
-| SAR-311 | footprint fields extracted | partial | tests | — | uncertainty model (CP5) | 🟡 PARTIALLY VERIFIED |
-| SAR-312 | detector parity 100% | yes | tests | TST-002 half | correlation parity (CP5) | 🟡 PARTIALLY VERIFIED |
+| SAR-311 | apparent footprint + explicit uncertainty | yes | yes | len/unc in parity | keep | 🟢 IMPLEMENTED |
+| SAR-312 | detector + correlation parity | yes | tests | 100% / 12-of-12 | keep | ✅ VERIFIED |
 | SAR-313 | none | no | no | no | CP15 adapter | ⚪ NOT IMPLEMENTED |
 | SAR-314 | none | no | no | no | CP15 channels | ⚪ NOT IMPLEMENTED |
 | SAR-315 | retention measured (strong) | partial | tests | — | real small-target test (CP6) | 🟡 PARTIALLY VERIFIED |
@@ -84,16 +84,16 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| COR-001/002 | legacy-TS (spherical) | DEMO | no | no | port + uncertainty | ⚪ NOT IMPLEMENTED |
-| COR-003 | violated (haversine) | no | no | no | pyproj.Geod | ⚪ NOT IMPLEMENTED |
-| COR-004/005 | legacy-TS | DEMO | no | no | port + persist radius | ⚪ NOT IMPLEMENTED |
-| COR-006..008 | legacy-TS | DEMO | no | no | port + persist backend | ⚪ NOT IMPLEMENTED |
-| COR-009 | none | no | no | no | missing-input guards | ⚪ NOT IMPLEMENTED |
-| COR-010 | legacy-TS | DEMO | no | no | port greedy 1-to-1 | ⚪ NOT IMPLEMENTED |
-| COR-011/012 | 4 of 7 dead | no | no | no | implement 3 + emit AIS_ONLY | ⚪ NOT IMPLEMENTED |
-| COR-013/014 | types clean, copy leaks | no | no | no | neutralize UI-022 | ⚪ NOT IMPLEMENTED |
-| COR-015 | legacy-TS pairs | DEMO | no | no | port neutral | ⚪ NOT IMPLEMENTED |
-| COR-016 | legacy-TS | DEMO | no | no | port with uncertainty | ⚪ NOT IMPLEMENTED |
+| COR-001/002 | propagate + full trace | yes | yes (backend) | parity test | keep | 🟢 IMPLEMENTED |
+| COR-003 | WGS84 ellipsoidal Geod | yes | yes | spot + parity | keep | 🟢 IMPLEMENTED |
+| COR-004/005 | radius persisted per candidate | yes | yes | parity test | keep | 🟢 IMPLEMENTED |
+| COR-006..008 | decomposition persisted | yes | yes (backend) | parity test | keep | 🟢 IMPLEMENTED |
+| COR-009 | inputs missing → no invented values | partial | yes | — | documented; surfaced in evidence | 🟢 IMPLEMENTED |
+| COR-010 | greedy 1-to-1 | yes | yes | parity test | keep | 🟢 IMPLEMENTED |
+| COR-011/012 | **all 7 states + AIS_ONLY** | yes | yes | parity + 3 synthetic | keep | 🟢 IMPLEMENTED |
+| COR-013/014 | neutral wording, no intent claims | yes (engine) | yes | classification tests | UI copy (CP10) | 🟡 PARTIALLY VERIFIED |
+| COR-015 | proximity pairs | no | no | no | CP15 temporal intel | ⚪ NOT IMPLEMENTED |
+| COR-016 | reported dimensions + uncertainty | yes | yes | parity test | keep | 🟢 IMPLEMENTED |
 
 ## EVD (CP6 — all ⚪; provenance object exists but ephemeral)
 
@@ -189,7 +189,7 @@
 | DOC-004/005 | real files | yes | yes | manual | maintain | 🟢 IMPLEMENTED |
 | DOC-006..008 | none/legacy | no | — | — | write (CP13) | ⚪ NOT IMPLEMENTED |
 | TST-001 | 6 tests, zero CFAR | partial | — | 6 pass | full suite | ⚪ NOT IMPLEMENTED |
-| TST-002 | detector 100%; correlation pending | partial | tests | parity proof | correlation parity (CP5) | 🟡 PARTIALLY VERIFIED |
+| TST-002 | detector + correlation golden parity | yes | tests | detector 100%, 12/12 classes exact | keep | ✅ VERIFIED |
 | TST-003..007 | none | no | no | no | integration (CP6/7) | ⚪ NOT IMPLEMENTED |
 | TST-008 | tsc clean (non-strict) | yes | — | pass | enable strict (CP8) | 🟡 PARTIALLY VERIFIED |
 | TST-009 | none | no | no | no | suite (CP8+) | ⚪ NOT IMPLEMENTED |

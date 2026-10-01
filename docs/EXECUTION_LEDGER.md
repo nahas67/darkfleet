@@ -69,3 +69,21 @@
 - Bugs caught: pyais 3.x `.content`→`.asdict()`; DuckDB needs pytz (added to deps).
 - 39/39 pytest; ruff + strict mypy clean.
 - Status: ✅ VERIFIED.
+
+## CP5 — Temporal alignment + correlation (2026-10-01)
+
+- geodesy.py: WGS84 **ellipsoidal** geodesic (mandated upgrade; legacy used
+  spherical haversine mislabeled "WGS-84"); propagation/radius/heading kept
+  legacy-exact so predicted positions stay parity-stable.
+- match.py: candidate enumeration, persisted per-candidate radius, 5-part score
+  decomposition, greedy 1-to-1 with explicit `UNRESOLVED` on near-tie conflict,
+  `AIS_ONLY` emitted as real targets.
+- **All 7 canonical classifications now reachable** (legacy emitted 3):
+  SEA_CLUTTER (weak/small/no-SNR), LOW_CONFIDENCE (sub-threshold candidate),
+  UNRESOLVED (two near-equal claimants).
+- PARITY: 12/12 classifications, positions, associations, SAR confidence exact;
+  radii/Δt exact; scores within 0.005; distance delta ≤1.11% (measured cost of
+  the geodesic upgrade — recorded, not hidden).
+- Correlation: 12 components × 200 AIS in **12.6 ms** (target <2s).
+- 44/44 pytest; ruff + strict mypy clean.
+- Status: ✅ VERIFIED.
