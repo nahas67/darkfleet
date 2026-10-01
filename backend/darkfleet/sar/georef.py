@@ -28,7 +28,8 @@ def read_window(href: str, bbox_wgs84: tuple[float, float, float, float]) -> dic
                 details={"href": href[:120]},
                 suggestions=["Use a GCP-referenced asset via the warp path, or another provider."],
             )
-        win = from_bounds(*bbox_wgs84, transform=ds.transform).round_offsets().round_lengths()
+        native = _reproject_aoi(bbox_wgs84, ds.crs)
+        win = from_bounds(*native, transform=ds.transform).round_offsets().round_lengths()
         win = _clamp_window(win, ds.width, ds.height)
         arr = ds.read(1, window=win)
         return {
@@ -49,6 +50,15 @@ def _maybe_raise_gcp(ds: Any) -> None:
             details={"gcp_count": len(gcps)},
             suggestions=["Warp GCP asset to an affine GeoTIFF before detection."],
         )
+
+
+def _reproject_aoi(
+    bbox_wgs84: tuple[float, float, float, float], crs: CRS
+) -> tuple[float, float, float, float]:
+    """WGS84 AOI into the raster's native CRS (densified edges)."""
+    if crs == CRS.from_epsg(4326):
+        return bbox_wgs84
+    return aoi_to_crs_bounds(bbox_wgs84, crs)
 
 
 def _clamp_window(win: Window, width: int, height: int) -> Window:

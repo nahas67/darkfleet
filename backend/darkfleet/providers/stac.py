@@ -48,7 +48,7 @@ def inspect_georeferencing(href: str) -> tuple[Georeferencing, dict[str, Any]]:
                 "width": ds.width,
                 "height": ds.height,
                 "dtype": ds.dtypes[0] if ds.dtypes else None,
-                "overviews": ds.get_band(1).overviews.__len__() if ds.count >= 1 else 0,
+                "overviews": len(ds.overviews(1)) if ds.count >= 1 else 0,
                 "gcp_count": len(ds.gcps[0]) if ds.gcps[0] else 0,
             }
             transform = ds.transform

@@ -8,7 +8,7 @@
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
 | RES-001 | probe scripts | yes (512² read) | partial (model only) | manual | wire into API (CP1) | 🟡 PARTIALLY VERIFIED |
-| RES-002 | probe | search only | model only | manual | test SAS read (CP1) | 🟡 PARTIALLY VERIFIED |
+| RES-002 | probe + shipped-code read | yes (signed window) | model | live proof | keep | ✅ VERIFIED |
 | RES-003 | probe | yes (absence proven) | registry | manual | keep gated | ✅ VERIFIED |
 | RES-004 | probe | yes (210 GCPs) | model only | manual | warp path (CP1) | 🟡 PARTIALLY VERIFIED |
 | RES-005 | registry | yes | no | no | adapters (CP4) | ✅ VERIFIED |
@@ -20,18 +20,18 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| SAR-101 | none (`/api/stac/scenes` missing) | no | no | no | provider router | ⚪ NOT IMPLEMENTED |
-| SAR-102 | none | no | no | no | capability check | ⚪ NOT IMPLEMENTED |
-| SAR-103 | none | no | no | no | asset selection | ⚪ NOT IMPLEMENTED |
-| SAR-104 | manual probe only | no | no | no | `read_window` + tests | ⚪ NOT IMPLEMENTED |
-| SAR-105 | none | no | no | no | chain + dual-CRS tests | ⚪ NOT IMPLEMENTED |
-| SAR-106 | none | no | no | no | GCP warp + tests | ⚪ NOT IMPLEMENTED |
-| SAR-107 | model exists | no | no | no | enforce in read path | ⚪ NOT IMPLEMENTED |
-| SAR-108 | none | no | no | no | GRD branch | ⚪ NOT IMPLEMENTED |
-| SAR-109 | none | no | no | no | RTC branch | ⚪ NOT IMPLEMENTED |
-| SAR-110 | partial (TS provenance) | DEMO | no | no | persist raster meta | ⚪ NOT IMPLEMENTED |
-| SAR-111 | none | no | no | no | 32648 fixture test | ⚪ NOT IMPLEMENTED |
-| SAR-112 | golden JSON only | no | no | no | COG generator | ⚪ NOT IMPLEMENTED |
+| SAR-101 | PC router | yes (live 2.7 s) | model | live proof | wire into API (CP7) | 🟢 IMPLEMENTED |
+| SAR-102 | capability model | yes | model | live proof | keep | 🟢 IMPLEMENTED |
+| SAR-103 | VV/VH selection | yes | model | live proof | keep | 🟢 IMPLEMENTED |
+| SAR-104 | `read_window` native-CRS | yes (live 2.0 s, 8.3 s total) | no | live + fixture | keep | 🟢 IMPLEMENTED |
+| SAR-105 | chain + AOI reprojection | yes | no | 12/12 tests | keep | 🟢 IMPLEMENTED |
+| SAR-106 | classifier (GCP proven) | partial | no | GCP control | warp path remains | 🟡 PARTIALLY VERIFIED |
+| SAR-107 | enforced in read path | yes | no | refusal test | keep | 🟢 IMPLEMENTED |
+| SAR-108 | none | no | no | no | GRD branch (CP2) | ⚪ NOT IMPLEMENTED |
+| SAR-109 | linear read only | partial | no | no | log/dB branch (CP2) | 🟡 PARTIALLY VERIFIED |
+| SAR-110 | partial (TS provenance) | DEMO | no | no | persist raster meta (CP6) | ⚪ NOT IMPLEMENTED |
+| SAR-111 | 32648 fixture test | yes | no | 12/12 tests | keep | 🟢 IMPLEMENTED |
+| SAR-112 | 4 COGs + sidecar | yes | tests | 12/12 tests | keep | 🟢 IMPLEMENTED |
 
 ## SAR-200s (CP2 — all ⚪)
 

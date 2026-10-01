@@ -12,4 +12,12 @@
   EarthSearch GCP-referenced (210 GCPs, warp path); MarineCadastre = keyless
   historical AIS; WorldCover 10 m = primary mask; deterministic CV path.
 - 11 plan docs written; PLAN_LOCK.json populated; commit follows.
+## CP1 — Real raster + georeferencing (2026-10-01)
+
+- Fixture COGs generated (seeded): 4326 + 32648 + unreferenced + 4-GCP control.
+- `read_window` reprojects WGS84 AOI to native CRS before windowing (bug caught by test).
+- 12/12 pytest green; ruff + strict mypy clean.
+- LIVE PRIMARY PATH through shipped code: PC RTC search 2.7 s → SAS sign
+  1.2 s → AFFINE/EPSG:32648/10 m/float32 → 332×334 window 2.0 s, TOTAL 8.3 s
+  (< 10 s target); center lat 1.26499 lon 103.81499 inside AOI; 100% finite.
 - Status: ✅ VERIFIED.
