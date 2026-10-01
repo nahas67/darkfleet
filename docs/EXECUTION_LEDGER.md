@@ -106,3 +106,19 @@
   8 unmatched, 2 AIS-only, 96 ms end to end. Logs show only real events.
 - 123/123 pytest · ruff clean · strict mypy clean (32 files).
 - Status: ✅ VERIFIED.
+
+### CP6 addendum — LIVE REAL scan through the shipped pipeline
+
+Two REAL scans over open water east of Singapore, live Sentinel-1 RTC, no
+credentials, no synthetic input:
+- AOI 103.83–103.87E / 1.22–1.26N · window 442×445 px · 10 m · EPSG:32648
+- 15 real stage transitions, 12.4 s total (scene search + SAS + window read +
+  WorldCover mask + RTC→dB + median + CA-CFAR + components + correlation)
+- 7 SAR_UNMATCHED + 2 STATIONARY_OR_INFRASTRUCTURE, confidence 0.72–0.81,
+  peaks 6.3–13.4 dB — consistent with real hull returns
+- 0 AIS observations (archive empty) ⇒ every target correctly UNMATCHED rather
+  than inventing a match — the failure mode the spec forbids, demonstrably absent
+- `runtime_mode=REAL`, `synthetic=False` on every artifact; mask provenance
+  records the exact WorldCover clip used
+- First scan exposed two real defects, both fixed: `resolution_m` was recorded
+  as null, and an unknown-provider guard wrongly blocked valid discovery.

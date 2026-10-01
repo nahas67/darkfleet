@@ -20,13 +20,13 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| SAR-101 | PC router | yes (live 2.7 s) | model | live proof | wire into API (CP7) | 🟢 IMPLEMENTED |
-| SAR-102 | capability model | yes | model | live proof | keep | 🟢 IMPLEMENTED |
-| SAR-103 | VV/VH selection | yes | model | live proof | keep | 🟢 IMPLEMENTED |
-| SAR-104 | `read_window` native-CRS | yes (live 2.0 s, 8.3 s total) | no | live + fixture | keep | 🟢 IMPLEMENTED |
+| SAR-101 | PC router | yes (live, full scan) | yes (pipeline) | 2 live REAL scans | API (CP7) | ✅ VERIFIED |
+| SAR-102 | capability model | yes | yes | live + refusal | keep | ✅ VERIFIED |
+| SAR-103 | VV/VH selection | yes | yes | live VV | keep | ✅ VERIFIED |
+| SAR-104 | `read_window` native-CRS | yes (live 442×445 window) | yes | live + fixtures | keep | ✅ VERIFIED |
 | SAR-105 | chain + AOI reprojection | yes | no | 12/12 tests | keep | 🟢 IMPLEMENTED |
-| SAR-106 | classifier (GCP proven) | partial | no | GCP control | warp path remains | 🟡 PARTIALLY VERIFIED |
-| SAR-107 | enforced in read path | yes | no | refusal test | keep | 🟢 IMPLEMENTED |
+| SAR-106 | classifier detects GCP (210 on real asset) | yes | yes | GCP control test | warp path (CP15) | 🟡 PARTIALLY VERIFIED |
+| SAR-107 | enforced in read path | yes | yes (pipeline) | refusal test | keep | ✅ VERIFIED |
 | SAR-108 | GRD branch + LUT refusal | yes | no | refusal test | EarthSearch path (CP6) | 🟢 IMPLEMENTED |
 | SAR-109 | RTC linear→dB live-read | yes (live window) | no | live + unit | keep | 🟢 IMPLEMENTED |
 | SAR-110 | partial (TS provenance) | DEMO | no | no | persist raster meta (CP6) | ⚪ NOT IMPLEMENTED |
@@ -40,7 +40,7 @@
 | SAR-201 | `valid_data_mask` | yes | no | 22/22 | keep | 🟢 IMPLEMENTED |
 | SAR-202 | RTC+GRD branches | yes | no | LUT-refusal test | keep | 🟢 IMPLEMENTED |
 | SAR-203 | `linear_to_db` eps-guarded | yes | no | spot -3.0103 dB | keep | 🟢 IMPLEMENTED |
-| SAR-204 | WorldCover clip 59.2% water | yes | tests | point-verified | keep | 🟢 IMPLEMENTED |
+| SAR-204 | WorldCover mask in live REAL scan | yes | yes (pipeline) | 2 live scans | keep | ✅ VERIFIED |
 | SAR-205 | metre buffer → px dilation | yes | tests | monotonic test | keep | 🟢 IMPLEMENTED |
 | SAR-206 | port carveback (GeoJSON) | yes | tests | carveback test | keep | 🟢 IMPLEMENTED |
 | SAR-207 | version+tile+buffer in evidence | yes | tests | sidecar test | keep | 🟢 IMPLEMENTED |

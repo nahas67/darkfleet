@@ -39,6 +39,8 @@ from .sar.speckle import apply_speckle
 
 StageCallback = Callable[[str, str], None]
 
+_KNOWN_PROVIDERS = frozenset({"planetary-computer", "earthsearch"})
+
 DEFAULT_CFAR: dict[str, Any] = {
     "training_cells": 16,
     "guard_cells": 4,
@@ -100,10 +102,11 @@ def run_scan(
             "DEMO scan requires a scene definition.",
             details={"provider": "demo"},
         )
-    if not synthetic and scene is None:
+    if not synthetic and scene is None and provider not in _KNOWN_PROVIDERS:
         raise RealDataUnavailableError(
-            "REAL scan requires a discovered scene; pass scene or run discovery first.",
-            details={"provider": provider},
+            f"Unknown SAR provider {provider!r}.",
+            details={"provider": provider, "known": sorted(_KNOWN_PROVIDERS)},
+            suggestions=["Use planetary-computer or earthsearch."],
         )
 
     emit("QUEUED", f"scan {scan_id} queued mode={runtime_mode}")
@@ -135,12 +138,16 @@ def run_scan(
         if provider == "planetary-computer":
             sign_planetary_computer_asset(asset)
         signed_href = str(asset.extra.get("signed_href", asset.asset_href))
-        state, _info = inspect_georeferencing(signed_href)
+        state, geo_info = inspect_georeferencing(signed_href)
         if state == Georeferencing.UNREFERENCED:
             raise RealDataUnavailableError(
                 "Selected asset has no usable georeferencing.",
                 details={"item_id": asset.item_id, "state": state.value},
             )
+        # Persist the measured raster geometry; never leave it null when known.
+        res = geo_info.get("resolution")
+        asset.resolution_meters = float(res[0]) if res else None
+        asset.crs_wkt = str(geo_info.get("crs") or "") or None
         emit("SEARCHING_SCENE", f"scene selected {asset.item_id}")
         log_stage("STAC", f"selected scene {asset.item_id}")
 
