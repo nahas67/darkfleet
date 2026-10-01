@@ -1,0 +1,7 @@
+{
+  "name": "DarkFleet",
+  "description": "Autonomous orbital reconnaissance & SAR/AIS maritime vessel correlation platform for detecting covert dark fleet activity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
