@@ -6,7 +6,9 @@ Collectors persist into the SAME archive used for historical correlation
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -15,6 +17,14 @@ from ..providers import RealDataUnavailableError
 from .archive import AisArchive
 from .models import AisObservation
 from .normalize import normalize_aishub, normalize_aistream
+from .resilience import (
+    AistreamWatchdog,
+    FailureKind,
+    classify_failure,
+    frame_is_oversized,
+)
+
+log = logging.getLogger(__name__)
 
 
 class AistreamCollector:
@@ -48,21 +58,59 @@ class AistreamCollector:
         return normalize_aistream(msg)
 
     async def run(self, bbox: tuple[float, float, float, float], limit: int = 0) -> int:
-        """Stream until `limit` observations persisted (0 = forever)."""
+        """Stream until `limit` observations persisted (0 = forever).
+
+        Reconnects under the policy in :mod:`darkfleet.ais.resilience`. The
+        previous implementation opened one socket and let any failure end the
+        run: a transient drop lost the subscription entirely, and there was no
+        failure classification at all, so an auth rejection and a network blip
+        were indistinguishable.
+        """
         import websockets
 
+        watchdog = AistreamWatchdog()
         count = 0
-        async with websockets.connect(self.URL) as ws:
-            await ws.send(json.dumps(self.subscribe_message(bbox)))
-            async for raw in ws:
-                obs = self.handle_message(str(raw))
-                if obs is None:
-                    continue
-                self.archive.append([obs])
-                count += 1
-                if limit and count >= limit:
-                    return count
-        return count
+
+        while True:
+            try:
+                async with websockets.connect(self.URL) as ws:
+                    await ws.send(json.dumps(self.subscribe_message(bbox)))
+                    async for raw in ws:
+                        if not frame_is_oversized(len(str(raw))):
+                            obs = self.handle_message(str(raw))
+                            if obs is not None:
+                                self.archive.append([obs])
+                                count += 1
+                                watchdog.record_success()
+                                if limit and count >= limit:
+                                    return count
+                # The stream ended without an exception. That is still a lost
+                # subscription: reconnecting immediately here is a hot loop,
+                # because a server that closes cleanly would be re-dialled as
+                # fast as it can answer. It is paced as a transport fault.
+                failure = classify_failure(message="stream ended by the provider")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - the policy, not the type, decides
+                failure = classify_failure(message=str(exc))
+
+            delay = watchdog.record_failure(failure)
+            log.warning(
+                "aisstream %s after %d frame(s); next attempt in %.0fs: %s",
+                failure.kind.value,
+                count,
+                delay,
+                failure.message,
+            )
+            if failure.kind is FailureKind.AUTH:
+                # The key is rejected. Retrying cannot fix it, so the run stops
+                # here rather than hammering the provider hourly.
+                raise RealDataUnavailableError(
+                    "AISStream rejected the API key; no retry is attempted.",
+                    details={"provider": "aistream", "message": failure.message},
+                    suggestions=["Check DARKFLEET_AIS__AISTREAM_API_KEY."],
+                )
+            await asyncio.sleep(delay)
 
 
 class AishubPoller:
