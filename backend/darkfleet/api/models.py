@@ -128,18 +128,18 @@ def jsonable(value: Any) -> Any:
 
 
 class ScanCreateRequest(BaseModel):
-    """Body of ``POST /api/scans``."""
+    """Body of ``POST /api/scans``.
+
+    There is no ``runtime_mode``. Every scan is a REAL scan against a live
+    provider: a client cannot ask this API for fabricated observations.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    runtime_mode: RuntimeModeLiteral = Field(
-        default="DEMO",
-        description="DEMO runs the synthetic pipeline; REAL requires live provider data.",
-    )
     bbox: BBox
     scene_id: str | None = Field(
         default=None,
-        description="DEMO scene identifier. REAL resolves the scene from the provider.",
+        description="Optional scene identifier to pin instead of letting the provider choose.",
     )
     datetime_range: str | None = Field(
         default=None,

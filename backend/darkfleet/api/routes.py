@@ -677,8 +677,15 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
     job that fails later. There is no REAL -> DEMO fallback anywhere below.
     """
     bbox = (float(body.bbox[0]), float(body.bbox[1]), float(body.bbox[2]), float(body.bbox[3]))
-    scene: Mapping[str, Any]
-    if body.runtime_mode == "REAL":
+
+    # A synthetic scene is reachable ONLY when the deployment explicitly enabled
+    # it, which shipping configuration and Docker never do. There is no client
+    # flag: a caller cannot ask for fabricated observations.
+    if state.settings.allow_synthetic_scenes:
+        scene = _resolve_demo_scene(body.scene_id, bbox)
+        provider = "demo-synthesizer"
+        synthetic = True
+    else:
         provider = body.provider
         if provider not in KNOWN_PROVIDERS:
             raise _unknown_provider(provider)
@@ -707,13 +714,9 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
             )
         scene = _scene_from_asset(assets[0], bbox)
         synthetic = False
-    else:
-        scene = _resolve_demo_scene(body.scene_id, bbox)
-        provider = "demo-synthesizer"
-        synthetic = True
 
     spec = ScanSpec(
-        runtime_mode=body.runtime_mode,
+        runtime_mode="DEMO" if synthetic else "REAL",
         bbox=bbox,
         scene=scene,
         provider=provider,
@@ -725,14 +728,14 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
     )
     job = state.runner.submit(
         lambda: _scan_work(spec),
-        runtime_mode=body.runtime_mode,
+        runtime_mode="DEMO" if synthetic else "REAL",
         synthetic=synthetic,
     )
     spec.bind(job.scan_id)
     return ScanAccepted(
         scan_id=job.scan_id,
         status=job.stage.value,
-        runtime_mode=body.runtime_mode,
+        runtime_mode="DEMO" if synthetic else "REAL",
         synthetic=synthetic,
     )
 
@@ -927,23 +930,34 @@ def list_scenes(
     datetime: str | None = Query(default=None, description="STAC datetime interval."),
     provider: str = Query(default="planetary-computer"),
     runtime_mode: str | None = Query(
-        default=None, description="Defaults to the configured settings.runtime_mode."
+        default=None,
+        description=(
+            "Only honoured when the deployment enabled synthetic scenes. Ignored "
+            "otherwise, so it cannot be used to request fabricated data."
+        ),
     ),
 ) -> SceneListResponse:
     """Scene discovery (API-005).
 
-    REAL proxies the provider search; a provider failure is an explicit error
-    response. DEMO returns the synthetic catalogue, always marked synthetic.
+    Proxies the live provider search; a provider failure is an explicit error
+    response. The synthetic catalogue is returned only when
+    ``settings.allow_synthetic_scenes`` is on, which shipping configuration and
+    Docker never do. When it is off, a ``runtime_mode=DEMO`` request is refused
+    rather than silently upgraded, so a caller is never misled about which data
+    it received.
     """
-    mode = (runtime_mode or state.settings.runtime_mode).upper()
-    if mode not in ("DEMO", "REAL"):
+    if runtime_mode and runtime_mode.upper() == "DEMO" and not state.settings.allow_synthetic_scenes:
         raise api_error(
-            status.HTTP_400_BAD_REQUEST,
-            error="INVALID_REQUEST",
+            status.HTTP_404_NOT_FOUND,
+            error="SYNTHETIC_SCENES_DISABLED",
             status_value="INVALID_REQUEST",
-            message=f"runtime_mode must be DEMO or REAL, got {runtime_mode!r}.",
+            message=(
+                "Synthetic scenes are not available in this deployment. Every scan is a "
+                "REAL scan against a live provider."
+            ),
+            suggestions=["Drop runtime_mode, or request a live provider scene."],
         )
-    if mode == "DEMO":
+    if state.settings.allow_synthetic_scenes:
         return SceneListResponse(
             runtime_mode="DEMO",
             synthetic=True,

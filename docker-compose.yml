@@ -5,6 +5,9 @@
 #
 # API : http://localhost:8000   (OpenAPI docs at /docs)
 # Web : http://localhost:8080
+
+# Every scan is a REAL scan against a live provider. This deployment cannot
+# produce synthetic observations: DARKFLEET_ALLOW_SYNTHETIC_SCENES is pinned off.
 #
 # Data persists in the darkfleet-data volume (AIS archive, scans, cache,
 # boundaries). Deleting it discards history — the AIS archive cannot be
@@ -30,6 +33,11 @@ services:
       DARKFLEET_DATA_DIR: /data
       DARKFLEET_API_HOST: 0.0.0.0
       DARKFLEET_API_PORT: "8000"
+      # Every scan in this deployment is a REAL scan. Stated explicitly rather
+      # than left to the default so the intent survives an image rebuild.
+      DARKFLEET_RUNTIME_MODE: REAL
+      # Never serve fabricated observations from a container.
+      DARKFLEET_ALLOW_SYNTHETIC_SCENES: "false"
     volumes:
       - darkfleet-data:/data
     ports:

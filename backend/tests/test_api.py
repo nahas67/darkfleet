@@ -144,8 +144,11 @@ def net() -> Iterator[FakeNetwork]:
 @pytest.fixture(scope="module")
 def api_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     data_dir = tmp_path_factory.mktemp("darkfleet-data")
-    settings = Settings(runtime_mode="DEMO", data_dir=str(data_dir))
+    settings = Settings(data_dir=str(data_dir))
     settings.log_level = "WARNING"
+    # The synthetic scene catalogue is a TEST harness, not a product mode. It is
+    # off by default everywhere else, and the API refuses it unless enabled here.
+    settings.allow_synthetic_scenes = True
     settings.cdse.client_secret = SECRETS[0]
     settings.ais.aistream_api_key = SECRETS[1]
     settings.ais.gfw_api_token = SECRETS[2]
@@ -156,6 +159,21 @@ def api_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
 def client(api_settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(api_settings)) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="module")
+def real_client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
+    """An app with synthetic scenes DISABLED, i.e. the shipped configuration.
+
+    This is the default the product actually runs with. The tests that assert
+    REAL behaviour must use it, because with synthetic scenes enabled the API
+    short-circuits before it ever contacts a provider.
+    """
+    conf = Settings(data_dir=str(tmp_path_factory.mktemp("darkfleet-real")))
+    conf.log_level = "WARNING"
+    conf.allow_synthetic_scenes = False
+    with TestClient(create_app(conf)) as real_test_client:
+        yield real_test_client
 
 
 # ------------------------------------------------------------------ helpers
@@ -178,7 +196,7 @@ def _await_terminal(client: TestClient, scan_id: str, timeout: float = 120.0) ->
 def _start_demo_scan(client: TestClient, bbox: list[float] | None = None) -> str:
     response = client.post(
         "/api/scans",
-        json={"runtime_mode": "DEMO", "bbox": bbox or DEMO_BBOX},
+        json={"bbox": bbox or DEMO_BBOX},
     )
     assert response.status_code == 202, response.text
     body: dict[str, Any] = response.json()
@@ -310,14 +328,13 @@ def test_provider_health_is_probed_and_leaks_no_secret(client: TestClient, net: 
 
 
 def test_real_scan_with_unknown_provider_is_explicit_and_synthetic_free(
-    client: TestClient, net: FakeNetwork
+    real_client: TestClient, net: FakeNetwork
 ) -> None:
     """API-012: a bad REAL request is a 400 with a status, never DEMO data."""
     net.reset()
-    response = client.post(
+    response = real_client.post(
         "/api/scans",
         json={
-            "runtime_mode": "REAL",
             "bbox": DEMO_BBOX,
             "provider": "totally-unknown-provider",
             "product": "rtc",
@@ -339,16 +356,15 @@ def test_real_scan_with_unknown_provider_is_explicit_and_synthetic_free(
 
 
 def test_real_provider_failure_surfaces_as_503_with_status(
-    client: TestClient, net: FakeNetwork
+    real_client: TestClient, net: FakeNetwork
 ) -> None:
     """An unauthenticated provider is AUTH_REQUIRED/503, not a DEMO fallback."""
     net.reset()
     net.search_status = 401
     try:
-        response = client.get(
+        response = real_client.get(
             "/api/scenes",
             params={
-                "runtime_mode": "REAL",
                 "provider": "planetary-computer",
                 "bbox": ",".join(str(value) for value in DEMO_BBOX),
                 "datetime": "2026-09-01T00:00:00Z/2026-09-30T00:00:00Z",
@@ -365,13 +381,12 @@ def test_real_provider_failure_surfaces_as_503_with_status(
 
 
 def test_real_scene_search_never_returns_demo_scenes(
-    client: TestClient, net: FakeNetwork
+    real_client: TestClient, net: FakeNetwork
 ) -> None:
     net.reset()
-    response = client.get(
+    response = real_client.get(
         "/api/scenes",
         params={
-            "runtime_mode": "REAL",
             "provider": "planetary-computer",
             "bbox": ",".join(str(value) for value in DEMO_BBOX),
             "datetime": "2026-09-01T00:00:00Z/2026-09-30T00:00:00Z",
@@ -388,19 +403,19 @@ def test_real_scene_search_never_returns_demo_scenes(
 
 
 def test_real_scan_fails_loudly_and_persists_nothing(
-    client: TestClient, net: FakeNetwork
+    real_client: TestClient, net: FakeNetwork
 ) -> None:
     """A REAL scan whose SAS token is refused ends FAILED with zero demo data."""
     net.reset()
     net.sas_status = 401
     try:
-        response = client.post(
+        response = real_client.post(
             "/api/scans",
-            json={"runtime_mode": "REAL", "bbox": DEMO_BBOX, "provider": "planetary-computer"},
+            json={"bbox": DEMO_BBOX, "provider": "planetary-computer"},
         )
         assert response.status_code == 202, response.text
         scan_id = str(response.json()["scan_id"])
-        state = _await_terminal(client, scan_id)
+        state = _await_terminal(real_client, scan_id)
         assert state["stage"] == ScanStage.FAILED.value
         assert state["synthetic"] is False
         assert state["runtime_mode"] == "REAL"
@@ -409,8 +424,8 @@ def test_real_scan_fails_loudly_and_persists_nothing(
         assert state["failed_at"] == ScanStage.READING_SAR.value
         assert state["record_persisted"] is False
         assert "account" in str(state["error"])
-        assert client.get(f"/api/scans/{scan_id}/targets").status_code == 404
-        assert client.get(f"/api/scans/{scan_id}/export/geojson").status_code == 404
+        assert real_client.get(f"/api/scans/{scan_id}/targets").status_code == 404
+        assert real_client.get(f"/api/scans/{scan_id}/export/geojson").status_code == 404
         for secret in SECRETS:
             assert secret not in json.dumps(state)
     finally:
@@ -441,7 +456,7 @@ def test_sse_for_an_unknown_scan_is_404(client: TestClient) -> None:
 
 def test_malformed_bbox_is_rejected_by_validation(client: TestClient) -> None:
     for bad in ([1.0, 2.0, 3.0], [1.0, 2.0, 3.0, 4.0, 5.0], [10.0, 0.0, 5.0, 1.0], ["a", 0, 1, 1]):
-        response = client.post("/api/scans", json={"runtime_mode": "DEMO", "bbox": bad})
+        response = client.post("/api/scans", json={"bbox": bad})
         assert response.status_code == 422, (bad, response.text)
         assert response.json()["detail"]
     # Out-of-range and unknown fields are refused too.
@@ -452,7 +467,7 @@ def test_malformed_bbox_is_rejected_by_validation(client: TestClient) -> None:
 
 
 def test_demo_scan_rejects_a_bbox_the_scene_does_not_cover(client: TestClient) -> None:
-    response = client.post("/api/scans", json={"runtime_mode": "DEMO", "bbox": OTHER_BBOX})
+    response = client.post("/api/scans", json={"bbox": OTHER_BBOX})
     assert response.status_code == 400, response.text
     assert response.json()["error"] == "BBOX_SCENE_MISMATCH"
 

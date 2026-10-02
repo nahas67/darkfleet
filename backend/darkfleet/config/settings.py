@@ -70,7 +70,17 @@ class MatchingSettings(BaseSettings):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DARKFLEET_", env_nested_delimiter="__")
 
-    runtime_mode: Literal["DEMO", "REAL"] = "DEMO"
+    #: Every scan is a REAL scan against a live provider. There is no synthetic
+    #: runtime mode: a fabricated observation must never be reachable from the
+    #: product, because a user cannot tell one from a measurement they relied on.
+    runtime_mode: Literal["REAL"] = "REAL"
+
+    #: Escape hatch for the test suite only, which needs a raster that does not
+    #: depend on provider credentials or the network. It is OFF by default and
+    #: the API refuses a synthetic scan unless it is explicitly on, so shipping
+    #: configuration and Docker can never expose it by accident.
+    allow_synthetic_scenes: bool = False
+
     data_dir: str = "data"
     api_host: str = "0.0.0.0"
     api_port: int = 8000

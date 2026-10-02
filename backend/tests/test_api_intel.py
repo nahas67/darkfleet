@@ -22,8 +22,10 @@ DEMO_BBOX = [103.65, 1.1, 104.05, 1.4]
 @pytest.fixture(scope="module")
 def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     data_dir = tmp_path_factory.mktemp("darkfleet-cp15")
-    conf = Settings(runtime_mode="DEMO", data_dir=str(data_dir))
+    conf = Settings(data_dir=str(data_dir))
     conf.log_level = "WARNING"
+    # Synthetic scenes are a test harness only; see Settings.allow_synthetic_scenes.
+    conf.allow_synthetic_scenes = True
     return conf
 
 
@@ -51,7 +53,7 @@ def scan_with_targets(client: TestClient) -> dict[str, Any]:
     """Two DEMO scans over the same AOI: enough history for the intel surfaces."""
     ids: list[str] = []
     for _ in range(2):
-        started = client.post("/api/scans", json={"runtime_mode": "DEMO", "bbox": DEMO_BBOX})
+        started = client.post("/api/scans", json={"bbox": DEMO_BBOX})
         assert started.status_code == 202, started.text
         ids.append(str(started.json()["scan_id"]))
     return {"scan_ids": ids, "targets": _await_terminal(client, ids[-1])}
@@ -109,8 +111,9 @@ def test_tracks_never_link_a_detection_without_ais(client: TestClient) -> None:
 def test_tracks_on_empty_history_returns_zero_not_an_error(
     settings: Settings, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    empty = Settings(runtime_mode="DEMO", data_dir=str(tmp_path_factory.mktemp("empty")))
+    empty = Settings(data_dir=str(tmp_path_factory.mktemp("empty")))
     empty.log_level = "WARNING"
+    empty.allow_synthetic_scenes = True
     with TestClient(create_app(empty)) as fresh:
         body = fresh.get("/api/tracks").json()
         assert body["track_count"] == 0
