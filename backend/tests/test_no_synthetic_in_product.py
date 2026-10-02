@@ -13,6 +13,7 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -119,6 +120,47 @@ def test_shipped_health_does_not_advertise_a_demo_mode(shipped: TestClient) -> N
     assert response.status_code == 200
     body = response.json()
     assert body["runtime_mode"] == "REAL"
+
+
+# ------------------------------------------------------- liveness vs readiness
+
+
+def test_liveness_is_served_outside_the_api_prefix(shipped: TestClient) -> None:
+    """So an orchestrator probe is never mistaken for an analysis request."""
+    response = shipped.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "darkfleet-api"
+    assert body["version"]
+    assert shipped.get("/api/health").status_code == 404
+
+
+def test_liveness_touches_no_provider(shipped: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression this endpoint exists to prevent.
+
+    The container healthcheck used to point at /api/providers/health, which
+    performs a live provider probe. A slow third party therefore exceeded the 5s
+    healthcheck timeout and Docker restarted a perfectly healthy API in a loop.
+    Liveness must answer even when every provider is unreachable.
+    """
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise AssertionError("liveness must not perform a network probe")
+
+    monkeypatch.setattr(httpx, "get", explode)
+    monkeypatch.setattr(httpx, "post", explode)
+
+    response = shipped.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_provider_readiness_is_still_available_separately(shipped: TestClient) -> None:
+    """The dependency-status surface is not lost, only separated from liveness."""
+    response = shipped.get("/api/providers/health")
+    assert response.status_code == 200
+    assert "providers" in response.json()
 
 
 # ------------------------------------------------------- the gate is real

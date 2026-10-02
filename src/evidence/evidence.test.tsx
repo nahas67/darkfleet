@@ -694,7 +694,7 @@ describe('optional evidence load', () => {
       evidence: undefined,
       client: stubClient({
         scan_id: 'DF-0001',
-        runtime_mode: 'DEMO',
+        runtime_mode: 'REAL',
         synthetic: true,
         ambiguous: false,
         candidate_scan_ids: [],

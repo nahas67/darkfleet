@@ -4,8 +4,10 @@
  * Layout contract:
  *  - The full-screen Cesium globe is the only primary viewport. There is no
  *    dashboard frame and no 2D fallback.
- *  - A minimal top bar carries the wordmark, the DEMO/REAL mode pill, live
- *    SAR/AIS provider status and the UTC clock.
+ *  - A minimal top bar carries the wordmark, live SAR/AIS provider status, the
+ *    UTC clock and settings. There is no runtime-mode control: the synthetic
+ *    runtime was removed from the product and every scan is a real provider
+ *    query, so there is no mode left to pick.
  *  - A compact left icon rail (SEARCH / LAYERS / SAR / AIS / CORRELATE /
  *    ANALYTICS / MORE) and a bottom-centre command dock (SEARCH / SCAN / TIME /
  *    LAYERS / VIEW) each open a single floating contextual surface.
@@ -13,8 +15,9 @@
  * Honesty rules enforced here:
  *  - Cesium attribution is never hidden; no rule in this file touches
  *    `.cesium-widget-credits` (see `src/index.css`, which only restyles it).
- *  - The mode pill always reflects store state, and each scan is labelled with
- *    the runtime mode the BACKEND reported for that job.
+ *  - Nothing in this file invents data: no synthetic scene, no substitute
+ *    extent, no fabricated count. Scan requests carry only a bbox and the
+ *    scene the backend itself catalogued.
  *  - Layers the registry marks NOT_AVAILABLE are rendered disabled with a
  *    reason. They are never made visible and never emitted.
  *  - No progress percentage, invented stage, or client-side analytics.
@@ -44,7 +47,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react';
-import type { LayerId, ProvidersHealth, ProviderHealthEntry, RuntimeMode } from '../types/api.ts';
+import type { BoundingBox, LayerId, ProvidersHealth, ProviderHealthEntry } from '../types/api.ts';
 import type { ScanRequest } from '../types/api.ts';
 import {
   ADVANCED_LAYER_IDS,
@@ -221,8 +224,6 @@ export function SpatialShell({
 
       {/* 2. Minimal top bar. */}
       <TopBar
-        mode={state.mode}
-        onModeChange={(mode) => store.setMode(mode)}
         sar={sar}
         ais={ais}
         clockMs={clockMs}
@@ -260,15 +261,13 @@ export function SpatialShell({
 // ----------------------------------------------------------------- top bar
 
 interface TopBarProps {
-  mode: RuntimeMode;
-  onModeChange: (mode: RuntimeMode) => void;
   sar: ProviderSummary;
   ais: ProviderSummary;
   clockMs: number;
   onOpenSettings: () => void;
 }
 
-function TopBar({ mode, onModeChange, sar, ais, clockMs, onOpenSettings }: TopBarProps) {
+function TopBar({ sar, ais, clockMs, onOpenSettings }: TopBarProps) {
   return (
     <header
       className="pointer-events-auto absolute inset-x-0 top-0 z-30 flex items-center gap-3 px-4 py-2"
@@ -278,7 +277,6 @@ function TopBar({ mode, onModeChange, sar, ais, clockMs, onOpenSettings }: TopBa
         <span className="font-mono text-sm font-semibold tracking-[0.22em] text-[var(--df-accent)]">
           DARKFLEET
         </span>
-        <ModePill mode={mode} onModeChange={onModeChange} />
       </div>
 
       <div className="ml-auto flex items-center gap-2">
@@ -294,63 +292,12 @@ function TopBar({ mode, onModeChange, sar, ais, clockMs, onOpenSettings }: TopBa
           type="button"
           onClick={onOpenSettings}
           aria-label="Settings and source health"
-          aria-pressed={false}
           className="df-glass rounded-[var(--df-control-radius)] p-2 text-[var(--df-text-secondary)] transition hover:text-[var(--df-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]"
         >
           <Settings className="h-4 w-4" aria-hidden />
         </button>
       </div>
     </header>
-  );
-}
-
-/**
- * Runtime mode pill. DEMO is loud on purpose: synthetic data must never be
- * mistakable for real observations (UI-021).
- */
-export function ModePill({
-  mode,
-  onModeChange,
-}: {
-  mode: RuntimeMode;
-  onModeChange?: (mode: RuntimeMode) => void;
-}) {
-  const isDemo = mode === 'DEMO';
-  return (
-    <div className="flex items-center gap-1">
-      <button
-        type="button"
-        onClick={() => onModeChange?.('DEMO')}
-        aria-pressed={isDemo}
-        aria-label="Runtime mode: DEMO, synthetic data"
-        data-df-mode="DEMO"
-        className={[
-          'rounded-[6px] px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.16em] transition',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
-          isDemo
-            ? 'bg-[var(--df-warning)] text-black'
-            : 'text-[var(--df-text-dim)] hover:text-[var(--df-text-secondary)]',
-        ].join(' ')}
-      >
-        DEMO
-      </button>
-      <button
-        type="button"
-        onClick={() => onModeChange?.('REAL')}
-        aria-pressed={!isDemo}
-        aria-label="Runtime mode: REAL, live provider data"
-        data-df-mode="REAL"
-        className={[
-          'rounded-[6px] px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.16em] transition',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)]',
-          isDemo
-            ? 'text-[var(--df-text-dim)] hover:text-[var(--df-text-secondary)]'
-            : 'bg-[var(--df-success)] text-black',
-        ].join(' ')}
-      >
-        REAL
-      </button>
-    </div>
   );
 }
 
@@ -757,8 +704,8 @@ function LayersSurface({ state, store }: { state: AppState; store: AppStore }) {
                 <button
                   type="button"
                   disabled
-                  aria-label={`${layer.title} â€” not available until CP15`}
-                  title={`${layer.title} is not available until CP15 (${layer.source})`}
+                  aria-label={`${layer.title} - no data source, cannot be enabled`}
+                  title={`${layer.title} has no backend data source (${layer.source})`}
                   className="flex w-full cursor-not-allowed items-center gap-2 rounded-[6px] px-1 py-0.5 text-left text-[11px] text-[var(--df-text-dim)] line-through"
                 >
                   <EyeOff className="h-3 w-3 shrink-0" aria-hidden />
@@ -801,7 +748,7 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
   return (
     <div data-df-scene-browser className="space-y-3">
       <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
-        Scenes come from the backend provider probe. DEMO results are labelled synthetic.
+        Every scene listed is a real acquisition returned by the backend provider probe.
       </p>
       {error && (
         <p className="flex items-start gap-1.5 text-[10px] text-[var(--df-danger)]">
@@ -824,19 +771,9 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
                 key={scene.id}
                 className="rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 text-[10px]"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-[var(--df-text)]">
-                    {scene.platform} {scene.product}
-                  </span>
-                  <span
-                    className={[
-                      'shrink-0 font-mono text-[9px] font-bold tracking-wider',
-                      scene.synthetic ? 'text-[var(--df-warning)]' : 'text-[var(--df-success)]',
-                    ].join(' ')}
-                  >
-                    {scene.synthetic ? 'DEMO' : 'REAL'}
-                  </span>
-                </div>
+                <span className="truncate font-mono text-[var(--df-text)]">
+                  {scene.platform} {scene.product}
+                </span>
                 <p className="mt-0.5 font-mono text-[9px] text-[var(--df-text-dim)]">
                   {scene.id} Â· {scene.acquisition_time}
                 </p>
@@ -859,12 +796,51 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
 }
 
 /**
+ * Parse the operator's extent. Pure, so the exact validation that guards a
+ * scan request is assertable without a DOM.
+ */
+export function parseBbox(
+  text: string,
+): { bbox: BoundingBox } | { error: string } {
+  const parts = text
+    .split(',')
+    .map((p: string) => Number(p.trim()))
+    .filter((n: number) => Number.isFinite(n));
+  if (parts.length !== 4) {
+    return { error: 'Enter four numbers: min_lon, min_lat, max_lon, max_lat.' };
+  }
+  const [minLon, minLat, maxLon, maxLat] = parts as [number, number, number, number];
+  if (minLon >= maxLon || minLat >= maxLat) {
+    return { error: 'min_lon must be below max_lon and min_lat below max_lat.' };
+  }
+  return { bbox: [minLon, minLat, maxLon, maxLat] };
+}
+
+/**
+ * Build the scan request.
+ *
+ * The request carries ONLY what the operator asked for: the extent, and the
+ * scene id when one came from the backend catalogue. It deliberately carries no
+ * `runtime_mode` — the backend removed the synthetic runtime and rejects that
+ * field with 422 `extra_forbidden`. Every scan is a live provider query.
+ */
+export function buildScanRequest(
+  bbox: BoundingBox,
+  scene: SceneSummary | null,
+): ScanRequest {
+  return {
+    bbox,
+    ...(scene ? { scene_id: scene.id } : {}),
+  };
+}
+
+/**
  * Scan launcher. The Scan surface previously only DISPLAYED scan state, so a
  * scan could be started from nowhere in the UI: `useScan().startScan` and
  * `client.createScan` both existed with no caller. This wires them.
  *
  * The bbox is entered explicitly. There is no "use the whole world" default,
- * because a REAL scan over an arbitrary extent would either return nothing or
+ * because a live scan over an arbitrary extent would either return nothing or
  * silently download an unreasonable amount of data.
  */
 export function ScanLauncher({
@@ -882,11 +858,10 @@ export function ScanLauncher({
   const [parseError, setParseError] = useState<string | null>(null);
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
   const busy = scan.connection === 'CONNECTING' || scan.connection === 'STREAMING';
-  const mode = store.getState().mode;
 
-  // The backend owns the footprints. A DEMO scene is synthesised on a fixed
-  // grid, so a hardcoded default bbox is rejected with BBOX_SCENE_MISMATCH;
-  // the scene catalogue is the authoritative source for a valid extent.
+  // The backend owns the footprints. A hardcoded default extent is rejected
+  // with BBOX_SCENE_MISMATCH, so the scene catalogue is the authoritative
+  // source for a valid extent — and it is a real provider catalogue.
   useEffect(() => {
     let cancelled = false;
     (client ?? createApiClient())
@@ -905,33 +880,18 @@ export function ScanLauncher({
     };
   }, [client]);
 
-  const sceneForMode = useMemo(
-    () => scenes?.find((s) => s.runtime_mode === mode) ?? scenes?.[0] ?? null,
-    [scenes, mode],
-  );
-  const suggested = bboxText ?? sceneForMode?.bbox?.join(', ') ?? '';
+  const cataloguedScene = useMemo(() => scenes?.[0] ?? null, [scenes]);
+  const suggested = bboxText ?? cataloguedScene?.bbox?.join(', ') ?? '';
 
   const submit = useCallback(() => {
-    const parts = suggested
-      .split(',')
-      .map((p: string) => Number(p.trim()))
-      .filter((n: number) => Number.isFinite(n));
-    if (parts.length !== 4) {
-      setParseError('Enter four numbers: min_lon, min_lat, max_lon, max_lat.');
-      return;
-    }
-    const [minLon, minLat, maxLon, maxLat] = parts as [number, number, number, number];
-    if (minLon >= maxLon || minLat >= maxLat) {
-      setParseError('min_lon must be below max_lon and min_lat below max_lat.');
+    const bbox = parseBbox(suggested);
+    if ('error' in bbox) {
+      setParseError(bbox.error);
       return;
     }
     setParseError(null);
-    onStart({
-      runtime_mode: mode,
-      bbox: [minLon, minLat, maxLon, maxLat],
-      ...(sceneForMode ? { scene_id: sceneForMode.id } : {}),
-    });
-  }, [suggested, onStart, mode, sceneForMode]);
+    onStart(buildScanRequest(bbox.bbox, cataloguedScene));
+  }, [suggested, onStart, cataloguedScene]);
 
   return (
     <div data-df-scan-launcher className="space-y-3">
@@ -953,10 +913,9 @@ export function ScanLauncher({
           aria-invalid={parseError !== null}
           className="w-full rounded-[6px] border border-[var(--df-border)] bg-transparent px-2 py-1.5 font-mono text-[11px] text-[var(--df-text)] placeholder:text-[var(--df-text-dim)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)] disabled:opacity-50"
         />
-        {sceneForMode && (
+        {cataloguedScene && (
           <p className="font-mono text-[9px] text-[var(--df-text-dim)]">
-            extent of {sceneForMode.id}
-            {sceneForMode.synthetic ? ' (synthetic)' : ''}
+            extent of {cataloguedScene.id}
           </p>
         )}
         {parseError && (
@@ -971,14 +930,15 @@ export function ScanLauncher({
         type="button"
         onClick={submit}
         disabled={busy || suggested.trim() === ''}
+        aria-label={busy ? 'Scan in flight' : 'Run live scan'}
         className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border-active)] px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--df-accent)] transition hover:bg-[var(--df-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)] disabled:opacity-40"
       >
         <Sparkles className="h-3 w-3" aria-hidden />
-        {busy ? 'Scan in flight' : `Run ${mode} scan`}
+        {busy ? 'Scan in flight' : 'Run live scan'}
       </button>
       <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
-        Runs in {mode} mode. DEMO synthesises a labelled scene; REAL queries the live provider and
-        never falls back to DEMO data.
+        Queries the live SAR provider over the extent above. If the provider cannot serve it the scan
+        fails visibly rather than returning substituted data.
       </p>
 
       <div className="border-t border-[var(--df-border)] pt-3">
@@ -1001,20 +961,6 @@ export function ScanSurface({ scan, store }: { scan: ScanState; store: AppStore 
         <span className="font-mono text-[10px] text-[var(--df-text-dim)]">
           {scan.scanId ?? 'no scan'}
         </span>
-        {scan.runtimeMode && (
-          <span
-            data-df-scan-mode={scan.runtimeMode}
-            className={[
-              'rounded-[4px] px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-[0.14em]',
-              scan.runtimeMode === 'DEMO'
-                ? 'bg-[var(--df-warning)] text-black'
-                : 'bg-[var(--df-success)] text-black',
-            ].join(' ')}
-          >
-            {scan.runtimeMode}
-            {scan.synthetic ? ' Â· SYNTHETIC' : ''}
-          </span>
-        )}
       </div>
 
       <p className="font-mono text-[11px] text-[var(--df-text)]" data-df-scan-stage>
@@ -1206,8 +1152,7 @@ function AnalyticsSurface({
       {targets && (
         <>
           <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
-            {targets.scan_id} Â· {targets.runtime_mode}
-            {targets.synthetic ? ' Â· synthetic' : ''}
+            {targets.scan_id} Â· {targets.runtime_mode} provenance
           </p>
           <dl className="space-y-0.5">
             {Object.entries(targets.counts).map(([key, value]) => (

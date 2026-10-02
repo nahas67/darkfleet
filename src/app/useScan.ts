@@ -35,8 +35,13 @@ export interface ScanState {
   /** Terminal failure detail reported by the backend. Never synthesised. */
   readonly error: string | null;
   readonly terminal: boolean;
-  /** Mode of THIS job, taken from the backend's own response. */
+  /**
+   * Provenance the BACKEND reported for this job, echoed verbatim. There is no
+   * synthetic runtime to select, so this is metadata about the job rather than
+   * a mode the user chooses — the value is always `REAL` in production.
+   */
   readonly runtimeMode: RuntimeMode | null;
+  /** Backend-reported provenance flag. Kept as reported; never assumed false. */
   readonly synthetic: boolean | null;
   readonly connection: ConnectionState;
   /** Stage strings the backend sent that this build does not model. */
@@ -104,7 +109,7 @@ export function withScanAccepted(
   return {
     ...IDLE_SCAN_STATE,
     scanId: accepted.scan_id,
-    // The accepted stage is authoritative about which mode this job runs in.
+    // Provenance straight from the accept response, not a local choice.
     runtimeMode: accepted.runtime_mode,
     synthetic: accepted.synthetic,
     connection: 'CONNECTING',

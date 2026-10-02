@@ -550,11 +550,11 @@ describe('dispose', () => {
 describe('syncGlobeLayers', () => {
   const scan = {
     scan_id: 'DF-0001',
-    runtime_mode: 'DEMO',
+    runtime_mode: 'REAL',
     synthetic: true,
     scene: {
       provider: 'sim',
-      collection: 'demo',
+      collection: 'sentinel-1-rtc',
       item_id: 'SIM-1',
       platform: 'Simulation',
       acquisition_time: '2026-02-01T00:00:00Z',

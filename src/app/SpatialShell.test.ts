@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ScanLauncher, ScanSurface, SpatialShell } from './SpatialShell.tsx';
+import { ScanLauncher, ScanSurface, SpatialShell, buildScanRequest, parseBbox } from './SpatialShell.tsx';
 import {
   ADVANCED_LAYER_IDS,
   appStore,
@@ -22,7 +22,6 @@ import {
   makeCloseHandler,
   makeLayerOpacityHandler,
   makeLayerVisibilityHandler,
-  makeModeHandler,
   makeSurfaceHandler,
   shellKeyHandler,
   summarizeProviders,
@@ -55,10 +54,10 @@ import {
   toProvidersHealth,
   ApiError,
 } from './useApi.ts';
-import type { FetchLike, HealthResponse, ScanTargetsResponse } from './useApi.ts';
+import type { FetchLike, HealthResponse, ScanTargetsResponse, SceneSummary } from './useApi.ts';
 import { LAYER_DEFS } from '../globe/registry.ts';
 import { SCAN_PIPELINE } from '../types/api.ts';
-import type { RuntimeMode, ScanStage } from '../types/api.ts';
+import type { BoundingBox, ScanStage } from '../types/api.ts';
 
 // ------------------------------------------------------------------- helpers
 
@@ -87,7 +86,7 @@ function stubFetch(routes: Record<string, unknown>): {
 
 const HEALTH: HealthResponse = {
   checked_at: '2026-01-02T03:04:05Z',
-  runtime_mode: 'DEMO',
+  runtime_mode: 'REAL',
   probe: 'live',
   providers: [
     {
@@ -229,54 +228,56 @@ describe('SpatialShell structure', () => {
   });
 });
 
-// ------------------------------------------------------------------ mode pill
+// -------------------------------------------------- no runtime mode anywhere
+//
+// The synthetic runtime was removed from the product. These tests assert the
+// ABSENCE of the mode control rather than its styling: there is no mode to
+// pick, so no surface may offer one, and nothing may imply the product can
+// fabricate data.
 
-describe('DEMO / REAL pill (UI-021)', () => {
-  it('reflects store state: DEMO active, REAL inactive', () => {
-    const html = renderShell({ mode: 'DEMO' });
-    const demo = html.match(/<button[^>]*data-df-mode="DEMO"[^>]*>/)?.[0] ?? '';
-    const real = html.match(/<button[^>]*data-df-mode="REAL"[^>]*>/)?.[0] ?? '';
-    expect(demo).toContain('aria-pressed="true"');
-    expect(real).toContain('aria-pressed="false"');
-  });
-
-  it('reflects store state: REAL active, DEMO inactive', () => {
-    const html = renderShell({ mode: 'REAL' });
-    const demo = html.match(/<button[^>]*data-df-mode="DEMO"[^>]*>/)?.[0] ?? '';
-    const real = html.match(/<button[^>]*data-df-mode="REAL"[^>]*>/)?.[0] ?? '';
-    expect(real).toContain('aria-pressed="true"');
-    expect(demo).toContain('aria-pressed="false"');
-  });
-
-  it('styles DEMO and REAL differently so the active one is unmistakable', () => {
-    // The button for `mode` as rendered while `mode` is the active store mode.
-    const button = (mode: RuntimeMode): string =>
-      renderShell({ mode })
-        .match(new RegExp(`<button[^>]*data-df-mode="${mode}"[^>]*>`))?.[0] ?? '';
-
-    const activeDemo = button('DEMO');
-    const inactiveDemo = button('REAL');
-    expect(activeDemo).not.toBe('');
-    expect(activeDemo).not.toBe(inactiveDemo);
-    // DEMO active is the loud warning colour; REAL active is the success colour.
-    expect(activeDemo).toContain('var(--df-warning)');
-    expect(button('REAL')).toContain('var(--df-success)');
-  });
-
-  it('names both modes in their accessible labels', () => {
+describe('runtime mode is not a user choice', () => {
+  it('renders no mode toggle anywhere in the shell', () => {
     const html = renderShell();
-    expect(html).toContain('aria-label="Runtime mode: DEMO, synthetic data"');
-    expect(html).toContain('aria-label="Runtime mode: REAL, live provider data"');
+    expect(html).not.toContain('data-df-mode');
+    expect(html).not.toContain('Runtime mode');
   });
 
-  it('defaults to DEMO, never silently claiming REAL', () => {
-    expect(initialState().mode).toBe('DEMO');
+  it('never names a synthetic mode in any accessible label', () => {
+    for (const surface of [
+      'LAYERS', 'SAR', 'AIS', 'MORE', 'TIME', 'VIEW', 'SCAN', 'SEARCH',
+      'CORRELATE', 'ANALYTICS',
+    ] as SurfaceId[]) {
+      const html = renderShell({ openSurface: surface });
+      expect(html.toLowerCase()).not.toContain('demo');
+      expect(html.toLowerCase()).not.toContain('synthetic');
+    }
   });
 
-  it('switches mode through the exported handler', () => {
+  it('keeps the top bar essentials the mode pill used to sit beside', () => {
+    const html = renderShell();
+    expect(html).toContain('DARKFLEET');
+    expect(html).toContain('data-df-provider="SAR"');
+    expect(html).toContain('data-df-provider="AIS"');
+    expect(html).toContain('03:04:05Z');
+    expect(html).toContain('aria-label="Settings and source health"');
+  });
+
+  it('leaves no dangling aria-pressed behind in the top bar', () => {
+    // The removed pill carried two `aria-pressed` buttons. Nothing it owned may
+    // survive as an orphaned pressed-state attribute.
+    const header = renderShell().slice(0, renderShell().indexOf('</header>'));
+    expect(header).not.toContain('aria-pressed');
+  });
+
+  it('has no mode field on the store state at all', () => {
+    expect(Object.keys(initialState())).not.toContain('mode');
+    expect('mode' in initialState()).toBe(false);
+  });
+
+  it('exposes no mode setter on the store contract', () => {
     const store = createStore();
-    makeModeHandler(store, 'REAL')();
-    expect(store.getState().mode).toBe('REAL');
+    expect(Object.keys(store)).not.toContain('setMode');
+    expect('setMode' in store).toBe(false);
   });
 });
 
@@ -304,7 +305,10 @@ describe('Layers panel', () => {
       const row = html.slice(html.indexOf(`data-df-layer="${id}"`));
       const tag = row.match(/<button[^>]*>/)?.[0] ?? '';
       expect(tag).toContain('disabled');
-      expect(tag).toContain('not available until CP15');
+      // The reason must name the real cause: no data source. The old copy
+      // blamed a milestone ("until CP15"), which is not why it is gated.
+      expect(tag).toContain('no data source');
+      expect(tag).not.toContain('until CP15');
     }
   });
 
@@ -532,11 +536,11 @@ describe('useScan: real SSE stage events', () => {
   it('folds real stage events onto state in order', () => {
     let state = withScanAccepted(IDLE_SCAN_STATE, {
       scan_id: 'scan-1',
-      runtime_mode: 'DEMO',
-      synthetic: true,
+      runtime_mode: 'REAL',
+      synthetic: false,
     });
-    expect(state.runtimeMode).toBe('DEMO');
-    expect(state.synthetic).toBe(true);
+    expect(state.runtimeMode).toBe('REAL');
+    expect(state.synthetic).toBe(false);
     expect(state.connection).toBe('CONNECTING');
 
     for (const stage of ['SEARCHING_SCENE', 'READING_SAR', 'CORRELATING'] as ScanStage[]) {
@@ -594,8 +598,8 @@ describe('useScan: real SSE stage events', () => {
     const serialised = JSON.stringify(
       applyStageEvent(withScanAccepted(IDLE_SCAN_STATE, {
         scan_id: 'scan-1',
-        runtime_mode: 'DEMO',
-        synthetic: true,
+        runtime_mode: 'REAL',
+        synthetic: false,
       }), { stage: 'DETECTING', timestamp: '', detail: '' }),
     );
     expect(serialised).not.toMatch(/percent|progress|ratio|fraction|0\.\d+/i);
@@ -626,8 +630,8 @@ describe('useScan: real SSE stage events', () => {
     const scan: ScanState = applyStageEvent(
       withScanAccepted(IDLE_SCAN_STATE, {
         scan_id: 'scan-1',
-        runtime_mode: 'DEMO',
-        synthetic: true,
+        runtime_mode: 'REAL',
+        synthetic: false,
       }),
       { stage: 'CORRELATING', timestamp: '', detail: 'matching' },
     );
@@ -635,8 +639,9 @@ describe('useScan: real SSE stage events', () => {
     // a state built from real backend stage events.
     const html = renderToStaticMarkup(createElement(ScanSurface, { scan, store: createStore() }));
 
-    expect(html).toContain('data-df-scan-mode="DEMO"');
-    expect(html).toContain('SYNTHETIC');
+    // No mode chip: there is no mode to report or to pick.
+    expect(html).not.toContain('data-df-scan-mode');
+    expect(html.toLowerCase()).not.toContain('synthetic');
     // Real stage name plus a counter, never a percentage or a progress bar.
     expect(html).toContain('Correlating');
     expect(html).toContain('stage 11 of 14');
@@ -645,15 +650,18 @@ describe('useScan: real SSE stage events', () => {
     expect(stageLabel(scan.stage as ScanStage)).toBe('Correlating');
   });
 
-  it('labels a REAL scan without a synthetic marker', () => {
+  it('labels a completed scan with no mode marker at all', () => {
     const scan = applyStageEvent(withScanAccepted(IDLE_SCAN_STATE, {
       scan_id: 'scan-2',
       runtime_mode: 'REAL',
       synthetic: false,
     }), { stage: 'COMPLETE', timestamp: '', detail: '' });
     const html = renderToStaticMarkup(createElement(ScanSurface, { scan, store: createStore() }));
-    expect(html).toContain('data-df-scan-mode="REAL"');
-    expect(html).not.toContain('SYNTHETIC');
+    // The panel shows the job, not a mode the operator picked.
+    expect(html).toContain('scan-2');
+    expect(html).toContain('Complete');
+    expect(html).not.toContain('data-df-scan-mode');
+    expect(html.toLowerCase()).not.toContain('synthetic');
     expect(html).not.toContain('%');
   });
 
@@ -682,15 +690,38 @@ describe('useScan: real SSE stage events', () => {
 describe('useApi typed client', () => {
   it('posts a scan with JSON content type', async () => {
     const { fetchImpl, calls } = stubFetch({
-      '/api/scans': { scan_id: 'scan-1', status: 'QUEUED', runtime_mode: 'DEMO', synthetic: true },
+      '/api/scans': { scan_id: 'scan-1', status: 'QUEUED', runtime_mode: 'REAL', synthetic: false },
     });
     const client = createApiClient(fetchImpl);
-    const accepted = await client.createScan({
-      runtime_mode: 'DEMO',
-      bbox: [0, 0, 1, 1],
-    });
+    const accepted = await client.createScan({ bbox: [0, 0, 1, 1] });
     expect(accepted.scan_id).toBe('scan-1');
     expect(calls).toEqual(['/api/scans']);
+  });
+
+  it('never puts runtime_mode in the scan request body', async () => {
+    // The backend rejects `runtime_mode` with 422 extra_forbidden, so the
+    // client must not be able to send it even by accident.
+    const bodies: string[] = [];
+    const fetchImpl: FetchLike = async (_input, init) => {
+      bodies.push(String(init?.body ?? ''));
+      return new Response(
+        JSON.stringify({ scan_id: 'scan-1', status: 'QUEUED', runtime_mode: 'REAL', synthetic: false }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+    const client = createApiClient(fetchImpl);
+    await client.createScan({ bbox: [1, 2, 3, 4] });
+    await client.createScan({ bbox: [1, 2, 3, 4], provider: 'cdse', product: 'GRD' });
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) {
+      expect(body).not.toContain('runtime_mode');
+      expect(Object.keys(JSON.parse(body))).not.toContain('runtime_mode');
+    }
+  });
+
+  it('never sends a runtime_mode filter on the scene query', () => {
+    expect(scenesUrl({ bbox: [1, 2, 3, 4] })).not.toContain('runtime_mode');
+    expect(scenesUrl()).toBe('/api/scenes');
   });
 
   it('targets the documented endpoint paths', async () => {
@@ -820,8 +851,8 @@ describe('AppStore', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('exports a process store defaulting to DEMO with no surface open', () => {
-    expect(appStore.getState().mode).toBe('DEMO');
+  it('exports a process store with no mode and no surface open', () => {
+    expect('mode' in appStore.getState()).toBe(false);
     expect(appStore.getState().openSurface).toBeNull();
   });
 });
@@ -948,12 +979,15 @@ describe('scan launcher', () => {
     // scan could not be launched from anywhere in the UI.
     const html = renderLauncher();
     expect(html).toContain('data-df-scan-launcher');
-    expect(html).toContain('Run DEMO scan');
+    expect(html).toContain('Run live scan');
     expect(html).toContain('df-scan-bbox');
   });
 
-  it('labels the mode it will actually run', () => {
-    expect(renderLauncher({ store: createStore({ mode: 'REAL' }) })).toContain('Run REAL scan');
+  it('names the run control and never offers a mode choice', () => {
+    const html = renderLauncher();
+    expect(html).toContain('aria-label="Run live scan"');
+    expect(html).not.toContain('aria-pressed');
+    expect(html).not.toContain('data-df-mode');
   });
 
   it('disables the control while a scan is in flight', () => {
@@ -965,5 +999,76 @@ describe('scan launcher', () => {
   it('exposes the bbox field with an accessible name', () => {
     const html = renderLauncher();
     expect(html).toContain('Bounding box: min_lon, min_lat, max_lon, max_lat');
+  });
+
+  it('does not promise a simulated fallback', () => {
+    const html = renderLauncher();
+    expect(html.toLowerCase()).not.toContain('demo');
+    expect(html.toLowerCase()).not.toContain('simulat');
+    expect(html).toContain('fails visibly rather than returning substituted data');
+  });
+});
+
+// ---------------------------------------------------- scan request assembly
+//
+// Extracted as pure functions so the exact body sent to `POST /api/scans` is
+// assertable without a DOM. The backend removed the synthetic runtime, so the
+// request must carry only the extent and the catalogued scene.
+
+describe('scan request assembly', () => {
+  const CATALOGUED: SceneSummary = {
+    id: 'S1A_IW_GRDH',
+    provider: 'cdse',
+    platform: 'SENTINEL-1A',
+    product: 'GRD',
+    polarization: 'VV',
+    acquisition_time: '2026-01-02T03:04:05Z',
+    bbox: [10, 50, 11, 51],
+    resolution_meters: 10,
+    georeferencing: null,
+    sea_clutter_level: null,
+    runtime_mode: 'REAL',
+    synthetic: false,
+  };
+
+  it('parses a four-number extent', () => {
+    expect(parseBbox('10, 50, 11, 51')).toEqual({ bbox: [10, 50, 11, 51] });
+  });
+
+  it('rejects a malformed extent with the operator-facing reason', () => {
+    expect(parseBbox('10, 50')).toHaveProperty('error');
+    expect(parseBbox('')).toHaveProperty('error');
+    expect(parseBbox('a, b, c, d')).toHaveProperty('error');
+  });
+
+  it('rejects an inverted extent instead of silently swapping it', () => {
+    expect(parseBbox('11, 50, 10, 51')).toHaveProperty('error');
+    expect(parseBbox('10, 51, 11, 50')).toHaveProperty('error');
+  });
+
+  it('sends only the bbox when no scene was catalogued', () => {
+    const request = buildScanRequest([10, 50, 11, 51], null);
+    expect(Object.keys(request)).toEqual(['bbox']);
+    expect(JSON.stringify(request)).not.toContain('runtime_mode');
+  });
+
+  it('sends only bbox and the catalogued scene id', () => {
+    const request = buildScanRequest([10, 50, 11, 51], CATALOGUED);
+    expect(Object.keys(request).sort()).toEqual(['bbox', 'scene_id']);
+    expect(request).toEqual({ bbox: [10, 50, 11, 51], scene_id: 'S1A_IW_GRDH' });
+    expect(JSON.stringify(request)).not.toContain('runtime_mode');
+  });
+
+  it('only ever sends the request fields the backend accepts', () => {
+    const allowed = new Set([
+      'bbox', 'scene_id', 'datetime_range', 'provider', 'product', 'cfar_config',
+    ]);
+    for (const request of [
+      buildScanRequest([0, 0, 1, 1], null),
+      buildScanRequest([0, 0, 1, 1], CATALOGUED),
+      { bbox: [0, 0, 1, 1], provider: 'cdse', product: 'GRD' },
+    ]) {
+      for (const key of Object.keys(request)) expect(allowed.has(key)).toBe(true);
+    }
   });
 });

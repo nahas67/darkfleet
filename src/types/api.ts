@@ -31,7 +31,19 @@ export const CLASSIFICATION_VALUES: readonly TargetClassification[] = [
   'UNRESOLVED',
 ];
 
-export type RuntimeMode = 'DEMO' | 'REAL';
+/**
+ * Runtime mode as REPORTED BY THE BACKEND.
+ *
+ * The synthetic ("DEMO") runtime was removed from the product: there is no
+ * synthetic mode to select, `POST /api/scans` rejects `runtime_mode` as an
+ * unknown field, and every scan is a real query against a live provider. This
+ * union therefore has a single member.
+ *
+ * It is kept rather than deleted because the backend still reports the field on
+ * scan, job and persisted-record payloads as provenance. Only the REQUEST side
+ * of `runtime_mode` is gone — see {@link ScanRequest}.
+ */
+export type RuntimeMode = 'REAL';
 
 /** The 15 canonical job stages, in pipeline order. */
 export type ScanStage =
@@ -205,8 +217,14 @@ export interface JobState {
   synthetic: boolean;
 }
 
+/**
+ * Scan creation request.
+ *
+ * `runtime_mode` is deliberately ABSENT: the backend rejects it with 422
+ * `extra_forbidden`, because there is no synthetic mode to ask for. The client
+ * must never send it — a scan is always a real provider query.
+ */
 export interface ScanRequest {
-  runtime_mode: RuntimeMode;
   bbox: BoundingBox;
   scene_id?: string;
   datetime_range?: string;
@@ -231,9 +249,12 @@ export type DisplayMode = 'WORLD' | 'SAR' | 'SAR_CONTRAST' | 'CORRELATION' | 'AN
 
 /**
  * Authoritative layer registry ids. Advanced layers (MULTIPASS_TRACKS,
- * WAKE_GEOMETRY, ML_OUTPUT, TEMPORAL_ANOMALIES) are declared here but carry
- * `capabilityState: NOT_AVAILABLE` until CP15 implements them, so the UI
- * hides/disables them instead of fabricating data (UI-029/030, correction #8).
+ * WAKE_GEOMETRY, ML_OUTPUT, TEMPORAL_ANOMALIES) are DECLARED HERE BUT HAVE NO
+ * DATA SOURCE — the backend does not serve any of them, so the registry marks
+ * them `capabilityState: NOT_AVAILABLE` and the UI shows them disabled with a
+ * reason instead of fabricating data (UI-029/030, correction #8). The gate is
+ * the missing source, not a pending milestone: nothing in the frontend can
+ * enable them.
  */
 export type LayerId =
   | 'BASE_WORLD'

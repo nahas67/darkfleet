@@ -6,7 +6,9 @@
  * behaviour testable without a DOM and keeps the render layer declarative.
  *
  * Rules encoded here (UI-011, UI-021, UI-029/030, API-011):
- *  - Runtime mode (DEMO | REAL) is application state, never inferred.
+ *  - There is NO runtime mode. The synthetic runtime was removed from the
+ *    product, so the store holds nothing to switch and no surface offers a
+ *    choice: every scan is a real query against a live provider.
  *  - NOT_AVAILABLE layers can never be made visible or emitted; reducers are
  *    a no-op for them so no surface can fabricate an advanced layer.
  *  - No analytics are computed here. Counters shown by the shell are passed
@@ -25,7 +27,6 @@ import type {
   ProviderHealthEntry,
   ProvidersHealth,
   ProviderState,
-  RuntimeMode,
 } from '../types/api.ts';
 
 /** Every floating contextual surface the shell can open. */
@@ -93,7 +94,12 @@ export const LAYER_GROUP_ORDER = [
 
 export type LayerGroupId = (typeof LAYER_GROUP_ORDER)[number];
 
-/** Advanced layers gated on CP15; surfaced as unavailable, never fabricated. */
+/**
+ * Advanced layers declared by the registry WITHOUT a data source. The backend
+ * serves none of them, so they stay `NOT_AVAILABLE` and are surfaced as an
+ * explicit disabled list. The gate is the missing source, not a pending
+ * milestone — they are never fabricated.
+ */
 export const ADVANCED_LAYER_IDS: readonly LayerId[] = [
   'MULTIPASS_TRACKS',
   'WAKE_GEOMETRY',
@@ -113,8 +119,6 @@ export interface LayerState {
 }
 
 export interface AppState {
-  /** DEMO or REAL. Never inferred, always explicit state (UI-021). */
-  readonly mode: RuntimeMode;
   /** At most one floating surface is open at a time. */
   readonly openSurface: SurfaceId | null;
   readonly layers: Readonly<Record<LayerId, LayerState>>;
@@ -144,7 +148,6 @@ export function initialLayerStates(): Record<LayerId, LayerState> {
 
 export function initialState(overrides: Partial<AppState> = {}): AppState {
   return {
-    mode: 'DEMO',
     openSurface: null,
     layers: initialLayerStates(),
     selectedTargetId: null,
@@ -159,10 +162,6 @@ export function initialState(overrides: Partial<AppState> = {}): AppState {
 // ------------------------------------------------------------------ reducers
 // Every reducer returns the SAME object when nothing changes, so a store that
 // compares by identity never notifies subscribers for a no-op.
-
-export function withMode(state: AppState, mode: RuntimeMode): AppState {
-  return state.mode === mode ? state : { ...state, mode };
-}
 
 export function withOpenSurface(state: AppState, id: SurfaceId | null): AppState {
   return state.openSurface === id ? state : { ...state, openSurface: id };
@@ -362,7 +361,6 @@ export function providerTone(status: ProviderState): 'ok' | 'warn' | 'bad' | 'id
 export interface AppStore {
   getState(): AppState;
   subscribe(listener: () => void): () => void;
-  setMode(mode: RuntimeMode): void;
   openSurface(id: SurfaceId): void;
   toggleSurface(id: SurfaceId): void;
   closeSurface(): void;
@@ -396,7 +394,6 @@ export function createStore(overrides: Partial<AppState> = {}): AppStore {
   return {
     getState,
     subscribe,
-    setMode: (mode) => set(withMode(state, mode)),
     openSurface: (id) => set(withOpenSurface(state, id)),
     toggleSurface: (id) => set(withToggledSurface(state, id)),
     closeSurface: () => set(withClosedSurface(state)),
@@ -438,10 +435,6 @@ export function shellKeyHandler(store: AppStore): (event: { key: string }) => vo
   return (event) => {
     if (event.key === 'Escape') store.closeSurface();
   };
-}
-
-export function makeModeHandler(store: AppStore, mode: RuntimeMode): () => void {
-  return () => store.setMode(mode);
 }
 
 export function makeLayerVisibilityHandler(

@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from darkfleet import __version__
-from darkfleet.api.routes import ApiState, router
+from darkfleet.api.routes import ApiState, liveness_router, router
 from darkfleet.config.settings import Settings
 from darkfleet.config.settings import settings as default_settings
 from darkfleet.observability import configure as configure_logging
@@ -76,6 +76,7 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
+    application.include_router(liveness_router)
     application.include_router(router)
 
     @application.exception_handler(HTTPException)

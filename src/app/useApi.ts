@@ -178,11 +178,18 @@ export interface DebugLayerResponse {
   grid: number[][] | null;
 }
 
+/**
+ * Scene search parameters.
+ *
+ * There is no `runtime_mode` filter: the synthetic scene catalogue was removed,
+ * and the backend answers `?runtime_mode=DEMO` with 404
+ * `SYNTHETIC_SCENES_DISABLED`. Every scene this can return is a real
+ * acquisition from the provider probe.
+ */
 export interface SceneQuery {
   bbox?: BoundingBox;
   datetime?: string;
   provider?: string;
-  runtime_mode?: RuntimeMode;
 }
 
 /**
@@ -234,7 +241,6 @@ export function scenesUrl(query: SceneQuery = {}): string {
   if (query.bbox) params.set('bbox', query.bbox.join(','));
   if (query.datetime) params.set('datetime', query.datetime);
   if (query.provider) params.set('provider', query.provider);
-  if (query.runtime_mode) params.set('runtime_mode', query.runtime_mode);
   const qs = params.toString();
   return qs ? `${API_BASE}/scenes?${qs}` : `${API_BASE}/scenes`;
 }
@@ -244,6 +250,10 @@ export function scenesUrl(query: SceneQuery = {}): string {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface ApiClient {
+  /**
+   * Create a scan. The request is sent verbatim; `ScanRequest` carries no
+   * `runtime_mode` because the backend rejects it as an unknown field.
+   */
   createScan(request: ScanRequest): Promise<ScanAccepted>;
   getScanState(scanId: string): Promise<ScanStateResponse>;
   getScanTargets(scanId: string): Promise<ScanTargetsResponse>;

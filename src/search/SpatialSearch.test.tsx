@@ -122,8 +122,8 @@ const SCENE = {
   resolution_meters: 10,
   georeferencing: null,
   sea_clutter_level: null,
-  runtime_mode: 'DEMO' as const,
-  synthetic: true,
+  runtime_mode: 'REAL' as const,
+  synthetic: false,
 };
 
 const DATA: SearchData = {

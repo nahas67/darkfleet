@@ -37,7 +37,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from darkfleet import __processing_version__
+from darkfleet import __processing_version__, __version__
 from darkfleet.ais.archive import AisArchive
 from darkfleet.api.models import (
     DEFERRED_EXPORT_FORMATS,
@@ -84,6 +84,7 @@ __all__ = [
     "KNOWN_PROVIDERS",
     "ApiState",
     "ScanSpec",
+    "liveness_router",
     "router",
 ]
 
@@ -241,6 +242,30 @@ def get_state(request: Request) -> ApiState:
 State = Annotated[ApiState, Depends(get_state)]
 
 router = APIRouter(prefix="/api", tags=["darkfleet"])
+
+#: Liveness is served OUTSIDE the /api prefix on purpose, so an orchestrator
+#: probe cannot be mistaken for an analysis request.
+liveness_router = APIRouter(tags=["liveness"])
+
+
+@liveness_router.get("/health", summary="Liveness probe")
+def liveness() -> dict[str, Any]:
+    """Is this process serving requests?
+
+    Deliberately touches NOTHING external: no provider probe, no filesystem
+    walk, no network. Liveness answers "is the app up", and readiness for the
+    providers is answered separately by ``/api/providers/health``. Conflating the
+    two is a real failure mode -- it was, in fact: the container healthcheck
+    pointed at the provider-status endpoint, so a slow third party pushed the
+    probe past its timeout and Docker restarted a perfectly healthy API in a
+    loop.
+    """
+    return {
+        "status": "ok",
+        "service": "darkfleet-api",
+        "version": __version__,
+        "processing_version": __processing_version__,
+    }
 
 
 # ------------------------------------------------------------ error helpers
