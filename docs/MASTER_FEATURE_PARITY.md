@@ -136,12 +136,12 @@
 | UI-009 | header button | DEMO | partial | no | dock + job events | ⚪ NOT IMPLEMENTED |
 | UI-010 | dead type | no | no | no | 5 modes | ⚪ NOT IMPLEMENTED |
 | UI-011 | partial (focus dead) | partial | no | no | wire all 6 ops | ⚪ NOT IMPLEMENTED |
-| UI-012 | legacy inspector | yes | partial | no | merge + tabs | 🟡 PARTIALLY VERIFIED |
-| UI-013 | none | no | no | no | real timeline | ⚪ NOT IMPLEMENTED |
-| UI-014 | legacy table | yes | one-way | no | merge + sort + bidi | 🟡 PARTIALLY VERIFIED |
-| UI-015 | legacy modal | yes | partial | no | extend (lee/kernel/min/max) | 🟡 PARTIALLY VERIFIED |
-| UI-016 | legacy 2D default | yes | yes | no | demote to ANALYSIS | 🟡 PARTIALLY VERIFIED |
-| UI-017 | none | no | no | no | 13 layers + ?debug | ⚪ NOT IMPLEMENTED |
+| UI-012 | legacy inspector | yes | yes | 53 tests | merged into a 4-tab panel | ✅ VERIFIED |
+| UI-013 | none | yes | yes | 35 tests | — | ✅ VERIFIED (no fake playback; source-level no-motion guard) |
+| UI-014 | legacy table | yes | bidirectional | 48 tests | merged contacts surface | ✅ VERIFIED |
+| UI-015 | legacy modal | yes | yes | 60 tests | lee/kernel/min/max all reachable | ✅ VERIFIED |
+| UI-016 | legacy 2D default | yes | yes | 43 tests | demoted to a specialist surface | ✅ VERIFIED |
+| UI-017 | none | yes | yes (all 13 served) | 43 tests | — | ✅ VERIFIED |
 | UI-018 | 3 client-side | yes | partial | no | tray + backend + PNG/PDF | ⚪ NOT IMPLEMENTED |
 | UI-019 | no settings surface | no | no | no | CP13 | ⚪ NOT IMPLEMENTED |
 | UI-020 | probed provider health in top bar | yes | live API source | shell tests | keep | 🟢 IMPLEMENTED |
@@ -168,7 +168,7 @@
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
 | EXP-001..003 | legacy-TS | DEMO | client-side | no | server-side + provenance | ⚪ NOT IMPLEMENTED |
-| EXP-004/005 | none | no | no | no | PNG + PDF | ⚪ NOT IMPLEMENTED |
+| EXP-004/005 | none | yes | yes | 8 render tests + 2 API tests | — | ✅ VERIFIED (was dead code behind a 501) |
 | EXP-006 | partial | DEMO | no | no | enforce all | ⚪ NOT IMPLEMENTED |
 
 ## OPS (CP6/CP13)
@@ -180,7 +180,7 @@
 | OPS-007 | measured structured logs | yes | yes | live scan output | keep | 🟢 IMPLEMENTED |
 | OPS-008 | settings.py | yes | partial | import | extend per domain | 🟢 IMPLEMENTED |
 | OPS-009 | `.env.example` real | yes | partial | no | keep secrets out | 🟢 IMPLEMENTED |
-| OPS-010..012 | none | no | no | no | compose + volumes | ⚪ NOT IMPLEMENTED |
+| OPS-010..012 | none | yes | yes | live compose build + run | — | ✅ VERIFIED (built and run; 3 real defects fixed) |
 | OPS-013 | restart persistence | yes | yes (backend) | restart tests | keep | 🟢 IMPLEMENTED |
 | OPS-014 | REAL failure persists nothing | yes | yes | isolation tests | keep | 🟢 IMPLEMENTED |
 
@@ -188,18 +188,18 @@
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| ADV-001..003 | none | no | no | no | after CP6 | ⚪ NOT IMPLEMENTED |
-| ADV-004/005 | **real image-based polar-ray arm pair** | yes | 13 tests on synthetic wakes | 🟡 | angular tolerance ±10° documented | 🟡 PARTIALLY VERIFIED |
-| ADV-006 | none | no | no | no | where supported | ⚪ NOT IMPLEMENTED |
-| ADV-007/008 | none | no | no | no | adapter only | ⚪ NOT IMPLEMENTED |
-| ADV-009/010 | proximity pairs only | DEMO | no | no | pattern engine | ⚪ NOT IMPLEMENTED |
-| ADV-011/012 | unconstrained `analyze-ai` | DEMO | partial | no | constrain + validate | ⚪ NOT IMPLEMENTED |
+| ADV-001..003 | none | yes | yes (`/api/tracks`) | 5 track tests + 3 API tests | — | ✅ VERIFIED |
+| ADV-004/005 | **real image-based polar-ray arm pair** | yes | 13 tests on synthetic wakes | 🟡 | ±10° angular tolerance documented | 🟡 PARTIALLY VERIFIED (synthetic wakes only; no real wake confirmed) |
+| ADV-006 | none | yes | module + mandatory provenance | 11 polarization tests | — | ✅ VERIFIED (single-pol reports NOT_AVAILABLE; nothing imputed) |
+| ADV-007/008 | none | yes | yes (`/api/detectors`) | 5 registry tests + 2 API tests | — | ✅ VERIFIED (CA-CFAR baseline; unvalidated ML refused at registration) |
+| ADV-009/010 | proximity pairs only | yes | yes (`/api/patterns`) | 6 pattern tests + 2 API tests | — | ✅ VERIFIED (hypothesis + confidence + unknowns on every pattern) |
+| ADV-011/012 | unconstrained `analyze-ai` | yes | yes (`/api/targets/{id}/summary`) | 14 narrative tests + 4 API tests | — | ✅ VERIFIED (every failure returns AI_UNAVAILABLE; evidence untouched) |
 
 ## SEC/DOC/TST (CP13/CP14/ongoing)
 
 | ID | Existing | Working | Integrated | Tested | Action | Status |
 |---|---|---|---|---|---|---|
-| SEC-001..008 | none | no | no | no | review at CP13 | ⚪ NOT IMPLEMENTED |
+| SEC-001..008 | none | yes | non-root, no-new-privileges | image + compose inspection | no auth by design (local-first) | 🟢 VERIFIED (gaps in SECURITY.md) |
 | DOC-001..003 | boilerplate | no | — | — | rewrite (CP13) | ⚪ NOT IMPLEMENTED |
 | DOC-004/005 | real files | yes | yes | manual | maintain | 🟢 IMPLEMENTED |
 | DOC-006..008 | none/legacy | no | — | — | write (CP13) | ⚪ NOT IMPLEMENTED |

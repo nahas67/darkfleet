@@ -198,3 +198,140 @@ credentials, no synthetic input:
 - Approach changed twice after the Radon variant proved insensitive to wake
   strength — recorded in PLAN_CHANGES rather than quietly rewritten.
 - 13 wake tests · 158 backend tests · ruff clean · strict mypy clean.
+
+### CP15 remainder �?" multi-pass intelligence, polarization, detector registry, narrative
+
+- **Tracks (ADV-001..003)**. uild_tracks links ONLY AIS-associated detections.
+  An unmatched detection is not evidence of a track, so it is refused rather
+  than linked. Identity strength is capped at 0.85 and grows only saturating in
+  the pass count; the emitted statement always says identity is not confirmed.
+  Gaps record the implied speed and the plausible-surface-speed test. A
+  non-positive acquisition interval is reported as a DATA problem, not as an
+  implausible vessel �?" an earlier version printed "exceeds plausible surface
+  speed" for a zero interval, which would have been a fabricated finding.
+  /api/tracks returns an empty history as zero tracks with a note, not an error.
+- **Polarization (ADV-006)**. extract_features computes per-pol statistics and
+  the VH/VV and HV/HH discriminators only when both polarizations are present.
+  Single-pol acquisitions report the dual-pol features as NOT_AVAILABLE with
+  the reason recorded in provenance. The VH/VV ship flag is labelled a flag, not
+  a probability, and is not calibrated for the product. Ratio computation
+  excludes noise-dominated pixels (denominator below -25 dB) because their ratio
+  is an artefact of dividing by noise. 11 tests.
+- **Detector registry (ADV-007/008)**. CA-CFAR is registered as the real shipped
+  baseline and its run path executes the production CFAR + connected-components
+  code. An ML or ensemble adapter lacking BOTH weights_digest and validation_data
+  is refused at registration, so it cannot appear in /api/detectors. No trained
+  weights ship: no maintained open Sentinel-1 GRD vessel-detection weight set
+  exists (RESEARCH_REGISTRY).
+- **Temporal patterns (ADV-009/010)**. Association-gap, repeated-unmatched and
+  co-located-track families. Each pattern carries an observation, a hypothesis, a
+  bounded confidence and explicit unknowns. A leading/trailing run of absent AIS
+  is archive edge, not a gap, and is not reported. The hypothesis text names
+  carriage exemption, reception shadow and receiver outage as equally
+  consistent with the data.
+- **Narrative (ADV-011/012)**. Strict five-section document. Every failure mode
+  returns AI_UNAVAILABLE with a reason and leaves the deterministic evidence
+  untouched. Model ids must be auditable (provider/name[:version]) or refused.
+  The fabrication guard is TWO-TIER and this was the design correction worth
+  recording: an earlier word-whitelist approach rejected the shipped template's
+  own analytic vocabulary and would have needed constant maintenance. Numbers
+  and named entities are checked against the evidence for EVERY writer, because
+  those are the tokens that carry claims about the world. Only an UNTRUSTED
+  adapter is additionally held to the closed analytic vocabulary, because the
+  shipped template is deterministic f-strings and cannot hallucinate. Accusatory
+  vocabulary is refused outright in any writer.
+- New endpoints: /api/tracks, /api/patterns, /api/detectors,
+  /api/targets/{id}/summary. 216 backend tests -> ruff clean -> strict mypy clean.
+### CP10/CP11 — evidence, timeline, contacts, analysis workbench
+
+- Four surfaces delivered and tested in isolation, then found to be UNREACHABLE
+  from the shell. Same failure mode CP12 had with its PNG/PDF renderers: complete,
+  tested, dead. Wiring them is CP14 below, and that is where the real bugs were.
+- UI-012/013/014: 4-tab inspector with OBSERVED / HYPOTHESES / UNKNOWNS kept as
+  three separate blocks; real acquisition-time timeline with Delta-t labels;
+  sortable + filterable contacts. Neutral language registry for SAR_UNMATCHED;
+  missing data renders "not established", never a zero or a null.
+- Timeline has a source-level guard test: after comment-stripping the file
+  contains no setInterval / setTimeout / requestAnimationFrame / autoplay /
+  fetch. Playback is not simulated.
+- UI-015/016/017: analysis workbench and all 13 debug layers. Five implementation
+  bugs caught by the lane's own tests: applyPreset broke object identity;
+  toCfarRequestParams emitted NaN for speckleFilter; scaleBar invented a distance
+  over a zero-width AOI; hasReportedStats counted always-numeric counters as real
+  statistics; AOI drag state was recreated on every render.
+- Legacy scale bar used a flat 111320 m/deg regardless of latitude. Replaced with
+  metres-per-degree at the AOI centre latitude.
+- The high-sensitivity preset changes 6 keys, not the 4 the brief assumed: the
+  legacy UI also moved minPixels 3->2 and maxPixels 1000->1200.
+- 136 + 103 frontend tests added. 167 -> 406 after both lanes.
+
+### CP13 — Docker build, run and OSS close-out
+
+Built and RAN both images. The build failed on the first attempt and two further
+defects only appeared once the stack was live. Recording all three:
+
+1. **The image did not build.** python:3.12-slim moved from Debian bookworm to
+   trixie, so pinned libgdal32 / libgeos-c1v5 / libproj25 no longer resolve and
+   apt-get exited 100. Re-pinning the versions would only break again on the next
+   base bump, so they were removed after verifying that rasterio 1.5.2 ships
+   self-contained wheels (GDAL 3.12.2 with no system GDAL present). The one
+   library the wheel genuinely needs from the OS is libexpat.so.1, so only
+   libexpat1 plus curl for the healthcheck are installed.
+
+2. **Every REAL scan without an explicit time window failed.** stac_search always
+   sent a datetime key; an empty string is a validation error, not an unfiltered
+   search, and Planetary Computer answered "Datetime parameter  is invalid."
+   The key is now omitted when the range is blank. 8 regression tests.
+
+3. **PNG/PDF export answered 501.** CP12 wrote render_png / render_pdf but never
+   wired them into the route, so both were dead code behind a placeholder test
+   that asserted the 501. Now rendered server-side; the placeholder test was
+   replaced by assertions on real artefact magic bytes.
+
+A rendering defect was found by INSPECTING the exported image rather than by
+reading the code: the no-data marker (40,40,40) was a grey, and the data ramp is
+pure greyscale, so valid water at low backscatter was indistinguishable from
+excluded land. Measured on the output: 95.1% of the frame was ambiguous. No-data
+is now (26,26,74), outside the ramp, and the caption states the excluded and
+analysed fractions plus the dB stretch so an excluded area can never read as an
+observed absence of returns. Re-measured on real data: no-data is exactly the
+68.1% land fraction, water occupies the ramp.
+
+Verified in the container against real data: Sentinel-1D
+S1D_IW_GRDH_1SDV_20260927T112445, EPSG:32648, VV, 10 m, 23 detections,
+synthetic=false, all 13 debug layers serving, all 5 export formats producing real
+bytes. A sample export is committed at docs/assets/DF-0001-export-sample.png.
+
+### CP14 — Wiring, and the defects only wiring could expose
+
+Four delivered surfaces were mounted. Mounting them found four real bugs:
+
+1. **A scan could not be started from the UI at all.** useScan().startScan and
+   client.createScan both existed with no caller, so the Scan command opened a
+   status panel describing a job that could never be launched. ScanLauncher now
+   binds them. It has no "whole world" default, because a REAL scan over an
+   arbitrary extent would either return nothing or download an unreasonable
+   amount of data.
+2. **The default bbox always failed in DEMO.** DEMO scenes are synthesised on a
+   fixed grid and the backend correctly rejects a mismatched extent, so the
+   launcher reads the extent from the backend's own scene catalogue.
+3. **Targets never refreshed.** The fetch keyed on scan id alone; one that raced
+   the running job got 409, and because nothing re-ran, Contacts, the inspector
+   and the timeline stayed empty after the scan finished until a manual reload.
+   Confirmed fixed in the container logs: 409s during the run, 200 on completion.
+4. **The payload shape was never actually checked.** ScanTargetsResponse.targets
+   was Array<Record<string, unknown>>, an escape hatch that hid two mismatches:
+   the backend persists the field as `cls` while every surface reads
+   `classification` (undefined against the real API), and
+   AisAssociation.aisAssociationConfidence was declared but never sent. Both are
+   reconciled by an explicit tested normaliser. The wire format is deliberately
+   unchanged, because the parity suite and the exports all read `cls`.
+
+Also: the shell offered a `csv` export the backend rejects with 400; ExportFormat
+now matches the backend's supported set exactly. The TimelineSurface placeholder,
+which claimed the backend had no timeline source, was removed, as was the stale
+"unavailable until CP15" copy.
+
+Verified by driving the containerised stack in Chrome: a REAL scan launched from
+the UI completed with 23 detections and synthetic=false; a DEMO scan completed in
+224 ms; Contacts rendered its 9 sortable columns against live data.
