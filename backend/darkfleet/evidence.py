@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import __classification_schema__, __processing_version__, __version__
+from .marine import describe_position
+from .marine import provenance as marine_provenance
 
 
 def build_provenance(
@@ -40,6 +42,9 @@ def build_provenance(
         "recorded_at": datetime.now(UTC).isoformat(),
         "runtime_mode": runtime_mode,
         "synthetic": synthetic,
+        # GEO-001 provenance. Public domain, so it carries no attribution duty,
+        # but the source commit is recorded so the answer is reproducible.
+        "marine_regions": marine_provenance(),
         "sar": {
             "provider": provider,
             "collection": collection,
@@ -72,11 +77,19 @@ def target_evidence(
     """Per-target evidence slice: observation, association, confidence, uncertainty."""
     corr = target.get("corr", {})
     decomposition = corr.get("scoreDecomposition")
+    lat, lon = target["lat"], target["lon"]
     return {
         "target_id": target["id"],
         "classification": target["cls"],
         "observed": {
-            "position": {"lat": target["lat"], "lon": target["lon"]},
+            "position": {
+                "lat": lat,
+                "lon": lon,
+                # GEO-001: the named water body, so evidence reads as geography
+                # rather than as a bare coordinate pair. Never invented: an
+                # unmatched position reports kind/primary explicitly.
+                "marine_region": describe_position(lat, lon),
+            },
             "apparent_footprint_m": {"length": target["lenM"], "width": target["widM"]},
             "orientation_deg": target["hdg"],
             "mean_backscatter_db": target["meanDb"],
