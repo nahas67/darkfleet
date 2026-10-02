@@ -201,6 +201,10 @@ class ScanTargetsResponse(BaseModel):
     stage: str
     runtime_mode: str
     synthetic: bool
+    #: The extent this scan covered. Needed by any surface that has to describe
+    #: the same water (acquisition planning, exports), so it travels with the
+    #: targets rather than requiring a second request.
+    aoi: list[float] = Field(default_factory=list)
     count: int
     ais_only_count: int
     counts: dict[str, int] = Field(default_factory=dict)

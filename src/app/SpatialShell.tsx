@@ -67,12 +67,13 @@ import type {
   SurfaceId,
 } from './state.ts';
 import { createApiClient, scanExportUrl, toProvidersHealth } from './useApi.ts';
-import type { ApiClient, ScanTargetsResponse, SceneListResponse, SceneSummary } from './useApi.ts';
+import type { ApiClient, RevisitPlan, ScanTargetsResponse, SceneListResponse, SceneSummary } from './useApi.ts';
 import { stageLabel, stagePosition, useScan } from './useScan.ts';
 import type { ScanState } from './useScan.ts';
 import { AnalysisWorkbench } from '../analysis/AnalysisWorkbench.tsx';
 import { Contacts } from '../contacts/Contacts.tsx';
 import { TargetInspector } from '../evidence/TargetInspector.tsx';
+import { AcquisitionPlan } from '../plan/AcquisitionPlan.tsx';
 import { Timeline } from '../timeline/Timeline.tsx';
 
 type IconComponent = React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
@@ -577,6 +578,9 @@ function SurfaceBody(props: SurfaceBodyProps) {
         <>
           <SarSurface state={state} providers={props.providers} />
           <div className="mt-4 border-t border-[var(--df-border)] pt-3">
+            <AcquisitionPlanSection client={client} state={state} scan={props.scan} />
+          </div>
+          <div className="mt-4 border-t border-[var(--df-border)] pt-3">
             <AnalysisWorkbench client={client} scanId={state.activeScanId} />
           </div>
         </>
@@ -832,6 +836,101 @@ export function buildScanRequest(
     bbox,
     ...(scene ? { scene_id: scene.id } : {}),
   };
+}
+
+/**
+ * SAR acquisition plan, mounted under the SAR surface (GEO-002).
+ *
+ * The AOI comes from the active scan so the plan describes the water the user is
+ * actually looking at. With no scan there is no extent to plan over, and the
+ * section says so rather than planning somewhere arbitrary.
+ */
+function AcquisitionPlanSection({
+  client,
+  state,
+  scan,
+}: {
+  client: ApiClient;
+  state: AppState;
+  scan: ScanState;
+}) {
+  const [plan, setPlan] = useState<RevisitPlan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [bbox, setBbox] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    const scanId = scan.scanId ?? state.activeScanId;
+    if (!scanId) {
+      setBbox(null);
+      setPlan(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    client
+      .getScanTargets(scanId)
+      .then((targets) => {
+        if (cancelled) return;
+        // Prefer the scan's own AOI; fall back to the extent of what it found.
+        const box = targets.aoi ?? null;
+        if (box && box.length === 4) {
+          setBbox(box as number[]);
+          return;
+        }
+        setBbox(null);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not read the scan extent.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, scan.scanId, state.activeScanId]);
+
+  useEffect(() => {
+    if (!bbox || bbox.length !== 4) {
+      setPlan(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    client
+      .getRevisitPlan(bbox)
+      .then((response) => {
+        if (!cancelled) setPlan(response);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setPlan(null);
+        setError(
+          err instanceof Error
+            ? `Acquisition plan unavailable: ${err.message}`
+            : 'Acquisition plan unavailable.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, bbox]);
+
+  if (!scan.scanId && !state.activeScanId) {
+    return (
+      <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
+        Acquisition planning needs an area. Run a scan, or set an extent, to plan coverage for it.
+      </p>
+    );
+  }
+
+  return <AcquisitionPlan plan={plan} error={error} loading={loading} />;
 }
 
 /**

@@ -841,6 +841,7 @@ def scan_targets(scan_id: str, state: State) -> ScanTargetsResponse:
         stage=ScanStage.COMPLETE.value,
         runtime_mode=str(record.get("runtime_mode", "REAL")),
         synthetic=bool(record.get("synthetic", False)),
+        aoi=[float(v) for v in (record.get("aoi") or [])],
         count=len(targets),
         ais_only_count=len(ais_only),
         counts={str(k): int(v) for k, v in dict(record.get("counts") or {}).items()},

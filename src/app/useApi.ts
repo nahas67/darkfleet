@@ -70,6 +70,8 @@ export interface ScanTargetsResponse {
   stage: string;
   runtime_mode: string;
   synthetic: boolean;
+  /** The extent this scan covered. Empty when the record carried none. */
+  aoi: number[];
   count: number;
   ais_only_count: number;
   counts: Record<string, number>;
@@ -249,6 +251,52 @@ export function scenesUrl(query: SceneQuery = {}): string {
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** One real acquisition the provider catalogue holds (GEO-002). */
+export interface RevisitAcquisition {
+  readonly item_id: string;
+  readonly acquisition_time: string;
+  readonly platform: string;
+  readonly collection: string;
+  readonly polarizations: readonly string[];
+}
+
+/** A measured interval between consecutive acquisitions. */
+export interface RevisitGap {
+  readonly start: string;
+  readonly end: string;
+  readonly days: number;
+  readonly window_edge: boolean;
+  readonly exceeds_nominal: boolean;
+}
+
+/**
+ * `null` here is a real answer from the backend meaning "not enough
+ * acquisitions to say". It must never be coerced to 0.
+ */
+export interface RevisitStatistics {
+  readonly platform_count: number;
+  readonly acquisitions_per_platform: Readonly<Record<string, number>>;
+  readonly interior_gap_count: number;
+  readonly median_revisit_days: number | null;
+  readonly min_revisit_days: number | null;
+  readonly max_revisit_days: number | null;
+  readonly flagged_gap_count: number;
+  readonly nominal_repeat_days: number;
+}
+
+export interface RevisitPlan {
+  readonly acquisition_count: number;
+  readonly acquisitions: readonly RevisitAcquisition[];
+  readonly gaps: readonly RevisitGap[];
+  readonly statistics: RevisitStatistics;
+  readonly window: { readonly start: string | null; readonly end: string | null };
+  readonly next_after: RevisitAcquisition | null;
+  readonly limitations: readonly string[];
+  readonly provider: string;
+  readonly collection: string;
+  readonly requested_bbox: readonly number[];
+}
+
 export interface ApiClient {
   /**
    * Create a scan. The request is sent verbatim; `ScanRequest` carries no
@@ -259,6 +307,11 @@ export interface ApiClient {
   getScanTargets(scanId: string): Promise<ScanTargetsResponse>;
   getScenes(query?: SceneQuery): Promise<SceneListResponse>;
   getProvidersHealth(): Promise<HealthResponse>;
+  /** SAR acquisition plan for an area (GEO-002). Measured from the catalogue. */
+  getRevisitPlan(
+    bbox: readonly number[],
+    options?: { provider?: string; historyDays?: number; horizonDays?: number },
+  ): Promise<RevisitPlan>;
   getTargetEvidence(targetId: string): Promise<TargetEvidenceResponse>;
   getEvidenceDocument(targetId: string): Promise<EvidenceDocumentResponse>;
   getDebugLayer(scanId: string, layer: DebugLayerId): Promise<DebugLayerResponse>;
@@ -409,6 +462,14 @@ export function createApiClient(fetchImpl?: FetchLike): ApiClient {
 
     getProvidersHealth: () =>
       requestJson<HealthResponse>(doFetch, `${API_BASE}/providers/health`),
+
+    getRevisitPlan: (bbox, options = {}) => {
+      const params = new URLSearchParams({ bbox: bbox.join(',') });
+      if (options.provider) params.set('provider', options.provider);
+      params.set('history_days', String(options.historyDays ?? 120));
+      params.set('horizon_days', String(options.horizonDays ?? 30));
+      return requestJson<RevisitPlan>(doFetch, `${API_BASE}/revisit?${params.toString()}`);
+    },
 
     getTargetEvidence: (targetId) =>
       requestJson<TargetEvidenceResponse>(
