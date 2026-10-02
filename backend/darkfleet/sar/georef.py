@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import rasterio
 from pyproj import CRS, Transformer
 from rasterio.windows import Window, from_bounds
 
+from ..geolocation import AffineLike
 from ..providers import RealDataUnavailableError
 from ..providers.stac import SarAsset
 
@@ -72,10 +73,28 @@ def _clamp_window(win: Window, width: int, height: int) -> Window:
 def pixel_to_wgs84(
     transform: Any, crs: CRS, x: float, y: float
 ) -> tuple[float, float]:
-    """Pixel centre -> source CRS -> WGS84 lon/lat."""
-    xs, ys = transform * (x, y)
-    lon, lat = Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True).transform(xs, ys)
-    return float(lat), float(lon)
+    """Pixel centre -> source CRS -> WGS84 lon/lat.
+
+    GEO-CORR: thin adapter over :func:`darkfleet.geolocation.pixel_to_wgs84`, which
+    is now the single implementation of pixel->ground. Two hand-written copies of
+    the same arithmetic drift, and only one of them would get the pixel-centre
+    convention right.
+
+    ``x``/``y`` are expected to ALREADY be continuous pixel-centre coordinates
+    (index + 0.5); existing callers pass ``200.5 - col_off`` and so on. Hence
+    ``centre_offset=0.0``. New code holding a raw sample index should use
+    :func:`darkfleet.geolocation.geolocate_components` and let it apply the
+    convention, rather than pre-adding 0.5 here.
+    """
+    from ..geolocation import pixel_to_wgs84 as _pixel_to_wgs84
+
+    return _pixel_to_wgs84(
+        x,
+        y,
+        transform=cast("AffineLike", transform),
+        to_wgs84=Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True),
+        centre_offset=0.0,
+    )
 
 
 def aoi_to_crs_bounds(

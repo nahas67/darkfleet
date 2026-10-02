@@ -22,6 +22,11 @@ import numpy as np
 from .ais.archive import AisArchive
 from .correlation.match import correlate
 from .evidence import build_provenance
+from .geolocation import (
+    assert_window_consistency,
+    geolocate_components,
+    geolocation_uncertainty_m,
+)
 from .observability import stage as log_stage
 from .providers import Georeferencing, RealDataUnavailableError
 from .providers.stac import (
@@ -211,6 +216,41 @@ def run_scan(
     )
     log_stage("CFAR", f"{len(comps)} components")
 
+    # ---- GEOLOCATE --------------------------------------------------------
+    # GEO-CORR: components carry PIXEL centroids here. They must be turned into
+    # geographic positions from the transform of the window that was ACTUALLY
+    # read, before correlation sees them. Interpolating across the requested AOI
+    # -- which correlation used to do -- places a detection wherever the AOI
+    # happens to fall rather than where the pixel is, and the error then
+    # propagates into the spatial score, the dynamic match radius and the
+    # association itself.
+    emit("GEOLOCATING", "pixel centroids to WGS84 from the window transform")
+    # The reader hands back ONLY the window transform, which is the one that must
+    # be used. `assert_window_consistency` is the guard for a caller that has both
+    # and might pass the wrong one; with only the window transform available there
+    # is nothing to cross-check, so what is asserted here is that it is present
+    # and complete. An absent transform raises inside geolocate_components.
+    window_transform = list(window_data["window_transform"])[:6]
+    assert_window_consistency(
+        scene_transform=None,
+        window=window_data["window"],
+        window_transform=window_transform,
+    )
+    comps = geolocate_components(
+        comps,
+        crs=str(window_data["crs"]),
+        transform=list(window_data["window_transform"])[:6],
+    )
+    geo_unc_m = geolocation_uncertainty_m(
+        resolution_m=raster_meta["resolution_m"],
+        georeferencing=Georeferencing.AFFINE_GEOREFERENCED.value,
+    )
+    log_stage(
+        "GEO",
+        f"geolocated {len(comps)} components"
+        + (f"; geolocation uncertainty {geo_unc_m:.1f} m" if geo_unc_m is not None else ""),
+    )
+
     # ---- AIS --------------------------------------------------------------
     emit("LOADING_AIS", "loading AIS observations")
     acq = raster_meta["acquisition_time"]
@@ -226,11 +266,11 @@ def run_scan(
     # ---- ALIGN ------------------------------------------------------------
     emit("ALIGNING", "propagating AIS to acquisition time")
     emit("CORRELATING", "building candidates")
-    grid_w, grid_h = int(window_data["window"][3]), int(window_data["window"][2])
-    grid_bbox: tuple[float, float, float, float] = aoi
+    # GEO-CORR: `comps` already carry measured lat/lon from the window
+    # transform. No width/height/bbox is passed, so correlation cannot reintroduce
+    # AOI interpolation. `grid_w`/`grid_h`/`grid_bbox` are gone for that reason.
     out = correlate(
-        comps, ais_rows, acq, grid_w, grid_h, grid_bbox,
-        float(raster_meta["resolution_m"] or 10.0), "PENDING",
+        comps, ais_rows, acq, float(raster_meta["resolution_m"] or 10.0), "PENDING",
     )
     targets = out["targets"]
     matched = sum(1 for t in targets if t["cls"] == "SAR_MATCHED_AIS")

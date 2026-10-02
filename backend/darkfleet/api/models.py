@@ -166,9 +166,16 @@ class ScanAccepted(BaseModel):
 
 
 class StageEventOut(BaseModel):
-    """One real stage transition as recorded by the runner."""
+    """One real stage transition as recorded by the runner.
 
-    stage: str
+    ``stage`` is typed as the enum rather than as ``str`` so the generated
+    contract carries the real stage list. As a bare ``str`` it serialised to
+    ``{"type": "string"}``, the frontend had to hand-maintain the union, and
+    adding a stage silently produced a value the UI could not type -- which is
+    exactly what happened when GEO-CORR added GEOLOCATING.
+    """
+
+    stage: ScanStage
     timestamp: datetime
     detail: str
     terminal: bool
@@ -178,7 +185,7 @@ class ScanStateResponse(BaseModel):
     """``GET /api/scans/{id}``: current state plus the full transition history."""
 
     scan_id: str
-    stage: str
+    stage: ScanStage
     terminal: bool
     runtime_mode: str
     synthetic: bool
@@ -186,7 +193,7 @@ class ScanStateResponse(BaseModel):
     source: Literal["runner", "run_store"] = "runner"
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    failed_at: str | None = Field(
+    failed_at: ScanStage | None = Field(
         default=None, description="Pipeline stage that was in flight when the job failed."
     )
     error: str | None = None

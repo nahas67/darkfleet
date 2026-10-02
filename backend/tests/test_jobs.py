@@ -32,24 +32,13 @@ from darkfleet.jobs import (
     validate_transition,
 )
 
-# The 15 canonical states, in the order the machine must walk them.
-CANONICAL_STATES = [
-    "QUEUED",
-    "SEARCHING_SCENE",
-    "READING_SAR",
-    "PREPROCESSING",
-    "MASKING",
-    "FILTERING",
-    "DETECTING",
-    "EXTRACTING",
-    "LOADING_AIS",
-    "ALIGNING",
-    "CORRELATING",
-    "SCORING",
-    "PERSISTING",
-    "COMPLETE",
-    "FAILED",
-]
+# The canonical states, in the order the machine must walk them.
+#
+# DERIVED from PIPELINE, not hand-written. This list used to be a literal copy,
+# and GEO-CORR proved the cost: adding a stage left the copy stale and nine
+# tests failed on a KeyError instead of on anything about geolocation. A mirror
+# of an ordered list drifts the moment the list changes; this one cannot.
+CANONICAL_STATES = [str(s) for s in ALL_STAGES]
 
 # Real measured outcomes. The runner never edits these and never adds numbers.
 DETAILS: dict[ScanStage, str] = {
@@ -60,6 +49,7 @@ DETAILS: dict[ScanStage, str] = {
     ScanStage.FILTERING: "dropped 6 low-SNR components",
     ScanStage.DETECTING: "detected 41 components",
     ScanStage.EXTRACTING: "extracted 41 component polygons",
+    ScanStage.GEOLOCATING: "geolocated 41 components; geolocation uncertainty 5.0 m",
     ScanStage.LOADING_AIS: "loaded 1284 AIS observations",
     ScanStage.ALIGNING: "aligned 2 candidate windows",
     ScanStage.CORRELATING: "matched 3 AIS targets within 250 m",
@@ -67,6 +57,12 @@ DETAILS: dict[ScanStage, str] = {
     ScanStage.PERSISTING: "persisted 1 scan and 3 targets",
     ScanStage.COMPLETE: "scan complete",
 }
+
+# DETAILS must cover every stage the machine can emit except QUEUED and FAILED,
+# which the runner supplies itself. A missing entry would be a KeyError mid-walk,
+# which is how a stale hand-written list failed in the first place.
+_MISSING_DETAILS = [s for s in PIPELINE[1:] if s not in DETAILS]
+assert not _MISSING_DETAILS, f"DETAILS is missing pipeline stages: {_MISSING_DETAILS}"
 
 TIMEOUT = 15.0
 
@@ -142,7 +138,10 @@ def _drain(channel: queue.Queue[StageEvent], timeout: float = TIMEOUT) -> list[S
 def test_stage_machine_is_canonical() -> None:
     assert [stage.value for stage in ScanStage] == CANONICAL_STATES
     assert ALL_STAGES == tuple(ScanStage)
-    assert len(ScanStage) == 15
+    # Deliberate tripwire: 16 states as of GEO-CORR, which added GEOLOCATING.
+    # CANONICAL_STATES above is derived rather than hand-written, so this
+    # literal is the one place a stage change has to be acknowledged by hand.
+    assert len(ScanStage) == 16
     assert TERMINAL == {ScanStage.COMPLETE, ScanStage.FAILED}
     # FAILED is an exit, not a step in the pipeline.
     assert ScanStage.FAILED not in PIPELINE

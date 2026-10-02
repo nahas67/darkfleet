@@ -677,7 +677,7 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
 def _job_events(job: ScanJob) -> list[StageEventOut]:
     return [
         StageEventOut(
-            stage=event.stage.value,
+            stage=event.stage,
             timestamp=event.timestamp,
             detail=event.detail,
             terminal=event.terminal,
@@ -706,7 +706,7 @@ def get_scan(scan_id: str, state: State) -> ScanStateResponse:
     if job is not None:
         return ScanStateResponse(
             scan_id=job.scan_id,
-            stage=job.stage.value,
+            stage=job.stage,
             terminal=is_terminal(job.stage),
             runtime_mode=job.runtime_mode.value,
             synthetic=job.synthetic,
@@ -714,7 +714,7 @@ def get_scan(scan_id: str, state: State) -> ScanStateResponse:
             source="runner",
             started_at=job.started_at,
             finished_at=job.finished_at,
-            failed_at=job.failed_at.value if job.failed_at else None,
+            failed_at=job.failed_at,
             error=redact(job.error) if job.error else None,
             history=_job_events(job),
             record_persisted=record is not None,
@@ -722,7 +722,7 @@ def get_scan(scan_id: str, state: State) -> ScanStateResponse:
     assert record is not None
     return ScanStateResponse(
         scan_id=scan_id,
-        stage=str(record.get("stage", ScanStage.COMPLETE.value)),
+        stage=ScanStage(record.get("stage", ScanStage.COMPLETE.value)),
         terminal=True,
         runtime_mode=str(record.get("runtime_mode", "REAL")),
         synthetic=bool(record.get("synthetic", False)),

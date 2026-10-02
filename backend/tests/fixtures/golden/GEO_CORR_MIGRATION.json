@@ -1,0 +1,678 @@
+{
+  "checkpoint": "GEO-CORR",
+  "fixture": "tests/fixtures/golden/ts_engine_golden.json",
+  "classification": {
+    "ALGORITHM_TRUTH": [
+      "sarConf - derived from component dB/geometry only, no coordinates",
+      "counts.aisOnly - AIS-driven, no SAR coordinates involved",
+      "geodesy functions - untouched by this checkpoint",
+      "classification logic and thresholds - untouched by this checkpoint"
+    ],
+    "LEGACY_BUG_OUTPUT": [
+      "targets[].lat / targets[].lon - AOI interpolation with corner semantics",
+      "targets[].corr.distanceOffsetMeters - computed from the displaced SAR point",
+      "targets[].corr.scoreDecomposition - spatial/radius terms derive from it",
+      "targets[].aisConf - composite score inherits the displacement",
+      "targets[].cls / corr.mmsi where the displacement changed the outcome"
+    ]
+  },
+  "summary": {
+    "targets": 12,
+    "sar_conf_changed": 0,
+    "distance_changed": 5,
+    "radius_changed": 2,
+    "spatial_changed": 5,
+    "composite_changed": 5,
+    "ais_conf_changed": 5,
+    "association_changed": 2,
+    "classification_changed": 2,
+    "max_shift_m": 154.27
+  },
+  "association_change_explanations": [
+    {
+      "mmsi": "477421900",
+      "claimants_under_corrected_geometry": [
+        {
+          "target": "DF-005",
+          "distance_m": 755.8,
+          "won": true,
+          "composite": 0.548,
+          "spatial": 0.399,
+          "heading": 0.822,
+          "temporal": 0.953,
+          "size": 0.045
+        },
+        {
+          "target": "DF-006",
+          "distance_m": 598.1,
+          "won": false,
+          "composite": null,
+          "spatial": null,
+          "heading": null,
+          "temporal": null,
+          "size": null
+        }
+      ],
+      "isolation": {
+        "solo_scores": {
+          "idx4_alone": {
+            "targets": [
+              {
+                "cls": "SAR_MATCHED_AIS",
+                "mmsi": "477421900",
+                "distance_m": 756,
+                "spatial": 0.399,
+                "heading": 0.822,
+                "composite": 0.548
+              }
+            ]
+          },
+          "idx5_alone": {
+            "targets": [
+              {
+                "cls": "SAR_MATCHED_AIS",
+                "mmsi": "477421900",
+                "distance_m": 598,
+                "spatial": 0.524,
+                "heading": 0.144,
+                "composite": 0.503
+              }
+            ]
+          }
+        },
+        "together": {
+          "targets": [
+            {
+              "cls": "SAR_MATCHED_AIS",
+              "mmsi": "477421900",
+              "distance_m": 756,
+              "spatial": 0.399,
+              "heading": 0.822,
+              "composite": 0.548
+            },
+            {
+              "cls": "SAR_UNMATCHED",
+              "mmsi": null,
+              "distance_m": null,
+              "spatial": null,
+              "heading": null,
+              "composite": null
+            }
+          ]
+        },
+        "reading": "A solo composite >= MIN_SCORE (0.40) means the target was NOT threshold-rejected; it lost the greedy one-to-1 contest on composite score. Heading (weight 0.15) can outweigh spatial (weight 0.45) when both terms are close."
+      },
+      "note": "Greedy 1-to-1 awards the observation to the highest COMPOSITE score, not the smallest distance."
+    }
+  ],
+  "rows": [
+    {
+      "id": "DF-001",
+      "old_lat": 1.332463,
+      "new_lat": 1.3316298333333332,
+      "old_lon": 103.721276,
+      "new_lon": 103.72238688888889,
+      "shift_m": 154.18,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "STATIONARY_OR_INFRASTRUCTURE",
+      "new_cls": "STATIONARY_OR_INFRASTRUCTURE",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-002",
+      "old_lat": 1.302499,
+      "new_lat": 1.3016658333333333,
+      "old_lon": 103.930331,
+      "new_lon": 103.93144177777778,
+      "shift_m": 154.17,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-003",
+      "old_lat": 1.28618,
+      "new_lat": 1.2853463333333333,
+      "old_lon": 103.826198,
+      "new_lon": 103.82730911111112,
+      "shift_m": 154.24,
+      "old_mmsi": "538007142",
+      "new_mmsi": "538007142",
+      "old_distance_m": 89,
+      "new_distance_m": 244,
+      "distance_delta_m": 155,
+      "old_radius_m": 1230,
+      "new_radius_m": 1230,
+      "old_spatial": 0.927,
+      "new_spatial": 0.802,
+      "old_composite": 0.68,
+      "new_composite": 0.623,
+      "old_aisConf": 0.68,
+      "new_aisConf": 0.62,
+      "old_cls": "SAR_MATCHED_AIS",
+      "new_cls": "SAR_MATCHED_AIS",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-004",
+      "old_lat": 1.273143,
+      "new_lat": 1.2723095,
+      "old_lon": 103.791281,
+      "new_lon": 103.79239244444445,
+      "shift_m": 154.26,
+      "old_mmsi": "563189210",
+      "new_mmsi": "563189210",
+      "old_distance_m": 144,
+      "new_distance_m": 289,
+      "distance_delta_m": 145,
+      "old_radius_m": 1250,
+      "new_radius_m": 1250,
+      "old_spatial": 0.885,
+      "new_spatial": 0.769,
+      "old_composite": 0.664,
+      "new_composite": 0.612,
+      "old_aisConf": 0.66,
+      "new_aisConf": 0.61,
+      "old_cls": "SAR_MATCHED_AIS",
+      "new_cls": "SAR_MATCHED_AIS",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-005",
+      "old_lat": 1.259664,
+      "new_lat": 1.2588303333333333,
+      "old_lon": 103.851335,
+      "new_lon": 103.85244644444444,
+      "shift_m": 154.27,
+      "old_mmsi": null,
+      "new_mmsi": "477421900",
+      "old_distance_m": null,
+      "new_distance_m": 756,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": 1257,
+      "old_spatial": null,
+      "new_spatial": 0.399,
+      "old_composite": null,
+      "new_composite": 0.548,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.55,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_MATCHED_AIS",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-006",
+      "old_lat": 1.25391,
+      "new_lat": 1.2530765,
+      "old_lon": 103.861796,
+      "new_lon": 103.86290733333334,
+      "shift_m": 154.25,
+      "old_mmsi": "477421900",
+      "new_mmsi": null,
+      "old_distance_m": 445,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": 1257,
+      "new_radius_m": null,
+      "old_spatial": 0.646,
+      "new_spatial": null,
+      "old_composite": 0.558,
+      "new_composite": null,
+      "old_aisConf": 0.56,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_MATCHED_AIS",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-007",
+      "old_lat": 1.238883,
+      "new_lat": 1.2380493333333333,
+      "old_lon": 103.92114,
+      "new_lon": 103.92225088888888,
+      "shift_m": 154.22,
+      "old_mmsi": "636019882",
+      "new_mmsi": "636019882",
+      "old_distance_m": 61,
+      "new_distance_m": 131,
+      "distance_delta_m": 70,
+      "old_radius_m": 1250,
+      "new_radius_m": 1250,
+      "old_spatial": 0.951,
+      "new_spatial": 0.895,
+      "old_composite": 0.686,
+      "new_composite": 0.66,
+      "old_aisConf": 0.69,
+      "new_aisConf": 0.66,
+      "old_cls": "SAR_MATCHED_AIS",
+      "new_cls": "SAR_MATCHED_AIS",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-008",
+      "old_lat": 1.216838,
+      "new_lat": 1.2160043333333332,
+      "old_lon": 103.765244,
+      "new_lon": 103.76635533333334,
+      "shift_m": 154.26,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-009",
+      "old_lat": 1.211149,
+      "new_lat": 1.2103153333333334,
+      "old_lon": 103.778487,
+      "new_lon": 103.77959822222222,
+      "shift_m": 154.25,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-010",
+      "old_lat": 1.209982,
+      "new_lat": 1.2091481666666666,
+      "old_lon": 103.755581,
+      "new_lon": 103.75669222222223,
+      "shift_m": 154.26,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-011",
+      "old_lat": 1.205491,
+      "new_lat": 1.204658,
+      "old_lon": 103.76881,
+      "new_lon": 103.76992133333334,
+      "shift_m": 154.21,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    },
+    {
+      "id": "DF-012",
+      "old_lat": 1.204661,
+      "new_lat": 1.2038280000000001,
+      "old_lon": 103.881044,
+      "new_lon": 103.88215466666666,
+      "shift_m": 154.16,
+      "old_mmsi": null,
+      "new_mmsi": null,
+      "old_distance_m": null,
+      "new_distance_m": null,
+      "distance_delta_m": null,
+      "old_radius_m": null,
+      "new_radius_m": null,
+      "old_spatial": null,
+      "new_spatial": null,
+      "old_composite": null,
+      "new_composite": null,
+      "old_aisConf": 0.0,
+      "new_aisConf": 0.0,
+      "old_cls": "SAR_UNMATCHED",
+      "new_cls": "SAR_UNMATCHED",
+      "sarConf_unchanged": true
+    }
+  ],
+  "golden_counts": {
+    "detPixels": 97,
+    "components": 12,
+    "targets": 12,
+    "aisOnly": 2,
+    "matched": 4,
+    "unmatched": 7,
+    "infra": 1
+  },
+  "counts_after": null,
+  "note_on_counts": "correlate() does not emit a counts block; `golden_counts` is the committed expectation being migrated, not a live before/after pair.",
+  "golden_field_changes": [
+    {
+      "target": "DF-001",
+      "field": "lat",
+      "old": 1.332463,
+      "new": 1.3316298333333332,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-001",
+      "field": "lon",
+      "old": 103.721276,
+      "new": 103.72238688888889,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-002",
+      "field": "lat",
+      "old": 1.302499,
+      "new": 1.3016658333333333,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-002",
+      "field": "lon",
+      "old": 103.930331,
+      "new": 103.93144177777778,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-003",
+      "field": "lat",
+      "old": 1.28618,
+      "new": 1.2853463333333333,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-003",
+      "field": "lon",
+      "old": 103.826198,
+      "new": 103.82730911111112,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-003",
+      "field": "aisConf",
+      "old": 0.68,
+      "new": 0.62,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-004",
+      "field": "lat",
+      "old": 1.273143,
+      "new": 1.2723095,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-004",
+      "field": "lon",
+      "old": 103.791281,
+      "new": 103.79239244444445,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-004",
+      "field": "aisConf",
+      "old": 0.66,
+      "new": 0.61,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-005",
+      "field": "lat",
+      "old": 1.259664,
+      "new": 1.2588303333333333,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-005",
+      "field": "lon",
+      "old": 103.851335,
+      "new": 103.85244644444444,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-005",
+      "field": "cls",
+      "old": "SAR_UNMATCHED",
+      "new": "SAR_MATCHED_AIS",
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-005",
+      "field": "aisConf",
+      "old": 0,
+      "new": 0.55,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-005",
+      "field": "corr.mmsi",
+      "old": null,
+      "new": "477421900",
+      "reason": "association decided by composite score, which moved when the target position moved; see association_change_explanations",
+      "independent_source_of_truth": "tools/geo_corr_audit.py isolation experiment"
+    },
+    {
+      "target": "DF-006",
+      "field": "lat",
+      "old": 1.25391,
+      "new": 1.2530765,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-006",
+      "field": "lon",
+      "old": 103.861796,
+      "new": 103.86290733333334,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-006",
+      "field": "cls",
+      "old": "SAR_MATCHED_AIS",
+      "new": "SAR_UNMATCHED",
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-006",
+      "field": "aisConf",
+      "old": 0.56,
+      "new": 0.0,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-006",
+      "field": "corr.mmsi",
+      "old": "477421900",
+      "new": null,
+      "reason": "association decided by composite score, which moved when the target position moved; see association_change_explanations",
+      "independent_source_of_truth": "tools/geo_corr_audit.py isolation experiment"
+    },
+    {
+      "target": "DF-007",
+      "field": "lat",
+      "old": 1.238883,
+      "new": 1.2380493333333333,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-007",
+      "field": "lon",
+      "old": 103.92114,
+      "new": 103.92225088888888,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-007",
+      "field": "aisConf",
+      "old": 0.69,
+      "new": 0.66,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-008",
+      "field": "lat",
+      "old": 1.216838,
+      "new": 1.2160043333333332,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-008",
+      "field": "lon",
+      "old": 103.765244,
+      "new": 103.76635533333334,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-009",
+      "field": "lat",
+      "old": 1.211149,
+      "new": 1.2103153333333334,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-009",
+      "field": "lon",
+      "old": 103.778487,
+      "new": 103.77959822222222,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-010",
+      "field": "lat",
+      "old": 1.209981,
+      "new": 1.2091481666666666,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-010",
+      "field": "lon",
+      "old": 103.755581,
+      "new": 103.75669222222223,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-011",
+      "field": "lat",
+      "old": 1.205491,
+      "new": 1.204658,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-011",
+      "field": "lon",
+      "old": 103.76881,
+      "new": 103.76992133333334,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-012",
+      "field": "lat",
+      "old": 1.204661,
+      "new": 1.2038280000000001,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    },
+    {
+      "target": "DF-012",
+      "field": "lon",
+      "old": 103.881043,
+      "new": 103.88215466666666,
+      "reason": "detection re-geolocated from the pixel-centre convention",
+      "independent_source_of_truth": "tests/test_geolocation.py (analytical + rasterio xy)"
+    }
+  ],
+  "algorithm_truth_verified_unchanged": [
+    "sarConf"
+  ]
+}

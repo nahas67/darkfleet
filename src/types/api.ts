@@ -71,29 +71,32 @@ export type { ProviderState, TargetClassification };
  */
 export type RuntimeMode = 'REAL';
 
-/** The 15 canonical job stages, in pipeline order. */
-export type ScanStage =
-  | 'QUEUED'
-  | 'SEARCHING_SCENE'
-  | 'READING_SAR'
-  | 'PREPROCESSING'
-  | 'MASKING'
-  | 'FILTERING'
-  | 'DETECTING'
-  | 'EXTRACTING'
-  | 'LOADING_AIS'
-  | 'ALIGNING'
-  | 'CORRELATING'
-  | 'SCORING'
-  | 'PERSISTING'
-  | 'COMPLETE'
-  | 'FAILED';
+import type { ScanStage as ContractScanStage } from '../api/contract';
+import { SCAN_STAGE_ORDER } from '../api/contract';
 
-export const SCAN_PIPELINE: ScanStage[] = [
-  'QUEUED', 'SEARCHING_SCENE', 'READING_SAR', 'PREPROCESSING', 'MASKING',
-  'FILTERING', 'DETECTING', 'EXTRACTING', 'LOADING_AIS', 'ALIGNING',
-  'CORRELATING', 'SCORING', 'PERSISTING', 'COMPLETE',
-];
+/**
+ * The canonical job stages, in pipeline order.
+ *
+ * DERIVED from the generated contract (src/api/contract.ts), not restated here.
+ * This union used to be hand-written, and GEO-CORR proved the cost: adding
+ * GEOLOCATING on the backend left the frontend unable to type a stage the API
+ * could genuinely return, and nothing failed until runtime. The backend now
+ * serialises `stage` as its enum, so the contract carries the values and this
+ * file cannot fall behind.
+ */
+export type ScanStage = ContractScanStage;
+
+/**
+ * Pipeline order, FAILED excluded.
+ *
+ * Derived from the contract's declaration order rather than kept as a second
+ * literal. The backend exposes FAILED as an exit from any stage rather than a
+ * step in the pipeline, so it is filtered out here instead of being listed and
+ * then excluded.
+ */
+export const SCAN_PIPELINE: readonly ScanStage[] = (
+  SCAN_STAGE_ORDER as readonly ScanStage[]
+).filter((s) => s !== 'FAILED');
 
 /** Provider capability states. NEVER inferred from the presence of an env var. */
 // The provider status set is GENERATED (see src/api/contract.ts), not restated

@@ -35,7 +35,7 @@ __all__ = [
 
 
 class ScanStage(StrEnum):
-    """The 15 states of a scan, declared in pipeline order."""
+    """The 16 states of a scan, declared in pipeline order."""
 
     QUEUED = "QUEUED"
     SEARCHING_SCENE = "SEARCHING_SCENE"
@@ -45,6 +45,12 @@ class ScanStage(StrEnum):
     FILTERING = "FILTERING"
     DETECTING = "DETECTING"
     EXTRACTING = "EXTRACTING"
+    #: GEO-CORR: pixel centroids -> WGS84, from the window transform that was
+    #: actually read. A real stage, not a log line, because it is where a target
+    #: position stops being a guess and becomes a measurement. It has to be
+    #: visible: a scan that silently placed targets by interpolating its
+    #: requested AOI reported plausible scores for the entire run.
+    GEOLOCATING = "GEOLOCATING"
     LOADING_AIS = "LOADING_AIS"
     ALIGNING = "ALIGNING"
     CORRELATING = "CORRELATING"
@@ -82,6 +88,7 @@ PIPELINE: Final[tuple[ScanStage, ...]] = (
     ScanStage.FILTERING,
     ScanStage.DETECTING,
     ScanStage.EXTRACTING,
+    ScanStage.GEOLOCATING,
     ScanStage.LOADING_AIS,
     ScanStage.ALIGNING,
     ScanStage.CORRELATING,
@@ -130,6 +137,7 @@ STAGE_TAGS: Final[dict[ScanStage, str]] = {
     ScanStage.FILTERING: "FILTER",
     ScanStage.DETECTING: "CFAR",
     ScanStage.EXTRACTING: "COMP",
+    ScanStage.GEOLOCATING: "GEO",
     ScanStage.LOADING_AIS: "AIS",
     ScanStage.ALIGNING: "ALIGN",
     ScanStage.CORRELATING: "CORR",

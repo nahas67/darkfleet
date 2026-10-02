@@ -133,7 +133,7 @@ export interface ScanAccepted {
 }
 
 export interface StageEventOut {
-  readonly stage: string;
+  readonly stage: ScanStage;
   readonly timestamp: string;
   readonly detail: string;
   readonly terminal: boolean;
@@ -141,7 +141,7 @@ export interface StageEventOut {
 
 export interface ScanStateResponse {
   readonly scan_id: string;
-  readonly stage: string;
+  readonly stage: ScanStage;
   readonly terminal: boolean;
   readonly runtime_mode: string;
   readonly synthetic: boolean;
@@ -151,7 +151,7 @@ export interface ScanStateResponse {
   readonly started_at?: string | null;
   readonly finished_at?: string | null;
   /** Pipeline stage that was in flight when the job failed. */
-  readonly failed_at?: string | null;
+  readonly failed_at?: ScanStage | null;
   readonly error?: string | null;
   readonly history?: StageEventOut[];
   readonly record_persisted?: boolean;
@@ -244,6 +244,9 @@ export interface ScanScene {
 
 export type ProviderStatus = "AVAILABLE" | "DEGRADED" | "UNAVAILABLE" | "AUTH_REQUIRED" | "RATE_LIMITED" | "NOT_CONFIGURED";
 
+/** The 16 states of a scan, declared in pipeline order. */
+export type ScanStage = "QUEUED" | "SEARCHING_SCENE" | "READING_SAR" | "PREPROCESSING" | "MASKING" | "FILTERING" | "DETECTING" | "EXTRACTING" | "GEOLOCATING" | "LOADING_AIS" | "ALIGNING" | "CORRELATING" | "SCORING" | "PERSISTING" | "COMPLETE" | "FAILED";
+
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
   | 'ScoreDecomposition'
@@ -264,4 +267,29 @@ export type ContractSchemaName =
   | 'LayerStats'
   | 'ScanScene'
   | 'ProviderStatus'
+  | 'ScanStage'
 ;
+
+/**
+ * ScanStage values in the backend's declared pipeline order.
+ *
+ * Generated. Consumers must not extend or reorder this.
+ */
+export const SCAN_STAGE_ORDER = [
+  'QUEUED',
+  'SEARCHING_SCENE',
+  'READING_SAR',
+  'PREPROCESSING',
+  'MASKING',
+  'FILTERING',
+  'DETECTING',
+  'EXTRACTING',
+  'GEOLOCATING',
+  'LOADING_AIS',
+  'ALIGNING',
+  'CORRELATING',
+  'SCORING',
+  'PERSISTING',
+  'COMPLETE',
+  'FAILED',
+] as const;

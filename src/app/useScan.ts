@@ -316,6 +316,7 @@ const STAGE_LABELS: Readonly<Record<ScanStage, string>> = {
   FILTERING: 'Filtering',
   DETECTING: 'Detecting',
   EXTRACTING: 'Extracting',
+  GEOLOCATING: 'Geolocating',
   LOADING_AIS: 'Loading AIS',
   ALIGNING: 'Aligning AIS',
   CORRELATING: 'Correlating',

@@ -7,6 +7,7 @@ lumped into SAR_UNMATCHED. Golden deltas are recorded in the CP5 ledger entry.
 
 from __future__ import annotations
 
+import math
 from typing import Any, TypedDict
 
 from ..ais.normalize import _as_utc
@@ -35,14 +36,56 @@ class Candidate(TypedDict):
     radius: float
 
 
-def grid_to_wgs84(
-    x: float, y: float, width: int, height: int, bbox: tuple[float, float, float, float]
-) -> tuple[float, float]:
-    """Legacy-exact linear raster mapping (y=0 is north)."""
-    min_lon, min_lat, max_lon, max_lat = bbox
-    lon = min_lon + (x / width) * (max_lon - min_lon)
-    lat = max_lat - (y / height) * (max_lat - min_lat)
-    return round(lat, 6), round(lon, 6)
+class DetectionNotGeolocatedError(TypeError):
+    """A component reached correlation without a measured geographic position.
+
+    A distinct type so a caller can catch exactly this and route it to
+    "geolocation failed" rather than to a generic bad-input path: it means the
+    SAR stage handed correlation a pixel it never converted, which is a pipeline
+    defect rather than user error.
+    """
+
+    def __init__(self, message: str, **detail: Any) -> None:
+        super().__init__(message)
+        self.detail: dict[str, Any] = detail
+
+
+def component_position(comp: dict[str, Any]) -> tuple[float, float]:
+    """The measured geographic position of one detection, as ``(lat, lon)``.
+
+    GEO-CORR: this used to interpolate linearly across the REQUESTED AOI::
+
+        lon = min_lon + (x / width) * (max_lon - min_lon)
+        lat = max_lat - (y / height) * (max_lat - min_lat)
+
+    which is only right when the window read exactly fills the AOI. On the
+    committed fixture the raster covered latitude 1.32075..1.35693 while the
+    requested AOI covered 1.35690..1.39310, so every detection was placed about
+    4 km north of where it was. Because the spatial score and the dynamic match
+    radius are both computed from this position, that displaced every
+    association while still producing plausible-looking scores.
+
+    Correlation now CONSUMES a position measured by
+    :mod:`darkfleet.geolocation` from the window transform that was actually
+    read. It does not receive a bbox, a width or a height, and it never inspects
+    a raster: mapping pixels to the Earth is not this module's concern.
+
+    A component with no measured position is an error, not something to estimate.
+    """
+    lat = comp.get("lat")
+    lon = comp.get("lon")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        raise DetectionNotGeolocatedError(
+            "component carries no measured lat/lon; detections must be geolocated "
+            "from the window transform before correlation "
+            "(see darkfleet.geolocation.geolocate_components)",
+            component_keys=sorted(str(k) for k in comp),
+        )
+    if not (math.isfinite(float(lat)) and math.isfinite(float(lon))):
+        raise ValueError(
+            f"component position is not finite (lat={lat}, lon={lon}); refusing to score it"
+        )
+    return float(lat), float(lon)
 
 
 def _sar_confidence(comp: dict[str, Any], wake: bool) -> float:
@@ -59,21 +102,30 @@ def correlate(
     components: list[dict[str, Any]],
     ais: list[dict[str, Any]],
     acquisition_iso: str,
-    width: int,
-    height: int,
-    bbox: tuple[float, float, float, float],
     resolution_m: float,
     scan_id: str,
     weights: tuple[float, float, float, float] = (0.45, 0.25, 0.15, 0.15),
     base_radius_m: float = 1200.0,
     max_radius_m: float = 2800.0,
 ) -> dict[str, Any]:
+    """Associate SAR detections with AIS observations.
+
+    GEO-CORR: ``width``, ``height`` and ``bbox`` are GONE from this signature.
+    They were only ever used to interpolate a pixel position across the
+    requested AOI, which is not the same thing as the window that was read. Each
+    ``component`` must now carry a measured ``lat``/``lon`` produced by
+    :mod:`darkfleet.geolocation` from the window transform.
+
+    Removing them from the signature rather than ignoring them is deliberate: a
+    parameter that exists invites a caller to pass a bbox and trust the result,
+    and that is precisely the defect being closed.
+    """
     acq = _as_utc(acquisition_iso).timestamp()
     w_sp, w_tm, w_hd, w_sz = weights
 
     cands: list[Candidate] = []
     for idx, comp in enumerate(components):
-        lat, lon = grid_to_wgs84(comp["cx"], comp["cy"], width, height, bbox)
+        lat, lon = component_position(comp)
         apparent_len = round(comp["major"] * resolution_m)
         for ob in ais:
             ob_ts = _as_utc(str(ob["timestamp"])).timestamp()
@@ -136,7 +188,7 @@ def correlate(
 
     targets: list[dict[str, Any]] = []
     for idx, comp in enumerate(components):
-        lat, lon = grid_to_wgs84(comp["cx"], comp["cy"], width, height, bbox)
+        lat, lon = component_position(comp)
         apparent_len = round(comp["major"] * resolution_m)
         apparent_wid = round(comp["minor"] * resolution_m)
         len_unc = max(10, round(apparent_len * 0.22))

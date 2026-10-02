@@ -606,12 +606,21 @@ describe('useScan: real SSE stage events', () => {
   });
 
   it('reports a stage counter, not a completion estimate', () => {
-    expect(stagePosition('QUEUED')).toEqual({ index: 1, total: 14 });
-    expect(stagePosition('CORRELATING')).toEqual({ index: 11, total: 14 });
-    expect(stagePosition('COMPLETE')).toEqual({ index: 14, total: 14 });
+    // `total` is derived, not restated: it used to be a literal in three places
+    // that all had to move together whenever the pipeline changed.
+    const total = SCAN_PIPELINE.length;
+    // Indices stay explicit -- they are what pins GEOLOCATING's position
+    // (8, between EXTRACTING and LOADING_AIS) in the rendered counter.
+    expect(stagePosition('QUEUED')).toEqual({ index: 1, total });
+    expect(stagePosition('EXTRACTING')).toEqual({ index: 8, total });
+    expect(stagePosition('GEOLOCATING')).toEqual({ index: 9, total });
+    expect(stagePosition('CORRELATING')).toEqual({ index: 12, total });
+    expect(stagePosition('COMPLETE')).toEqual({ index: total, total });
     expect(stagePosition('FAILED')).toBeNull();
     expect(stagePosition(null)).toBeNull();
-    expect(SCAN_PIPELINE).toHaveLength(14);
+    // Deliberate tripwire, mirroring the backend's ScanStage count: 15 as of
+    // GEO-CORR, which added GEOLOCATING.
+    expect(SCAN_PIPELINE).toHaveLength(15);
   });
 
   it('labels stages and passes unknown names through', () => {
@@ -644,7 +653,9 @@ describe('useScan: real SSE stage events', () => {
     expect(html.toLowerCase()).not.toContain('synthetic');
     // Real stage name plus a counter, never a percentage or a progress bar.
     expect(html).toContain('Correlating');
-    expect(html).toContain('stage 11 of 14');
+    // Derived from the pipeline so a stage addition cannot leave this stale.
+    const correlating = SCAN_PIPELINE.indexOf('CORRELATING') + 1;
+    expect(html).toContain(`stage ${correlating} of ${SCAN_PIPELINE.length}`);
     expect(html).not.toContain('%');
     expect(html).not.toContain('<progress');
     expect(stageLabel(scan.stage as ScanStage)).toBe('Correlating');

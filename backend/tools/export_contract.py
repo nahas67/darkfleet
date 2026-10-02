@@ -264,6 +264,26 @@ def build() -> str:
     out.append(";")
     out.append("")
 
+    # The ScanStage values, in enum order, as a RUNTIME array.
+    #
+    # A generated union type alone cannot give a consumer the pipeline ORDER, so
+    # the frontend was obliged to keep a second hand-written list beside it --
+    # and that list is what went stale when GEO-CORR added GEOLOCATING. Emitting
+    # the ordered values removes the second list rather than documenting it.
+    stage_spec = defs.get("ScanStage") or {}
+    stage_values = stage_spec.get("enum")
+    if stage_values:
+        out.append("/**")
+        out.append(" * ScanStage values in the backend's declared pipeline order.")
+        out.append(" *")
+        out.append(" * Generated. Consumers must not extend or reorder this.")
+        out.append(" */")
+        out.append("export const SCAN_STAGE_ORDER = [")
+        for value in stage_values:
+            out.append(f"  '{value}',")
+        out.append("] as const;")
+        out.append("")
+
     return "\n".join(out)
 
 
