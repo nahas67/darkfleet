@@ -30,7 +30,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from darkfleet.api.app import create_app
-from darkfleet.api.routes import DEBUG_LAYERS
+from darkfleet.api.routes import _CORRELATION_COLUMNS, DEBUG_LAYERS
 from darkfleet.config.settings import Settings
 from darkfleet.jobs.models import PIPELINE, ScanStage
 from darkfleet.providers import ProviderStatus
@@ -547,6 +547,14 @@ def test_debug_layers_return_compact_summaries(
             assert body["kind"] == "table"
             assert body["columns"]
             assert body["rows"] == targets["count"]
+        elif layer in _CORRELATION_COLUMNS:
+            # Correlation layers are per-target rows built from the score
+            # decomposition, never a raster and never a rendered overlay.
+            assert body["kind"] == "table"
+            assert body["source"] == "correlation"
+            assert body["columns"] == list(_CORRELATION_COLUMNS[layer])
+            assert body["rows"] <= targets["count"]
+            assert body["notes"], "a correlation layer must state its provenance"
         else:
             assert body["kind"] == "array"
             assert body["stats"]["size"] == body["shape"][0] * body["shape"][1]

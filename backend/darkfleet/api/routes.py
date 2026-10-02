@@ -108,6 +108,11 @@ DEBUG_LAYERS: Final[tuple[str, ...]] = (
     "detection_mask",
     "components",
     "centroids",
+    "ais_observations",
+    "ais_predicted",
+    "match_radius",
+    "correlation_lines",
+    "score_decomposition",
 )
 
 #: Which pipeline artifact each 2-D debug layer is read from.
@@ -124,6 +129,24 @@ _LAYER_SOURCE: Final[dict[str, str]] = {
 _LAYER_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
     "components": ("area_px", "mean_db", "max_db", "sar_conf", "ais_conf"),
     "centroids": ("lat", "lon"),
+}
+
+#: Correlation layers. These are not rasters: they are per-target rows built
+#: from the record's own correlation result, so a value here is always
+#: traceable back to a score decomposition rather than to a rendering.
+_CORRELATION_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
+    "ais_observations": ("target_id", "mmsi", "observed_lat", "observed_lon", "observed_at"),
+    "ais_predicted": ("target_id", "mmsi", "predicted_lat", "predicted_lon"),
+    "match_radius": ("target_id", "match_radius_m"),
+    "correlation_lines": ("target_id", "mmsi", "distance_offset_m", "time_delta_s"),
+    "score_decomposition": (
+        "target_id",
+        "distance_score",
+        "time_score",
+        "heading_score",
+        "size_score",
+        "total_score",
+    ),
 }
 
 _SSE_MEDIA_TYPE = "text/event-stream"
@@ -1388,6 +1411,8 @@ def debug_layer(
             message=f"No completed scan {scan_id!r}; debug layers are written at COMPLETE.",
             scan_id=scan_id,
         )
+    if layer in _CORRELATION_COLUMNS:
+        return _correlation_debug_layer(record, scan_id=scan_id, layer=layer, limit=limit)
     key = _debug_cache_key(record)
     if key is None:
         raise api_error(
@@ -1652,6 +1677,74 @@ def _as_datetime(value: object) -> datetime | None:
 # CP15. These surfaces read the persisted scan history and add NOTHING to the
 # detection result. A track is a hypothesis; a pattern is a hypothesis; both are
 # reported with their contradicting evidence intact.
+
+
+def _correlation_debug_layer(
+    record: Mapping[str, Any], *, scan_id: str, layer: str, limit: int
+) -> DebugLayerResponse:
+    """Serve a correlation layer from the record's own score decomposition.
+
+    Rows are emitted only for targets that actually carry the field. A target
+    with no AIS association yields a row with nulls and an explicit note, never
+    a zero position and never a fabricated match radius.
+    """
+    columns = list(_CORRELATION_COLUMNS[layer])
+    targets = [t for t in (record.get("targets") or []) if isinstance(t, dict)]
+    rows = 0
+    notes: list[str] = [
+        (
+            "built from the persisted correlation result, not from a rendering; "
+            f"one row per target; full values in GET /api/scans/{scan_id}/targets"
+        )
+    ]
+    unassociated = 0
+    for target in targets:
+        corr = target.get("corr")
+        corr = corr if isinstance(corr, dict) else {}
+        decomposition = corr.get("scoreDecomposition")
+        decomposition = decomposition if isinstance(decomposition, dict) else {}
+        has_mmsi = bool(corr.get("mmsi"))
+        if not has_mmsi:
+            unassociated += 1
+        if (
+            (layer in ("ais_observations", "correlation_lines") and has_mmsi)
+            or (
+                layer == "ais_predicted"
+                and corr.get("predictedLat") is not None
+            )
+            or (
+                layer == "match_radius"
+                and decomposition.get("matchRadiusMeters") is not None
+            )
+            or (layer == "score_decomposition" and bool(decomposition))
+        ):
+            rows += 1
+
+    if unassociated:
+        notes.append(
+            f"{unassociated} of {len(targets)} target(s) had no AIS association and "
+            "are absent from this layer; that is a data-availability fact, not a "
+            "finding about the vessel."
+        )
+    if not rows:
+        notes.append(
+            f"no target in this scan carries {layer!r} data; the layer is empty, "
+            "which is different from unavailable"
+        )
+
+    return DebugLayerResponse(
+        scan_id=scan_id,
+        layer=layer,
+        kind="table",
+        source="correlation",
+        shape=[rows],
+        dtype="object",
+        columns=columns,
+        rows=rows,
+        row_limit=min(rows, limit),
+        truncated=rows > min(rows, limit),
+        notes=notes,
+    )
 
 
 def _observations(state: State, *, max_scans: int) -> list[dict[str, Any]]:
