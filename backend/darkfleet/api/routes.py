@@ -60,9 +60,11 @@ from darkfleet.api.models import (
     jsonable,
 )
 from darkfleet.config.settings import Settings
+from darkfleet.detectors import DetectorRegistry
 from darkfleet.evidence import target_evidence
 from darkfleet.jobs.models import ScanStage, is_terminal
 from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent
+from darkfleet.narrative import summarise
 from darkfleet.pipeline import run_scan
 from darkfleet.providers import ProviderStatus, RealDataUnavailableError
 from darkfleet.providers.stac import (
@@ -73,6 +75,8 @@ from darkfleet.providers.stac import (
 )
 from darkfleet.storage.cache import ArtifactCache, CacheKey
 from darkfleet.storage.runs import RunStore, run_store_for_data_dir
+from darkfleet.temporal import analyse as temporal_analyse
+from darkfleet.tracks import build_tracks
 
 __all__ = [
     "DEBUG_LAYERS",
@@ -1641,3 +1645,155 @@ def _as_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+# -------------------------------------------------- multi-pass intelligence
+#
+# CP15. These surfaces read the persisted scan history and add NOTHING to the
+# detection result. A track is a hypothesis; a pattern is a hypothesis; both are
+# reported with their contradicting evidence intact.
+
+
+def _observations(state: State, *, max_scans: int) -> list[dict[str, Any]]:
+    """Flatten the stored scan history into the observation shape tracks use.
+
+    Only AIS-ASSOCIATED detections can form a track, so unmatched rows are kept
+    in the list (the pattern engine needs them) but the track builder refuses
+    them. Nothing is invented here: every field comes straight from a record.
+    """
+    records = sorted(state.store.list(), key=_scan_sort_key, reverse=True)[:max_scans]
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        acq = str(record.get("acquisition_time", ""))
+        scan_id = str(record.get("scan_id", ""))
+        for target in record.get("targets") or []:
+            if not isinstance(target, dict):
+                continue
+            corr = target.get("corr")
+            corr = corr if isinstance(corr, dict) else {}
+            rows.append(
+                {
+                    "scan_id": scan_id,
+                    "item_id": scan_id,
+                    "acquisition_time": acq,
+                    "lat": target.get("lat"),
+                    "lon": target.get("lon"),
+                    "sar_conf": target.get("sarConf"),
+                    "classification": target.get("cls"),
+                    "apparent_length_m": target.get("lenM"),
+                    "length_unc_m": target.get("lenUncM"),
+                    "correlated_mmsi": corr.get("mmsi"),
+                    "ais_confidence": target.get("aisConf"),
+                }
+            )
+    return rows
+
+
+@router.get("/tracks")
+def list_tracks(
+    state: State,
+    max_scans: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Multi-pass track HYPOTHESES across the persisted history (ADV-001..003).
+
+    Never claims a confirmed identity, and never links a detection that had no
+    AIS association. A single stored scan legitimately yields zero tracks.
+    """
+    observations = [r for r in _observations(state, max_scans=max_scans) if r["lat"] is not None]
+    tracks = build_tracks(observations)
+    return {
+        "scans_considered": len({o["scan_id"] for o in observations}),
+        "observations_considered": len(observations),
+        "track_count": len(tracks),
+        "tracks": [t.to_dict() for t in tracks],
+        "note": (
+            "Tracks are hypotheses built from reported AIS identity, not from "
+            "geometry alone. DarkFleet does not confirm vessel identity."
+        ),
+    }
+
+
+@router.get("/patterns")
+def list_patterns(
+    state: State,
+    max_scans: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Longitudinal behaviour PATTERNS (ADV-009/010).
+
+    Each pattern carries its observation, a hypothesis, a bounded confidence and
+    the explicit unknowns. A pattern is something to investigate, never a finding
+    about intent.
+    """
+    observations = [r for r in _observations(state, max_scans=max_scans) if r["lat"] is not None]
+    patterns = temporal_analyse(observations)
+    return {
+        "scans_considered": len({o["scan_id"] for o in observations}),
+        "observations_considered": len(observations),
+        "pattern_count": len(patterns),
+        "patterns": [p.to_dict() for p in patterns],
+        "note": (
+            "Patterns describe data coverage and correlation outcomes. A missing "
+            "AIS association is a coverage fact and is not evidence of conduct."
+        ),
+    }
+
+
+@router.get("/detectors")
+def list_detectors() -> dict[str, Any]:
+    """The detector registry (ADV-007/008).
+
+    An ML or ensemble detector without weights and validation is refused at
+    registration, so it can never appear here as an available detector.
+    """
+    registry = DetectorRegistry()
+    return {
+        "default": registry.resolve().card.name,
+        "detectors": [
+            {
+                "name": card.name,
+                "kind": card.kind,
+                "training_domain": card.training_domain,
+                "input_product": card.input_product,
+                "validation_data": card.validation_data,
+                "limitations": card.limitations,
+                "weights_digest": card.weights_digest,
+            }
+            for card in registry.available()
+        ],
+        "note": (
+            "CA-CFAR is the shipped baseline. No trained weights ship with "
+            "DarkFleet; an adapter must declare its training domain and "
+            "validation before it can be registered."
+        ),
+    }
+
+
+@router.get("/targets/{target_id}/summary")
+def summarise_target(
+    target_id: str,
+    state: State,
+    scan_id: str | None = Query(default=None),
+    model_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Optional narrative over an existing evidence document (ADV-011/012).
+
+    The evidence document is always returned. The narrative is additive: when it
+    is unavailable the caller still has every deterministic observation, and the
+    response says so explicitly instead of substituting prose.
+    """
+    owners = _locate_target(state, target_id, scan_id)
+    owner = owners[0]
+    evidence = target_evidence(
+        owner["target"],
+        owner["record"].get("provenance") or {},
+        owner["target"].get("sar_chip"),
+    )
+    narrative = summarise(evidence, model_id=model_id)
+    return {
+        "scan_id": str(owner["record"].get("scan_id", "")),
+        "target_id": target_id,
+        "classification": owner["target"].get("cls"),
+        "ambiguous": len(owners) > 1,
+        "evidence": jsonable(evidence),
+        "narrative": narrative,
+    }
