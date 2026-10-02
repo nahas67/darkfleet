@@ -29,7 +29,7 @@ from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Final, TypedDict, cast
+from typing import Annotated, Any, Final, NoReturn, TypedDict, cast
 from xml.etree import ElementTree
 
 import httpx
@@ -37,7 +37,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from darkfleet import __processing_version__, __version__
+from darkfleet import __classification_schema__, __processing_version__, __version__
 from darkfleet.ais.archive import AisArchive
 from darkfleet.api.models import (
     DEFERRED_EXPORT_FORMATS,
@@ -75,6 +75,15 @@ from darkfleet.providers.stac import (
     search_earthsearch_grd,
     search_planetary_computer,
     stac_items,
+)
+from darkfleet.raster_render import (
+    RASTER_LAYERS,
+    RasterMode,
+    RasterNotRenderableError,
+    rectangle_for,
+)
+from darkfleet.raster_render import (
+    render_png as render_raster_png,
 )
 from darkfleet.revisit import acquisitions_from_items, plan_revisit
 from darkfleet.revisit import window_for as revisit_window
@@ -605,6 +614,242 @@ def _debug_cache_key(record: Mapping[str, Any]) -> CacheKey | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _raster_context(
+    record: Mapping[str, Any], state: State, layer: str
+) -> tuple[np.ndarray, CacheKey, dict[str, Any]]:
+    """Load one renderable raster plus the measured geometry that positions it.
+
+    Raises an api_error rather than returning a partial answer: a raster with no
+    bounds cannot be placed, and guessing its extent would put detections in the
+    wrong sea.
+    """
+    if layer not in RASTER_LAYERS:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="UNKNOWN_RASTER_LAYER",
+            status_value="UNKNOWN_RASTER_LAYER",
+            message=(
+                f"Unknown raster layer {layer!r}. "
+                f"Renderable layers: {', '.join(RASTER_LAYERS)}."
+            ),
+            detail={"layers": list(RASTER_LAYERS)},
+        )
+    key = _debug_cache_key(record)
+    if key is None:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="RASTER_NOT_AVAILABLE",
+            status_value="LAYERS_NOT_AVAILABLE",
+            message=(
+                "This scan did not persist its raster artifacts, so no image can be "
+                "rendered. Re-run the scan to produce them."
+            ),
+        )
+    array = ArtifactCache(Path(state.settings.data_dir) / "cache", __processing_version__).get(
+        key, RASTER_LAYERS[layer]
+    )
+    if array is None:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="RASTER_LAYER_ABSENT",
+            status_value="LAYERS_NOT_AVAILABLE",
+            message=(
+                f"This scan stored no '{layer}' raster. It is written only for the "
+                "products the pipeline actually produced."
+            ),
+            detail={"layer": layer},
+        )
+    raw_scene = record.get("scene")
+    scene: dict[str, Any] = raw_scene if isinstance(raw_scene, dict) else {}
+    geometry = {
+        "crs": str(scene.get("crs") or ""),
+        "transform": list(scene.get("transform") or []),
+    }
+    return array, key, geometry
+
+
+def _raise_raster_failure(exc: RasterNotRenderableError) -> NoReturn:
+    """Raise an explicit 422 for a raster that cannot be positioned.
+
+    An image nobody can place is not a degraded result, it is a wrong one, so this
+    is raised rather than returned. Returning the exception would let FastAPI try
+    to serialise it as a successful response body.
+    """
+    raise api_error(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        error="RASTER_NOT_GEOREFERENCED",
+        status_value="UNREFERENCED",
+        message=exc.reason,
+        detail=exc.detail,
+    ) from exc
+
+
+@router.get("/scans/{scan_id}/raster")
+def raster_index(scan_id: str, state: State) -> Response:
+    """Which rasters this scan can render, and the geometry each would occupy.
+
+    Metadata before image, deliberately: Cesium's SingleTileImageryProvider needs
+    the rectangle before it will fetch the image, so the two cannot be one
+    response without either guessing the extent or inlining the image as a data
+    URL. This keeps the extent measured and the image a plain PNG.
+    """
+    record = _safe_store_get(state.store, scan_id)
+    if record is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="UNKNOWN_SCAN",
+            status_value="UNKNOWN_SCAN",
+            message=f"No completed scan {scan_id!r}; rasters are written at COMPLETE.",
+            scan_id=scan_id,
+        )
+    key = _debug_cache_key(record)
+    layers: list[dict[str, Any]] = []
+    if key is not None:
+        cache = ArtifactCache(Path(state.settings.data_dir) / "cache", __processing_version__)
+        raw_scene = record.get("scene")
+        scene: dict[str, Any] = raw_scene if isinstance(raw_scene, dict) else {}
+        crs = str(scene.get("crs") or "")
+        transform = list(scene.get("transform") or [])
+        for name, source in RASTER_LAYERS.items():
+            array = cache.get(key, source)
+            if array is None:
+                continue
+            entry: dict[str, Any] = {
+                "layer": name,
+                "modes": ["stretch", "raw", "falsecolor"]
+                if name not in ("landmask", "detection_mask")
+                else ["stretch"],
+                "shape": [int(array.shape[0]), int(array.shape[1])],
+                "dtype": str(array.dtype),
+            }
+            try:
+                bounds = rectangle_for(array, crs=crs, transform=transform)
+                entry["rectangle"] = bounds.as_rectangle()
+                entry["georeferenced"] = True
+            except RasterNotRenderableError as exc:
+                entry["georeferenced"] = False
+                entry["reason"] = exc.reason
+            layers.append(entry)
+
+    payload = {
+        "scan_id": scan_id,
+        "scene_item_id": ((record.get("scene") or {}).get("item_id") if isinstance(record.get("scene"), dict) else None),
+        "crs": ((record.get("scene") or {}).get("crs") if isinstance(record.get("scene"), dict) else None),
+        "layers": layers,
+        "renderable_count": len(layers),
+    }
+    return Response(
+        content=json.dumps(payload, indent=2, sort_keys=True, default=str),
+        media_type="application/json",
+    )
+
+
+@router.get("/scans/{scan_id}/raster/{layer}")
+def raster_metadata(scan_id: str, layer: str, state: State) -> Response:
+    """Measured geometry and statistics for one raster layer.
+
+    Separate from the image because Cesium needs the rectangle to construct the
+    imagery provider, and because an operator asking "what is this layer" deserves
+    its measured numbers without decoding a PNG.
+    """
+    record = _safe_store_get(state.store, scan_id)
+    if record is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="UNKNOWN_SCAN",
+            status_value="UNKNOWN_SCAN",
+            message=f"No completed scan {scan_id!r}; rasters are written at COMPLETE.",
+            scan_id=scan_id,
+        )
+    array, _key, geometry = _raster_context(record, state, layer)
+    try:
+        bounds = rectangle_for(array, crs=geometry["crs"], transform=geometry["transform"])
+    except RasterNotRenderableError as exc:
+        _raise_raster_failure(exc)
+
+    _png, report = render_raster_png(array, layer=layer, mode="stretch")
+    raw_scene = record.get("scene")
+    scene: dict[str, Any] = raw_scene if isinstance(raw_scene, dict) else {}
+    payload = {
+        "scan_id": scan_id,
+        "layer": layer,
+        "rectangle": bounds.as_rectangle(),
+        "crs": geometry["crs"],
+        "transform": geometry["transform"],
+        "image_url": f"/api/scans/{scan_id}/raster/{layer}/image",
+        "scene": {
+            "item_id": scene.get("item_id"),
+            "platform": scene.get("platform"),
+            "acquisition_time": scene.get("acquisition_time"),
+            "polarization": scene.get("polarization"),
+            "product": scene.get("product"),
+            "provider": scene.get("provider"),
+            "resolution_m": scene.get("resolution_m"),
+            "raster_window": scene.get("raster_window"),
+        },
+        "render": report,
+        "provenance": {
+            "processing_version": __processing_version__,
+            "software_version": __version__,
+            "classification_schema": __classification_schema__,
+        },
+    }
+    return Response(
+        content=json.dumps(payload, indent=2, sort_keys=True, default=str),
+        media_type="application/json",
+    )
+
+
+@router.get("/scans/{scan_id}/raster/{layer}/image")
+def raster_image(
+    scan_id: str,
+    layer: str,
+    state: State,
+    mode: Annotated[
+        RasterMode,
+        Query(description="stretch = measured percentiles; raw = fixed dB window; falsecolor = analytical ramp."),
+    ] = "stretch",
+) -> Response:
+    """The raster itself, as a georeferenced PNG.
+
+    ``singleTileImageryProvider`` decodes PNG; the pipeline's assets are GeoTIFF
+    over HTTP, which no browser can display. This is the server-side render that
+    makes the SAR actually visible, and it renders the SAME cached array the
+    detections were computed from.
+    """
+    record = _safe_store_get(state.store, scan_id)
+    if record is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="UNKNOWN_SCAN",
+            status_value="UNKNOWN_SCAN",
+            message=f"No completed scan {scan_id!r}; rasters are written at COMPLETE.",
+            scan_id=scan_id,
+        )
+    array, _key, geometry = _raster_context(record, state, layer)
+    try:
+        # Refuse early if it cannot be positioned: an image nobody can place is
+        # not a degraded result, it is a wrong one.
+        rectangle_for(array, crs=geometry["crs"], transform=geometry["transform"])
+        png, report = render_raster_png(array, layer=layer, mode=mode)
+    except RasterNotRenderableError as exc:
+        _raise_raster_failure(exc)
+
+    # The report travels as headers so the client can state what it is showing
+    # (downsample factor, display window) rather than implying 1:1 native pixels.
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "X-DarkFleet-Downsample": str(report["downsample_factor"]),
+            "X-DarkFleet-Display-Window": json.dumps(report["display_window"]),
+            "X-DarkFleet-Source-Shape": ",".join(str(v) for v in report["source_shape"]),
+            "X-DarkFleet-Rendered-Shape": ",".join(str(v) for v in report["rendered_shape"]),
+        },
+    )
 
 
 # ------------------------------------------------------------- endpoints
