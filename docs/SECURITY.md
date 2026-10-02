@@ -34,8 +34,9 @@ configuration — a hostile response cannot redirect the token request to an
 arbitrary host.
 
 **Filesystem paths.** `RunStore` validates its subdirectory name and rejects
-`.`, `..`, separators, and NUL bytes (`storage/runs.py:130`). Scan identifiers
-are allocated by the runner, not accepted from clients.
+`.`, `..`, separators, and NUL bytes (`storage/runs.py:152-157`), and refuses a
+`scan_id` containing a separator, NUL or colon (`storage/runs.py:184`). Scan
+identifiers are allocated by the runner, not accepted from clients.
 
 **Input validation.** Every request body is a Pydantic model. A malformed AOI is
 rejected with 422 before any work begins (`api/models.py::BBox`).
@@ -50,9 +51,21 @@ never credentials.
 **Container privileges.** The Docker images run as non-root with no capability
 additions and no privileged mounts.
 
-**DEMO/REAL isolation.** `RunStore.save` rejects any record whose
-`runtime_mode` and `synthetic` flag disagree. This prevents mislabelled evidence
-being persisted even if a caller is wrong.
+**No synthetic path.** There is no DEMO mode, no scene synthesiser
+(`backend/darkfleet/demo.py` is deleted) and no `allow_synthetic_scenes` setting.
+Two guards back that up:
+
+- `RunStore.save` rejects any record that is not `runtime_mode="REAL"` **and**
+  `synthetic=False`, and requires both fields to be present — so a caller cannot
+  persist a mislabelled artifact, or an artifact with the isolation fields
+  stripped out.
+- `mark_synthetic(record, synthetic=True)` raises at the call site rather than
+  letting the store reject it downstream.
+
+A provider failure is an error response and persists nothing; there is no second
+world for the pipeline to degrade into. `POST /api/scans` rejects
+`runtime_mode` and `scene_id` with 422 `extra_forbidden`, and the OpenAPI schema
+advertises neither, so a caller cannot request a mode that does not exist.
 
 ## Known limitations
 

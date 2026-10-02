@@ -76,21 +76,46 @@ With no credentials configured, each provider reports its own real state
 (`AUTH_REQUIRED` / `NOT_CONFIGURED`) through `GET /api/providers/health`. Nothing
 is simulated in their place — see "No synthetic mode" below.
 
+`GET /api/revisit` (GEO-002) queries the same catalogues and ships no data of its
+own: every acquisition it reports is a STAC item the provider returned, with its
+real item id, timestamp, platform and polarisation. It uses no orbit prediction —
+`skyfield`/SGP4 is deliberately not a dependency — so there is no modelled pass to
+license and no predicted acquisition to mistake for a measurement.
+
 ## No synthetic mode
 
 DarkFleet has **no** synthetic runtime mode. Every scan is a REAL scan against a
-live provider.
+live provider. This is now a deletion rather than a switch:
 
-The synthetic scene catalogue survives only as an automated-test harness behind
-`Settings.allow_synthetic_scenes`, which defaults to `False` and is pinned off in
-`docker-compose.yml`. It exists because the test suite needs a raster that
-requires neither a provider credential nor network access; deleting it would leave
-the detection engine untestable.
+- `Settings.allow_synthetic_scenes` **does not exist** and cannot be set from the
+  environment, so there is no flag to discover and no degraded path to reach.
+- `backend/darkfleet/demo.py`, the scene/raster/AIS generator, is **deleted**.
+  No synthesiser remains anywhere in the repository, product code or tests.
+- `POST /api/scans` does not accept `runtime_mode` or `scene_id`; sending either
+  is a **422 `extra_forbidden`**, and the OpenAPI schema advertises only
+  `bbox`, `cfar_config`, `datetime_range`, `product`, `provider`.
+- `GET /api/scenes` has no `runtime_mode` parameter and no fallback catalogue. It
+  is a live provider proxy that requires an explicit
+  `bbox=min_lon,min_lat,max_lon,max_lat`; there is no default extent and no
+  synthetic list behind it, so every scene it returns is an acquisition the
+  provider actually holds.
+- `RunStore.save` rejects any record that is not `runtime_mode="REAL"` **and**
+  `synthetic=False`, with both fields required to be present, and
+  `mark_synthetic(record, synthetic=True)` raises at the call site.
 
-`POST /api/scans` does not accept `runtime_mode`, and the OpenAPI schema does not
-advertise it. `GET /api/scenes?runtime_mode=DEMO` is refused with
-`SYNTHETIC_SCENES_DISABLED` rather than silently upgraded, so a caller is never
-handed live data believing it is synthetic or vice versa.
+The test suite still runs offline, and honestly: `backend/tests/fixture_source.py`
+reads a checked-in GeoTIFF (`tests/fixtures/cog/fixture_32648.tif`, 400×400
+EPSG:32648, 10 m) through `run_scan`'s existing `window_source` injection point.
+A real GeoTIFF on disk needs neither a credential nor a network, and it keeps the
+production CFAR, land-mask, correlation, evidence and persistence code in the
+loop instead of exercising a parallel implementation of it.
 
 The reason this is a correctness rule rather than a preference: **a user cannot
 tell a fabricated observation from a measurement they relied on.**
+
+> **Correction, 2026-10-02.** The previous version of this section claimed the
+> synthetic scene catalogue "survives only as an automated-test harness behind
+> `Settings.allow_synthetic_scenes`" and that `GET /api/scenes?runtime_mode=DEMO`
+> is refused with `SYNTHETIC_SCENES_DISABLED`. Both were true when written and are
+> false now: the switch and the generator are deleted, and there is no
+> `SYNTHETIC_SCENES_DISABLED` status code anywhere in the backend.

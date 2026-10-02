@@ -122,8 +122,56 @@ counter.
 
 ## Modes
 
-`DEMO` uses deterministic synthetic SAR and AIS; every artifact carries
-`{"runtime_mode":"DEMO","synthetic":true}`. `REAL` uses live providers only. A
-provider failure in REAL surfaces an explicit status and **never** degrades to
-synthetic data — the run store rejects any record whose mode and synthetic flag
-disagree.
+There is one mode. Every artifact carries `{"runtime_mode":"REAL",
+"synthetic":false}`, and those two fields are invariants rather than labels: the
+run store rejects any record that is not both of those things, and requires both
+fields to be present. There is no synthetic scene generator anywhere in the
+project — `backend/darkfleet/demo.py` is deleted and
+`Settings.allow_synthetic_scenes` no longer exists — so a provider failure has
+nothing to degrade into. It surfaces as an explicit `ProviderStatus` code and the
+scan persists nothing.
+
+Offline tests read a checked-in GeoTIFF fixture
+(`tests/fixtures/cog/fixture_32648.tif`) through the pipeline's `window_source`
+injection point, so the stages above are the real ones even with no network.
+
+## Geography the evidence carries
+
+Two facts are attached to every target's position, because a bare coordinate pair
+is either less useful than it should be or actively misleading:
+
+- **GEO-001 — the named water body.** `darkfleet/marine.py` resolves the
+  position to a Natural Earth marine region so evidence reads as geography. An
+  unmatched position reports `kind`/`primary` explicitly rather than silently
+  returning nothing.
+- **GEO-003 — the vertical datum.** `darkfleet/geoid.py` embeds
+  `describe_datum(lat, lon)` with `altitude_measured: false`, because SAR
+  measures a two-dimensional backscatter image and does not measure height. The
+  record names the ellipsoid (WGS84) and the geoid model (EGM2008) separately and
+  carries the undulation only if an undulation source is installed. No EGM2008
+  grid ships with this project, so the value is reported on its original datum and
+  clearly labelled as *not* height above sea level. N is never assumed to be zero,
+  because a sign error in the undulation is exactly the tens-of-metres mistake
+  this module exists to prevent.
+
+## Acquisition planning (GEO-002)
+
+`GET /api/revisit` sits beside the scan pipeline rather than inside it, because
+it answers a prior question: can this water be imaged at all, and when?
+`darkfleet/revisit.py` searches the provider STAC catalogue over a window and
+reports the acquisitions that **genuinely exist**.
+
+It measures rather than predicts. Predicting a pass from a TLE would mean
+shipping `skyfield`/SGP4 and presenting an estimate of when a satellite *could*
+look as though it were a schedule; the catalogue gives what was actually acquired.
+Three honesty constraints follow from that choice:
+
+- Gaps and intervals are computed only **inside** the queried window. A gap at the
+  window edge is not evidence of a coverage hole, so window bounds are returned
+  alongside the statistics and `nominal_repeat_days` (12 d) is a constraint used
+  only to *flag* long gaps, never to invent an acquisition.
+- A revisit interval is reported only when at least two acquisitions exist. With
+  one, the honest answer is "insufficient data" — `median_revisit_days` is `null`,
+  not `0` — and a `limitations` string says why.
+- The response echoes the provider, collection, requested bbox and window, so a
+  statistic can never be quoted without the bounds that produced it.

@@ -3,6 +3,12 @@
 Prepared after inspecting the archive. Every claim below is read out of the zip,
 not assumed.
 
+> **Status: executed, with one scope change (2026-10-02).** Picks A and B shipped
+> (`darkfleet/marine.py` GEO-001, `darkfleet/ais/resilience.py` AIS-016/017) and
+> the DEMO removal is complete rather than gated. §4's stated assumption about
+> keeping synthetic generation for tests was superseded — see the correction note
+> in §4 for why the narrow scope was not the right end state.
+
 ## 1. What the archive actually is
 
 `gods-eye-view-0.1.1.zip` — 77,011,857 bytes, sha256
@@ -81,6 +87,35 @@ and unreachable from the HTTP surface.** A user-facing mode that fabricates
 observations goes away; the ability to test without provider credentials stays,
 because deleting that instead would leave the engine untestable. If the intent
 was to delete synthetic *test* generation as well, say so and I will widen it.
+
+> **Correction, 2026-10-02 — this scope was superseded by a wider one.** The
+> assumption above is what was planned, and it was *not* the final shape. The
+> narrow scope ("tests may generate scenes, but nothing user-facing can reach
+> them") was implemented first, then deliberately widened and the whole thing
+> deleted. Why the narrow scope was not good enough, which is worth recording:
+>
+> A synthesiser kept alive only for tests is still a synthesiser. `backend/tests/`
+> could call `demo.py` for a fixture scene, which means the module stayed
+> importable, which meant `Settings.allow_synthetic_scenes` had to stay as its
+> guard, which meant a real capability was one env var away from being reachable
+> from the product. The fixture the tests actually needed was a *raster*, and a
+> checked-in GeoTIFF is a better answer to that need than a generator: it needs
+> no credential, no network, and it is real data rather than invented data.
+>
+> Final state (verified on disk 2026-10-02):
+>
+> - `backend/darkfleet/demo.py` — **deleted**.
+> - `Settings.allow_synthetic_scenes` — **removed**, and not settable from the environment.
+> - `run_scan(runtime_mode=…, scene=…)` — both parameters **removed**.
+> - `ScanCreateRequest.scene_id` / `.runtime_mode` — **removed**; the OpenAPI schema advertises neither.
+> - `DEMO_SCENES`, `_demo_scene_summary`, `_resolve_demo_scene` — **deleted** from `api/routes.py`.
+> - `RUNTIME_MODES = ("REAL",)`, single-member `RuntimeMode`, `RuntimeModeLiteral = Literal["REAL"]`.
+> - `server.ts` and its 35-file unreachable frontend tree — **deleted** (see `REMOVALS.md`).
+> - Offline tests now read `tests/fixtures/cog/fixture_32648.tif` via `backend/tests/fixture_source.py`, driving the production pipeline through `run_scan(window_source=…)`.
+
+§5's execution order was carried out as written; step 3 turned out to be larger
+than scoped, and `docs/PLAN_CHANGES.md` records that as a scope change rather than
+leaving this plan quietly wrong.
 
 ## 5. Execution order
 

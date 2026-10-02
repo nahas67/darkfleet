@@ -6,6 +6,38 @@
 
 ---
 
+> ## ⚠ SUPERSEDED IN PART — this is a historical handover record
+>
+> **This file is a point-in-time audit taken at 2026-10-01T10:57 and is left
+> unedited below.** It is not a live work plan and must not be read as one: the
+> dispositions it assigns were overtaken by what actually shipped. It is kept
+> because the takeover reasoning is worth having, and because deleting it would
+> lose the record of what the second analytical engine was.
+>
+> **Do not act on the rows below without this note.** Corrections, 2026-10-02:
+>
+> | Row here | Said | Actually true now |
+> |---|---|---|
+> | §1, §2 `server.ts` **ACTIVE** | the dev/server entry, via `tsx`, on port 3000 | **Deleted.** It was a 375-line Express server reimplementing the whole pipeline in TypeScript and defaulting to DEMO. `npm run dev` is now `vite`; `npm start` is `vite preview`. The API is FastAPI in `backend/`, reached through Vite's `/api` proxy. |
+> | §2 `src/engine/rasterSynthesis.ts` **REUSABLE (DEMO ONLY)** | a module to keep and label | **Deleted**, along with the whole synthetic scene concept. There is no DEMO mode to isolate it to. |
+> | §2 `src/data/dataProvider.ts` **MIGRATION → REWRITE** | expand into `DemoDataProvider` + `RealDataProvider` | **Deleted.** That expansion was never written. The only client is `src/app/useApi.ts`, and there is one provider kind, not two. |
+> | §2 `src/types/darkfleet.ts` **MIGRATION → REWRITE** | keep, modernising its types | **Deleted.** The wire contract lives in `src/types/api.ts` + `src/app/useApi.ts`. |
+> | §2 every other path in the classification matrix | ACTIVE / REUSABLE / SPECIALIZED | **Deleted 2026-10-02** — 35 modules, proven unreachable from `src/main.tsx`. |
+> | §4 "Current Data Flow & Synthetic Leaks" | describes the live architecture | Describes a tree that no longer exists. All five leaks it lists are closed: synthetic generation is gone from both languages, `RealDataProvider` exists in Python, and the criminal-narrative copy is gone. |
+> | §5 Gate 4 (`RuntimeMode = 'DEMO' \| 'REAL'`) | introduce the two-valued enum | Never done, and deliberately not done. `RuntimeMode` is a single-member StrEnum; `RuntimeModeLiteral` is `Literal["REAL"]`. |
+> | §5 Gate 5/6/7 (`DemoDataProvider`, remove local synthesis) | implement the split | Obsolete. The split is replaced by "there is no DEMO side": synthetic generation was deleted outright, and tests read a checked-in COG fixture through the production pipeline. |
+>
+> **What is still worth reading below:** §5 Gates 1, 2, 8, 10 (Cesium as the sole
+> viewport, wiring the floating shell, shrinking the root component, canonical
+> classifications) were carried out and shipped. §4's leak list is a good
+> statement of the failure modes this project is built to avoid, even though the
+> code it describes is gone.
+>
+> Current state of record: `CURRENT_STATE.md`, `REMOVALS.md`, and
+> `EXECUTION_LEDGER.md`.
+
+---
+
 ## 1. Application Entry Path & Runtime Inventory
 
 The application is a full-stack Node.js + Express + Vite + React 19 SPA running on port 3000.

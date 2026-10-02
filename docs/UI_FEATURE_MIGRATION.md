@@ -2,6 +2,13 @@
 
 > Old capability → new surface. Every row ends `MIGRATED`, `REPLACED`, or
 > `REMOVED_WITH_JUSTIFICATION`. No silent loss. Verified at CP8–CP11.
+>
+> **Status note, 2026-10-02.** The "Existing file:line" column names the CP0
+> tree. Every file in it has since been **deleted** — the whole unreachable
+> frontend tree went as one batch once `server.ts` was removed (see `REMOVALS.md`,
+> 2026-10-02). The column is kept as a record of where each capability came
+> from; the New surface column names where it lives now. Three rows changed
+> disposition rather than migrating, and are called out below.
 
 | Old capability | Existing file:line | Required? | New surface | Disposition | Verification |
 |---|---|---|---|---|---|
@@ -14,7 +21,7 @@
 | DARK / CRITICAL counters | `Header.tsx:188-205` | yes (neutralized) | Top-bar status (neutral wording) | REPLACED | no `CRITICAL` copy |
 | GeoJSON/KML/JSON export | `Header.tsx:208-233` | yes | Export tray (+PNG/PDF via API) | REPLACED | 5 files with provenance |
 | Zulu clock | `Header.tsx:59-67` | yes | Top-bar current time | MIGRATED | ticks, no 1 s full re-render |
-| Brand block | `Header.tsx:75-102` | yes | Top-bar brand + mode pill | REPLACED | DEMO/REAL unmistakable |
+| Brand block | `Header.tsx:75-102` | yes | Top-bar brand + live SAR/AIS source badges + UTC clock | REPLACED | **Correction 2026-10-02:** the Verification cell read "DEMO/REAL unmistakable" because the CP0 bar carried a mode pill. The pill is gone — there is no mode to display — so the bar now shows real provider health instead, and the requirement becomes "every scan reports `runtime_mode="REAL"` and `synthetic=false`". |
 | 2D canvas renderer | `TacticalMap.tsx` (all) | yes (as specialist tool) | ANALYSIS workbench raster stack | REPLACED | all 11 passes available |
 | 3 raster colormaps | `TacticalMap.tsx:305-366` | yes | Workbench colormap controls | MIGRATED | pixel-identical mapping |
 | 3 heatmap palettes + opacity | `TacticalMap.tsx:30-85,1006-1057` | yes | Workbench heatmap controls | MIGRATED | palettes selectable |
@@ -46,12 +53,22 @@
 | Radar-targets tab + filters | `AISTelemetryTable.tsx` | yes | Contacts surface (+ sorting) | REPLACED | 3 filters + sort |
 | AIS telemetry tab | `AISTelemetryTable.tsx:229-268` | yes | Contacts AIS tab | MIGRATED | columns kept |
 | Row↔map selection | `AISTelemetryTable.tsx:165-218` | yes | Bidirectional sync + camera-fly | REPLACED | both directions |
-| Sector/target/MMSI search | `SpatialSearch.tsx` (dead) | yes | Wired search + scan-ID | MIGRATED | drives camera |
-| Layer visibility/opacity | `layerRegistry.ts` (dead) | yes | Layers surface | MIGRATED | all 12 layers |
-| DEMO/REAL provider switch | `dataProvider.ts` (dead) | yes | Mode pill + settings | MIGRATED | strict isolation |
-| Camera presets | `cameraController.ts` (4 uncalled) | yes | Full suite wired | MIGRATED | all 11 commands |
+| Sector/target/MMSI search | `SpatialSearch.tsx` (dead, **deleted 2026-10-02**) | yes | Wired search + scan-ID | MIGRATED | drives camera |
+| Layer visibility/opacity | `layerRegistry.ts` (dead, **deleted 2026-10-02**) | yes | Layers surface — `src/globe/registry.ts` | MIGRATED | all 12 layers |
+| DEMO/REAL provider switch | `dataProvider.ts` (dead, **deleted 2026-10-02**) | **no** | **REMOVED_WITH_JUSTIFICATION — the capability is gone, not migrated.** A switch between two modes requires two modes; `RuntimeMode` is a single-member enum and `Settings.runtime_mode` is `Literal["REAL"]`, so there is nothing to switch to. Inventing a second mode to give the control a purpose would reintroduce the fabricated-observation failure the project exists to prevent. | REMOVED_WITH_JUSTIFICATION | The UI offers no mode control; `src/app/SpatialShell.test.ts` asserts the request body never contains `runtime_mode`. The mode is *reported*, never chosen: the shell prints the scan's actual `runtime_mode`, and the top bar shows live provider health from `/api/providers/health`. The CP0 "mode pill" was removed in the same batch (commit `6ede0b4`). |
+| Camera presets | `cameraController.ts` (4 uncalled, **deleted 2026-10-02**) | yes | Full suite wired | MIGRATED | all 11 commands |
 | WebGL fallback | `cesiumViewer.ts:23` (uncalled) | yes | Startup check + fallback view | MIGRATED | renders message |
 | AI summary + per-target notes | `IntelligenceDebriefModal.tsx` | yes (optional) | Evidence AI section | REPLACED | constrained schema |
 
 Legacy files are deleted only after the Verification column is ticked, and each
 deletion lands in `docs/REMOVALS.md` (UI-037).
+
+**UI-037 satisfied, 2026-10-02.** Every "Existing file:line" path in this
+matrix is now deleted — 35 modules and 4 test files, 89 tests, all logged in
+`REMOVALS.md`. Unreachability was proven before deletion by resolving the import
+graph from `src/main.tsx`: 0 reachability violations, and no live module imports
+a deleted one. The capability outcomes are unchanged by the deletion, because the
+capabilities had already been migrated into `src/app/SpatialShell.tsx` at
+CP8–CP14; deleting the dead tree removed the duplicate, not the feature. The one
+genuine exception is the DEMO/REAL provider switch, which was never a capability
+this product should have had.

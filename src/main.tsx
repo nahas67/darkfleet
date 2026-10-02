@@ -19,8 +19,14 @@ import './index.css';
 import { SpatialShell } from './app/SpatialShell.tsx';
 import { createApiClient, toProvidersHealth } from './app/useApi.ts';
 import { initializeCesiumViewer } from './globe/cesiumViewer.ts';
+import {
+  createGlobeBridge,
+  disposeGlobeBridge,
+  pushScanResult,
+} from './globe/globeBridge.ts';
+import type { LayerRegistry } from './globe/registry.ts';
 import { appStore } from './app/state.ts';
-import type { ProvidersHealth } from './types/api.ts';
+import type { ProvidersHealth, ScanResult } from './types/api.ts';
 
 /**
  * Mounts the globe into the shell's container and tears it down on unmount.
@@ -63,6 +69,7 @@ function Root(): React.ReactElement {
   // Provider status comes from the backend's live probe. One client instance is
   // created here and never re-created, so in-flight scans keep their transport.
   const [client] = useState(() => createApiClient());
+  const [registry, setRegistry] = useState<LayerRegistry | null>(null);
 
   useEffect(() => {
     void client
@@ -79,10 +86,45 @@ function Root(): React.ReactElement {
       });
   }, [client]);
 
+  // The globe's layers follow the store, and the store follows the backend.
+  // This effect is the whole of the wiring that CP9 described and never built:
+  // a completed scan reaches `appStore`, and this pushes it onto the viewer.
+  useEffect(() => {
+    const viewer = window.__darkfleetViewer;
+    if (!registry || !viewer || viewer.isDestroyed()) return undefined;
+
+    const apply = (): void => {
+      if (viewer.isDestroyed()) return;
+      pushScanResult(registry, viewer, appStore.getState().scanResult);
+    };
+
+    apply();
+    return appStore.subscribe(apply);
+  }, [registry]);
+
+  // Layer visibility is owned by the layer panel. Mirroring it here is what
+  // makes those switches do something; before this, they changed store state and
+  // no Cesium object was ever consulted.
+  useEffect(() => {
+    if (!registry) return undefined;
+    const applyVisibility = (): void => {
+      const state = appStore.getState();
+      for (const [id, layer] of Object.entries(state.layers)) {
+        registry.setVisible(id as never, layer.visible);
+      }
+    };
+    applyVisibility();
+    return appStore.subscribe(applyVisibility);
+  }, [registry]);
+
+  useEffect(() => () => disposeGlobeBridge(registry), [registry]);
+
   const handleViewerReady = useCallback((viewer: unknown) => {
-    // CP9 wires the LayerRegistry to this viewer. The shell itself stays free
-    // of Cesium logic; this is the single handoff point.
-    if (viewer instanceof Viewer) window.__darkfleetViewer = viewer;
+    if (!(viewer instanceof Viewer)) return;
+    // Debug handle only. Nothing in the product reaches the viewer through this;
+    // the bridge above owns the LayerRegistry and pushes scan data through it.
+    window.__darkfleetViewer = viewer;
+    setRegistry(createGlobeBridge(viewer));
   }, []);
 
   return (
@@ -94,7 +136,12 @@ function Root(): React.ReactElement {
 
 declare global {
   interface Window {
-    /** Single handoff to the Cesium Viewer for CP9 layer wiring. */
+    /**
+     * Read-only handle on the Cesium Viewer, for debugging and for a browser
+     * console. This is NOT how layers are wired: `GlobeBridge` owns the
+     * LayerRegistry and pushes scan data through it. Nothing in the product
+     * should reach the viewer through this global.
+     */
     __darkfleetViewer?: Viewer;
   }
 }

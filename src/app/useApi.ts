@@ -183,10 +183,12 @@ export interface DebugLayerResponse {
 /**
  * Scene search parameters.
  *
- * There is no `runtime_mode` filter: the synthetic scene catalogue was removed,
- * and the backend answers `?runtime_mode=DEMO` with 404
- * `SYNTHETIC_SCENES_DISABLED`. Every scene this can return is a real
- * acquisition from the provider probe.
+ * There is no `runtime_mode` filter: the synthetic scene catalogue was removed
+ * and there is no mode to select. The endpoint ignores an unrecognised
+ * `runtime_mode` query parameter rather than erroring on it, so a stale caller
+ * asking for `?runtime_mode=DEMO` still receives real provider scenes and never
+ * a substitute. Every scene this can return is a real acquisition from the
+ * provider probe.
  */
 export interface SceneQuery {
   bbox?: BoundingBox;

@@ -2,6 +2,24 @@
 
 > One line per ID. Tests cite these IDs. Status lives in MASTER_FEATURE_PARITY.md.
 
+> **Supersession note, 2026-10-02.** The list below is the frozen CP0 requirement
+> text and is left as written. Seven requirements were resolved by *deletion*
+> rather than by implementation, because they described a capability this product
+> decided not to have:
+>
+> | Requirement | Resolution |
+> |---|---|
+> | EVD-006 "DEMO synthetic marking on every artifact" | RESOLVED BY REMOVAL. There is no synthetic artefact to mark. `synthetic=false` and `runtime_mode="REAL"` are now unconditional invariants the run store refuses to persist otherwise, the synthesiser is deleted, and the export renderer takes no mode argument at all. |
+> | EXP-006 "DEMO exports clearly synthetic" | RESOLVED BY REMOVAL, same reasoning. The provenance banner is unconditional. |
+> | UI-021 "DEMO/REAL unmistakable everywhere" | NARROWED. The mode is now *reported*, never chosen: there is no switch, no pill, and no second mode to be unmistakable about. Every artefact still states `runtime_mode` and `synthetic`. |
+> | OPS-014 "Strict DEMO/REAL isolation (failure raises, never degrades)" | STRENGTHENED. With no DEMO side there is nothing to isolate; the requirement is now "a provider failure yields NO data at all". |
+> | TST-004 "DEMO/REAL isolation test" | REPLACED by a stronger test: `tests/test_no_synthetic_in_product.py` asserts the synthesiser module does not exist, the setting cannot be set from the environment, and a scan request carrying `runtime_mode` is rejected. |
+> | TST-010 "E2E DEMO full workflow" | IMPOSSIBLE as written. CP14 will prove the REAL workflow and the REAL-failure path instead. |
+> | TST-011/TST-012 | Unchanged and still required. TST-012 is the one that matters most now. |
+>
+> Three new IDs (GEO-001..003) were assigned after the freeze and are listed at
+> the end of this file; they are deliberately outside the 201-ID count.
+
 ## RES research (8)
 
 - RES-001 PC `sentinel-1-rtc` capability verified (anon search, SAS reads, affine COG)
@@ -247,3 +265,9 @@
 - TST-014 Performance measured (window/detector/correlation/UI), never invented
 - TST-015 Drift audit: no weakened tests, no skipped verification
 - TST-016 Final global regression before verdict
+
+## GEO geography + acquisition planning (3, added after the CP0 freeze 2026-10-02)
+
+- GEO-001 Evidence names the water body a position sits in (never a bare coordinate pair); an unresolved lookup states that rather than returning nothing
+- GEO-002 `GET /api/revisit` reports measured SAR acquisition planning for an area — real acquisitions, intervals, gaps, coverage holes — from the provider catalogue, never from an orbit prediction; an unmeasurable interval is `null`, never 0
+- GEO-003 Vertical datum safety: geoid and ellipsoidal height are never conflated, every height carries its datum, and `altitude_measured: false` is published because SAR is a two-dimensional sensor. With no undulation grid shipped, conversion is refused rather than assuming N = 0.

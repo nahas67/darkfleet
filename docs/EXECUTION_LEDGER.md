@@ -335,3 +335,64 @@ which claimed the backend had no timeline source, was removed, as was the stale
 Verified by driving the containerised stack in Chrome: a REAL scan launched from
 the UI completed with 23 detections and synthetic=false; a DEMO scan completed in
 224 ms; Contacts rendered its 9 sortable columns against live data.
+
+> **Correction 2026-10-02.** The DEMO scan in the paragraph above can no longer be
+> run: the synthetic scene generator was deleted in the batch recorded below. Every
+> earlier entry in this ledger that mentions `demo.py`, a DEMO scene, or a DEMO
+> scan describes the tree as it stood at that checkpoint and is left unedited,
+> because the point of an append-only ledger is that it shows the path.
+
+### Post-CP15 — GEO-001..003, and the end of the synthetic mode
+
+Eight commits, `f3540c1` through `be9cd07`. Recorded here because it closes the
+DEMO/REAL isolation requirements (EVD-006, EXP-006, TST-004, UI-037) by removal
+rather than by implementation, which no earlier entry does.
+
+- **GEO-002 — `GET /api/revisit`.** `darkfleet/revisit.py` measures SAR revisit
+  from the provider STAC catalogue instead of predicting passes from a TLE, so
+  `skyfield`/SGP4 is deliberately not a dependency. Constraints that cost
+  something and were kept: gaps are computed only inside the queried window and
+  the window is returned with the statistics; a single acquisition yields
+  `median_revisit_days: null` plus a limitations string rather than a number; the
+  12-day nominal repeat flags long gaps and never invents an acquisition.
+  Surfaced by `src/plan/AcquisitionPlan.tsx`, mounted in the SAR surface of
+  `SpatialShell.tsx`, 18 tests.
+- **GEO-003 — vertical datum.** `darkfleet/geoid.py`, with
+  `describe_datum()` embedded in every target evidence record and
+  `altitude_measured: false` as the load-bearing field, because SAR is a 2-D
+  sensor. No EGM2008 grid ships, so `to_geoid_height` returns the value on its
+  original datum and labels it WGS84 rather than assuming N = 0 — the assumed
+  zero is exactly the error the module exists to prevent.
+- **GEO-001** (earlier, commit `5681d78`) — named marine regions from Natural
+  Earth, public domain; see `PROVENANCE.md`.
+- **The synthetic mode is deleted, not gated.** `darkfleet/demo.py`,
+  `Settings.allow_synthetic_scenes`, `run_scan(runtime_mode=, scene=)`,
+  `ScanCreateRequest.scene_id`/`.runtime_mode`, `DEMO_SCENES` and its two
+  resolvers are all gone. `RUNTIME_MODES` is `("REAL",)`, `RuntimeMode` is a
+  single-member StrEnum, `mark_synthetic(..., True)` raises at the call site, and
+  `render_png`/`render_pdf` take no `runtime_mode` argument at all (PDF
+  compression OFF, so the unconditional provenance banner is greppable in the raw
+  bytes). Offline tests read `tests/fixtures/cog/fixture_32648.tif` via
+  `run_scan(window_source=…)`, so the production pipeline is what runs.
+- **`server.ts` deleted**, plus 35 unreachable frontend modules and 4 test files.
+  It was a second analytical engine in TypeScript that defaulted to DEMO and was
+  the `npm run dev` entry point. Unreachability was proven by resolving the import
+  graph from `src/main.tsx` at 0 violations — and the first version of that
+  analysis missed a multi-line import block, which `tsc` caught, so the corrected
+  analysis was rerun before anything was deleted.
+- **A real defect found while removing the pill.** The container healthcheck
+  pointed at `/api/providers/health`, which performs a LIVE provider probe; a
+  slow third party pushed it past the 5 s timeout and Docker restarted a healthy
+  API in a loop. Liveness is now `GET /health`, outside the `/api` prefix, with a
+  test that monkeypatches `httpx` to raise and asserts it still answers.
+- **Verified after the batch:** 371 backend tests pass (3 live deselected), ruff
+  clean, strict mypy clean, 356 frontend tests pass, `tsc --noEmit` clean,
+  `vite build` clean. Three `src/` files still contain the string `DEMO`, and all
+  three are correct: two negative assertions in `src/app/SpatialShell.test.ts`
+  (`not.toContain('demo')`) and one doc comment in `src/types/api.ts` recording
+  the removal. **Caveat:** the neighbouring comment in `src/app/useApi.ts:186-188`
+  claims the backend answers `?runtime_mode=DEMO` with 404 and a
+  `SYNTHETIC_SCENES_DISABLED` status. Neither is true against the current backend —
+  `GET /api/scenes` requires `bbox` (400 `INVALID_REQUEST` without it) and no
+  `SYNTHETIC_SCENES_DISABLED` code exists. Corrected in `PROVENANCE.md`; the code
+  comment is left as-is because this change is markdown-only.

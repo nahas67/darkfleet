@@ -3,6 +3,18 @@
 > Authority: actual repo + vNext requirements + live probes + test results.
 > Prior runs are re-verified inputs, not authority. Scope changes → PLAN_CHANGES.md.
 
+> **Supersession note, 2026-10-02.** This plan is frozen at CP0 and its gates are
+> left as written, but four of them reference a DEMO mode that no longer exists.
+> Read them with this note; the corrections are recorded in `PLAN_CHANGES.md` and
+> `REMOVALS.md`:
+>
+> | Gate | Says | Now |
+> |---|---|---|
+> | CP6 "real job events; DEMO/REAL isolated" | two modes to keep apart | There is one mode. Isolation became "a provider failure yields NO data at all". |
+> | CP12 "5 formats, provenance, DEMO marked" | synthetic exports exist and are labelled | Synthetic exports cannot exist. The provenance banner is unconditional and the renderer takes no mode argument. |
+> | §"E2E modes" — "DEMO success · REAL success · REAL-failure" | 3 modes | 2 modes. The REAL-failure E2E (TST-012) is now the load-bearing one; DEMO E2E (TST-010) is not runnable and is replaced in `MASTER_REQUIREMENTS.md`. |
+> | CP16 global audit "feature-loss audit" | diff against the frozen list | Still required. `FEATURE_PRESERVATION.md` now marks the two retired capabilities and the one never-ported capability (COR-015 proximity pairs) rather than implying all of them survived. |
+
 ## Dependency order (no UI polish before the detector is real)
 
 ```text

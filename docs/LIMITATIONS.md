@@ -91,6 +91,29 @@ explicitly as the observations.
 - EarthSearch serves Sentinel-1 GRD whose measurement assets are GCP-referenced
   rather than affine-georeferenced, requiring a warp path.
 
+## Coverage limitations
+
+- **SAR revisit is a property of the provider's catalogue, not of the sky.**
+  `GET /api/revisit` (GEO-002) measures the acquisitions that exist for an area,
+  so it is honest about what was captured and never predicts a pass from an orbit.
+  A long median interval means the catalogue holds nothing between two passes; it
+  does not mean the satellite could not have looked.
+- **The plan is bounded by the queried window.** Intervals are computed only
+  inside it, and a gap at the window edge is reported as an edge rather than as a
+  coverage hole. The window is returned with the statistics for that reason.
+- **No geoid undulation grid ships with this project.** Every height-related
+  value is therefore reported on the WGS84 ellipsoid and explicitly labelled *not*
+  height above sea level (GEO-003). A conversion is refused rather than performed
+  with an assumed N = 0, because the sign of N flips across the world and a wrong
+  sign is worse than no answer.
+- **DarkFleet reports no vessel altitude at all.** SAR measures a
+  two-dimensional backscatter image. `altitude_measured: false` appears in every
+  target's evidence record so no consumer infers a height from an apparent
+  footprint.
+- **Two named marine regions are absent.** Luzon Strait and Drake Passage are
+  sliver-only in the upstream Natural Earth source and were dropped by its own
+  curation. An unresolved lookup says so rather than returning nothing (GEO-001).
+
 ## What is not implemented yet
 
 Stated plainly rather than implied:
@@ -101,6 +124,18 @@ Stated plainly rather than implied:
 - Machine-learning detector (the interface exists; no validated model is shipped)
 - Longitudinal temporal-pattern analysis
 - PNG and PDF evidence exports
+
+> **Correction, 2026-10-02.** Five of the six items above have since shipped:
+> multi-pass track hypotheses (`/api/tracks`, ADV-001..003), image-based wake
+> analysis (`sar/wake.py`, ADV-004/005, still 🟡 — angular recovery is ±10° and
+> confidence is bounded evidence strength, not a probability), multi-polarization
+> features (`/api/detectors` registry + `polarization.py`, ADV-006, with single-pol
+> acquisitions reporting `NOT_AVAILABLE` rather than an imputed ratio), temporal
+> patterns (`/api/patterns`, ADV-009/010), and PNG/PDF exports
+> (`GET /api/scans/{id}/export/{fmt}`, EXP-004/005). Only the validated ML detector
+> remains genuinely unshipped, and `MASTER_FEATURE_PARITY.md` is the row-level
+> record of status. The list is left visible because it was true at the time and
+> because it is a useful picture of how much of this was aspiration.
 
 ## Appropriate use
 

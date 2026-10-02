@@ -27,6 +27,7 @@ import type {
   ProviderHealthEntry,
   ProvidersHealth,
   ProviderState,
+  ScanResult,
 } from '../types/api.ts';
 
 /** Every floating contextual surface the shell can open. */
@@ -124,6 +125,17 @@ export interface AppState {
   readonly layers: Readonly<Record<LayerId, LayerState>>;
   readonly selectedTargetId: string | null;
   readonly activeScanId: string | null;
+  /**
+   * The completed scan whose detections belong on the globe.
+   *
+   * Held in the store rather than in the shell so the globe bridge can subscribe
+   * to it. That keeps Cesium out of `SpatialShell`, which is the rule the shell's
+   * own header states: the shell owns layout and state, the globe owns drawing.
+   *
+   * Null means nothing has been scanned yet, or the scan was cleared — the
+   * bridge treats it as "draw nothing", never as "keep the last scan up".
+   */
+  readonly scanResult: ScanResult | null;
   readonly providers: ProvidersHealth | null;
   readonly providersCheckedAt: string | null;
   readonly providersError: string | null;
@@ -152,6 +164,7 @@ export function initialState(overrides: Partial<AppState> = {}): AppState {
     layers: initialLayerStates(),
     selectedTargetId: null,
     activeScanId: null,
+    scanResult: null,
     providers: null,
     providersCheckedAt: null,
     providersError: null,
@@ -223,6 +236,19 @@ export function withSelectedTarget(state: AppState, id: string | null): AppState
 
 export function withActiveScan(state: AppState, id: string | null): AppState {
   return state.activeScanId === id ? state : { ...state, activeScanId: id };
+}
+
+/**
+ * Record the scan whose detections belong on the globe.
+ *
+ * Switching scans clears the globe. `withActiveScan` deliberately does NOT do
+ * this: the AOI and the detections are separate facts, and a caller that changes
+ * the active scan without loading its result should get an empty globe rather
+ * than the previous scan's marks sitting over a different AOI.
+ */
+export function withScanResult(state: AppState, result: ScanResult | null): AppState {
+  if (state.scanResult === result) return state;
+  return { ...state, scanResult: result };
 }
 
 export function withProviders(
@@ -370,6 +396,8 @@ export interface AppStore {
   toggleLayer(id: LayerId): void;
   selectTarget(id: string | null): void;
   setActiveScanId(id: string | null): void;
+  /** Push a completed scan onto the globe. `null` clears it. */
+  setScanResult(result: ScanResult | null): void;
   setProviders(providers: ProvidersHealth | null, checkedAt: string | null, error: string | null): void;
 }
 
@@ -403,6 +431,7 @@ export function createStore(overrides: Partial<AppState> = {}): AppStore {
     toggleLayer: (id) => set(withToggledLayer(state, id)),
     selectTarget: (id) => set(withSelectedTarget(state, id)),
     setActiveScanId: (id) => set(withActiveScan(state, id)),
+    setScanResult: (result) => set(withScanResult(state, result)),
     setProviders: (providers, checkedAt, error) =>
       set(withProviders(state, providers, checkedAt, error)),
   };

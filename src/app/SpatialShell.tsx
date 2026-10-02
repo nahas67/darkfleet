@@ -47,7 +47,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react';
-import type { BoundingBox, LayerId, ProvidersHealth, ProviderHealthEntry } from '../types/api.ts';
+import type { BoundingBox, LayerId, ProvidersHealth, ProviderHealthEntry, ScanResult, VesselTarget } from '../types/api.ts';
 import type { ScanRequest } from '../types/api.ts';
 import {
   ADVANCED_LAYER_IDS,
@@ -519,18 +519,60 @@ function useScanTargets(
     client
       .getScanTargets(scanId)
       .then((response) => {
-        if (!cancelled) setTargets(response);
+        if (cancelled) return;
+        setTargets(response);
+        // Publish to the store so the globe bridge can draw it. This is the only
+        // handoff from the shell to the map: the shell does not know what Cesium
+        // is, and the bridge does not fetch.
+        appStore.setScanResult(toGlobeScanResult(response));
       })
       .catch(() => {
         // Not readable yet (409 while the job runs) is an unknown state, not an
         // empty scan. The stage dependency re-runs this once the job lands.
-        if (!cancelled) setTargets(null);
+        if (cancelled) return;
+        setTargets(null);
+        // Clear the globe too: the previous scan's marks are real measurements,
+        // but of somewhere else, and leaving them up while a new scan loads
+        // would show a stale reading as if it were the current one.
+        appStore.setScanResult(null);
       });
     return () => {
       cancelled = true;
     };
   }, [client, scanId, stage, terminal]);
   return targets;
+}
+
+/**
+ * Adapt the targets response into the `ScanResult` shape the globe draws.
+ *
+ * Returns null when the response cannot be trusted as a measurement. The backend
+ * stamps `runtime_mode` and `synthetic` on every response, so a payload that
+ * says otherwise is refused here rather than drawn: a globe full of fabricated
+ * marks would be the single worst failure this tool could have.
+ *
+ * Exported for testing: this is the last point at which a fabricated payload can
+ * be stopped, so it is asserted directly rather than inferred from the globe.
+ */
+export function toGlobeScanResult(response: ScanTargetsResponse): ScanResult | null {
+  if (response.runtime_mode !== 'REAL' || response.synthetic !== false) return null;
+  const targets = Array.isArray(response.targets) ? response.targets : [];
+  const aisOnly = Array.isArray(response.ais_only) ? response.ais_only : [];
+  return {
+    scan_id: response.scan_id,
+    runtime_mode: 'REAL',
+    synthetic: false,
+    scene: (response.scene ?? {}) as ScanResult['scene'],
+    aoi: Array.isArray(response.aoi) ? response.aoi : [],
+    acquisition_time: response.acquisition_time ?? '',
+    config: {},
+    targets: targets as unknown as VesselTarget[],
+    ais_only: aisOnly as unknown as ScanResult['ais_only'],
+    counts: response.counts ?? {},
+    provenance: (response.provenance ?? {}) as unknown as ScanResult['provenance'],
+    processing_time_ms: 0,
+    created_at: '',
+  };
 }
 
 function SurfaceBody(props: SurfaceBodyProps) {
