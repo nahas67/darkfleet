@@ -1,6 +1,9 @@
 """CP15 API surface: /tracks, /patterns, /detectors, /targets/{id}/summary.
 
 ADV-001..003, ADV-007/008, ADV-009..012.
+
+Scans run the production pipeline over the checked-in fixture COG; only the
+network is replaced (see :mod:`tests.fixture_source`).
 """
 
 from __future__ import annotations
@@ -15,8 +18,17 @@ from fastapi.testclient import TestClient
 
 from darkfleet.api.app import create_app
 from darkfleet.config.settings import Settings
+from tests import fixture_source
 
-DEMO_BBOX = [103.65, 1.1, 104.05, 1.4]
+#: The AOI the fixture COG covers.
+AOI = fixture_source.FIXTURE_BBOX
+
+
+@pytest.fixture(scope="module", autouse=True)
+def offline_pipeline() -> Iterator[None]:
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        fixture_source.install(monkeypatch)
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -24,8 +36,6 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     data_dir = tmp_path_factory.mktemp("darkfleet-cp15")
     conf = Settings(data_dir=str(data_dir))
     conf.log_level = "WARNING"
-    # Synthetic scenes are a test harness only; see Settings.allow_synthetic_scenes.
-    conf.allow_synthetic_scenes = True
     return conf
 
 
@@ -50,10 +60,10 @@ def _await_terminal(client: TestClient, scan_id: str, timeout: float = 120.0) ->
 
 @pytest.fixture(scope="module")
 def scan_with_targets(client: TestClient) -> dict[str, Any]:
-    """Two DEMO scans over the same AOI: enough history for the intel surfaces."""
+    """Two scans over the same AOI: enough history for the intel surfaces."""
     ids: list[str] = []
     for _ in range(2):
-        started = client.post("/api/scans", json={"bbox": DEMO_BBOX})
+        started = client.post("/api/scans", json={"bbox": AOI})
         assert started.status_code == 202, started.text
         ids.append(str(started.json()["scan_id"]))
     return {"scan_ids": ids, "targets": _await_terminal(client, ids[-1])}
@@ -109,11 +119,10 @@ def test_tracks_never_link_a_detection_without_ais(client: TestClient) -> None:
 
 
 def test_tracks_on_empty_history_returns_zero_not_an_error(
-    settings: Settings, tmp_path_factory: pytest.TempPathFactory
+    tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     empty = Settings(data_dir=str(tmp_path_factory.mktemp("empty")))
     empty.log_level = "WARNING"
-    empty.allow_synthetic_scenes = True
     with TestClient(create_app(empty)) as fresh:
         body = fresh.get("/api/tracks").json()
         assert body["track_count"] == 0
@@ -162,7 +171,7 @@ def test_summary_returns_evidence_even_when_narrative_is_unavailable(
     client: TestClient, scan_with_targets: dict
 ) -> None:
     targets = client.get(f"/api/scans/{scan_with_targets['scan_ids'][-1]}/targets").json()["targets"]
-    assert targets, "the demo scan produced no targets to summarise"
+    assert targets, "the scan produced no targets to summarise"
     target_id = str(targets[0]["id"])
 
     response = client.get(f"/api/targets/{target_id}/summary")

@@ -92,17 +92,25 @@ def test_png_is_a_real_png_with_caption_height() -> None:
         assert im.height == 64 + 156  # raster + provenance caption
 
 
-def test_png_marks_demo_as_synthetic() -> None:
+def test_png_never_renders_a_legacy_synthetic_record_as_real() -> None:
+    """A record an older build wrote is still marked synthetic on export.
+
+    This product no longer produces synthetic output, but the run store still
+    holds ``DEMO`` records written before it was removed, and the API will serve
+    an export for one. The renderer must keep labelling it: an export is the
+    artefact a user forwards to someone else, so mislabelling it is the one
+    failure that cannot be walked back.
+    """
     db, valid = _db()
-    demo = render_png(
-        scan_id="DF-D", runtime_mode="DEMO", db=db, valid=valid,
-        centroids=[], provenance=PROV, title="Demo",
+    legacy = render_png(
+        scan_id="DF-LEGACY", runtime_mode="DEMO", db=db, valid=valid,
+        centroids=[], provenance=PROV, title="Legacy",
     )
     real = render_png(
         scan_id="DF-R", runtime_mode="REAL", db=db, valid=valid,
         centroids=[], provenance=PROV, title="Real",
     )
-    assert demo != real  # the mode banner differs; DEMO is never silently identical
+    assert legacy != real  # a legacy record is never silently identical to REAL
 
 
 def test_pdf_has_a_page_per_target_and_provenance() -> None:
@@ -115,7 +123,12 @@ def test_pdf_has_a_page_per_target_and_provenance() -> None:
     assert pdf.rstrip().endswith(b"%%EOF")
 
 
-def test_pdf_demo_and_real_differ() -> None:
+def test_pdf_never_renders_a_legacy_synthetic_record_as_real() -> None:
+    """Same guarantee as the PNG, on the artefact people actually print.
+
+    One flag statement per page, so a single page torn out of the pack still
+    carries the label.
+    """
     common = {
         "scan_id": "DF-T", "title": "T", "scene": PROV["sar"], "provenance": PROV,
         "targets": TARGETS, "ais_only": [],

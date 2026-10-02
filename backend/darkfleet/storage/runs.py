@@ -4,12 +4,18 @@ Every scan becomes one JSON document under ``root/scans/<scan_id>.json``. State
 lives on disk, never in memory: a new :class:`RunStore` over the same root sees
 every previously saved record.
 
-The isolation guard is the point of this module. Any record written here must
-carry a ``runtime_mode`` of ``"DEMO"`` or ``"REAL"`` **and** a boolean
-``synthetic`` flag, and the two must agree: ``REAL`` may never claim synthetic
-data and ``DEMO`` may never claim real data. Violations raise
-:class:`ValueError` at :meth:`RunStore.save` time, so a mislabelled artifact
-never reaches disk.
+The isolation guard is the point of this module, and it is now a STRONGER
+invariant than the two-mode version it replaced. Every record written here must
+carry ``runtime_mode="REAL"`` and ``synthetic=False``. Those are not options and
+not labels: they are the only legal values, because this project has no synthetic
+path at all. Any record claiming otherwise raises :class:`RunRecordError` at
+:meth:`RunStore.save` time, so a mislabelled or synthetic artifact can never
+reach disk -- not even one written by hand.
+
+Why the fields are kept at all, now that there is only one mode: a consumer
+reading a stored record still needs to know whether it is looking at a real
+observation, and a field that is asserted on every write is one that cannot drift.
+An absent field is an assumption; a checked field is a guarantee.
 
 ``root`` is the run root; :func:`run_store_for_data_dir` maps the project-level
 ``settings.data_dir`` onto the ``data/scans/`` layout used by the CLI/API.
@@ -32,8 +38,9 @@ __all__ = [
     "run_store_for_data_dir",
 ]
 
-RUNTIME_MODES: Final[tuple[str, ...]] = ("DEMO", "REAL")
-RuntimeMode = Literal["DEMO", "REAL"]
+#: The only legal runtime mode. There is no second value, by design.
+RUNTIME_MODES: Final[tuple[str, ...]] = ("REAL",)
+RuntimeMode = Literal["REAL"]
 
 RUNTIME_MODE_FIELD: Final[str] = "runtime_mode"
 SYNTHETIC_FIELD: Final[str] = "synthetic"
@@ -41,9 +48,11 @@ SCAN_ID_FIELD: Final[str] = "scan_id"
 
 SCHEMA_VERSION: Final[int] = 1
 
-#: ``DEMO`` always means synthetic, ``REAL`` always means not synthetic. The map
-#: is the single source of truth used by both the stamper and the validator.
-_EXPECTED_SYNTHETIC: Final[dict[str, bool]] = {"DEMO": True, "REAL": False}
+#: Single source of truth used by both the stamper and the validator.
+_EXPECTED_SYNTHETIC: Final[dict[str, bool]] = {"REAL": False}
+
+#: The only legal mode. Stamped on every record.
+ONLY_RUNTIME_MODE: Final[str] = "REAL"
 
 #: Module-level alias so that the ``list()`` method name cannot shadow the
 #: builtin inside class-level annotations.
@@ -52,7 +61,7 @@ _PathList = list[Path]
 
 
 class RunRecordError(ValueError):
-    """Raised when a run record violates the DEMO/REAL isolation guard.
+    """Raised when a run record violates the real-data isolation guard.
 
     Subclasses :class:`ValueError` so callers may catch either.
     """
@@ -63,15 +72,23 @@ def _validate_runtime_mode(value: object) -> str:
         raise RunRecordError(f"{RUNTIME_MODE_FIELD} must be a string, got {type(value).__name__}")
     if value not in RUNTIME_MODES:
         raise RunRecordError(
-            f"{RUNTIME_MODE_FIELD} must be one of {RUNTIME_MODES}, got {value!r}"
+            f"{RUNTIME_MODE_FIELD} must be {ONLY_RUNTIME_MODE!r}; this project has no "
+            f"synthetic runtime mode, so {value!r} cannot be stored"
         )
     return value
 
 
 def _assert_consistent(record: Mapping[str, Any]) -> None:
-    """Enforce the OPS-014 guard: mode present, flag present, flag agrees."""
+    """Enforce the isolation guard: every record is REAL and not synthetic.
+
+    Both fields must be PRESENT and both must hold their only legal value. The
+    presence check matters as much as the value check: an absent field is an
+    assumption, and this store refuses to make one.
+    """
     if RUNTIME_MODE_FIELD not in record:
-        raise RunRecordError(f"record must carry {RUNTIME_MODE_FIELD!r} ('DEMO' or 'REAL')")
+        raise RunRecordError(
+            f"record must carry {RUNTIME_MODE_FIELD!r} ({ONLY_RUNTIME_MODE!r})"
+        )
     mode = _validate_runtime_mode(record[RUNTIME_MODE_FIELD])
 
     if SYNTHETIC_FIELD not in record:
@@ -97,12 +114,14 @@ def mark_synthetic(
 ) -> dict[str, Any]:
     """Return a copy of ``record`` with both isolation fields stamped correctly.
 
-    ``synthetic=True`` implies ``runtime_mode="DEMO"`` and ``synthetic=False``
-    implies ``runtime_mode="REAL"``. Passing an explicit ``runtime_mode`` that
-    disagrees with ``synthetic`` raises :class:`RunRecordError`, so the helper
-    cannot be used to launder a mislabelled record.
+    There is only one legal combination, so this is now an assertion rather than
+    a mapping: ``synthetic=False`` and ``runtime_mode="REAL"``. Passing anything
+    else raises :class:`RunRecordError`, so the helper cannot be used to launder a
+    mislabelled or synthetic record. The parameters are kept so callers do not
+    have to change, and so an attempt to pass ``synthetic=True`` fails loudly at
+    the call site rather than silently producing a real-looking record.
     """
-    mode = "DEMO" if synthetic else "REAL"
+    mode = ONLY_RUNTIME_MODE
     if runtime_mode is not None:
         requested = _validate_runtime_mode(runtime_mode)
         if requested != mode:
@@ -199,7 +218,7 @@ class RunStore:
         """Validate and persist one evidence document; return its path.
 
         Raises :class:`RunRecordError` (a ``ValueError``) if ``scan_id`` is
-        missing/invalid or the DEMO/REAL isolation guard is violated.
+        missing/invalid, or the real-data isolation guard is violated.
         """
         if not isinstance(record, Mapping):
             raise RunRecordError(f"record must be a mapping, got {type(record).__name__}")

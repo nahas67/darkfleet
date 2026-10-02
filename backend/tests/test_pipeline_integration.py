@@ -1,7 +1,7 @@
 """CP6 gate: pipeline + cache + runs + jobs wired together (EVD, OPS, TST-005/006).
 
 Proves: real stage streaming, cache reuse via a REAL hit counter, restart
-persistence, and the DEMO/REAL isolation guard.
+persistence, and that a provider failure yields no data at all.
 """
 
 from __future__ import annotations
@@ -16,13 +16,9 @@ from darkfleet.pipeline import run_scan
 from darkfleet.providers import RealDataUnavailableError
 from darkfleet.storage.cache import ArtifactCache, cache_key
 from darkfleet.storage.runs import RunStore, mark_synthetic
+from tests import fixture_source
 
 CFG = {"training_cells": 16, "guard_cells": 4, "threshold_factor": 3.5}
-SCENE = {
-    "id": "SIM-A", "platform": "S1", "polarization": "VV",
-    "acquisitionTime": "2026-01-01T00:00:00Z", "resolutionMeters": 10,
-    "bbox": [0.0, 0.0, 1.0, 1.0], "seaClutterLevel": "LOW",
-}
 
 
 def _gen(stages: list[ScanStage]) -> Iterator[tuple[ScanStage, str]]:
@@ -79,25 +75,26 @@ def test_corrupt_cache_entry_is_a_miss_not_a_silent_success(tmp_path) -> None:
     assert c3.stats_snapshot().misses == 1
 
 
-def test_runs_store_rejects_mode_synthetic_mismatch(tmp_path) -> None:
+def test_run_store_only_accepts_a_real_non_synthetic_record(tmp_path) -> None:
+    """OPS-014: ``REAL`` is the only mode, and it can never claim synthetic data."""
     store = RunStore(tmp_path)
     with pytest.raises(ValueError):
         store.save({"scan_id": "DF-0001", "runtime_mode": "REAL", "synthetic": True})
     with pytest.raises(ValueError):
-        store.save({"scan_id": "DF-0002", "runtime_mode": "DEMO"})
-    stamped = mark_synthetic({"scan_id": "DF-0003"}, synthetic=True)
-    store.save(stamped)
+        store.save({"scan_id": "DF-0002", "runtime_mode": "DEMO", "synthetic": True})
+    store.save(mark_synthetic({"scan_id": "DF-0003"}, synthetic=False))
     assert RunStore(tmp_path).get("DF-0003") is not None
+    # Neither the stamper nor the store will file a synthetic record.
     with pytest.raises(ValueError):
-        mark_synthetic({"scan_id": "X"}, synthetic=True, runtime_mode="REAL")
+        store.save(mark_synthetic({"scan_id": "DF-0004"}, synthetic=True))
+    with pytest.raises(ValueError):
+        mark_synthetic({"scan_id": "X"}, synthetic=False, runtime_mode="DEMO")
+    assert sorted(RunStore(tmp_path).list_ids()) == ["DF-0003"]
 
 
 def test_pipeline_stages_stream_into_job_runner(tmp_path) -> None:
     runner = ScanRunner(state_dir=str(tmp_path / "state"))
-    job = runner.submit(
-        lambda: _gen(list(PIPELINE)[1:]),
-        synthetic=True,
-    )
+    job = runner.submit(lambda: _gen(list(PIPELINE)[1:]))
     seen: list[ScanStage] = []
     queue = runner.subscribe(job.scan_id)
     while True:
@@ -116,7 +113,7 @@ def test_pipeline_failure_maps_to_failed_stage(tmp_path) -> None:
         raise RuntimeError("provider exploded")
 
     runner = ScanRunner(state_dir=str(tmp_path / "state"))
-    job = runner.submit(boom, synthetic=True)
+    job = runner.submit(boom)
     queue = runner.subscribe(job.scan_id)
     while True:
         ev = queue.get(timeout=10)
@@ -128,11 +125,18 @@ def test_pipeline_failure_maps_to_failed_stage(tmp_path) -> None:
     assert "provider exploded" in (finished.error or "")
 
 
-def test_real_mode_failure_persists_nothing(tmp_path) -> None:
+def test_provider_failure_persists_nothing(tmp_path) -> None:
+    """OPS-014: there is no second world to degrade into, so there is no data.
+
+    The stronger form of the old isolation guard: a REAL scan that cannot reach
+    a provider writes no record and reports nothing but the error.
+    """
     with pytest.raises(RealDataUnavailableError):
         run_scan(
-            runtime_mode="REAL", bbox=[0.0, 0.0, 1.0, 1.0],
-            data_dir=str(tmp_path), cfar_config=CFG,
-            scene=None, provider="nonexistent-provider",
+            bbox=fixture_source.FIXTURE_BBOX,
+            data_dir=str(tmp_path),
+            cfar_config=CFG,
+            provider="nonexistent-provider",
         )
     assert RunStore(tmp_path).list() == []
+    assert list(tmp_path.glob("scans/*.json")) == []

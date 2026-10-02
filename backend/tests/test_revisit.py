@@ -7,7 +7,7 @@ a fixture change cannot make the expected numbers drift away from reality.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -42,7 +42,7 @@ REAL_TIMES = [
 def _acq(i: int, platform: str = "sentinel-1d") -> Acquisition:
     return Acquisition(
         item_id=REAL_ITEM_IDS[i],
-        acquisition_time=datetime.fromisoformat(REAL_TIMES[i].replace("Z", "+00:00")),
+        acquisition_time=datetime.fromisoformat(REAL_TIMES[i]),
         platform=platform,
         collection="sentinel-1-rtc",
         polarizations=("VH", "VV"),
@@ -129,7 +129,7 @@ def test_next_after_returns_the_next_real_pass() -> None:
     before = datetime(2026, 9, 10, tzinfo=UTC)
     nxt = plan.next_after(before)
     assert nxt is not None
-    assert nxt.acquisition_time == datetime.fromisoformat(REAL_TIMES[2].replace("Z", "+00:00"))
+    assert nxt.acquisition_time == datetime.fromisoformat(REAL_TIMES[2])
     assert plan.last_before(before) is not None
     assert plan.last_before(before).acquisition_time < before
 
@@ -216,14 +216,14 @@ def test_window_covers_history_and_a_short_horizon() -> None:
     start, end = window_for(now, history_days=90, horizon_days=30)
     assert start == "2026-07-03T00:00:00Z"
     assert end == "2026-10-31T00:00:00Z"
-    parsed_start = datetime.fromisoformat(start.replace("Z", "+00:00"))
-    parsed_end = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    parsed_start = datetime.fromisoformat(start)
+    parsed_end = datetime.fromisoformat(end)
     assert parsed_start < now < parsed_end
 
 
 def test_window_spans_more_history_than_horizon() -> None:
     """A catalogue rarely holds future passes, so history carries the signal."""
     start, end = window_for(datetime(2026, 10, 1, tzinfo=UTC), history_days=90, horizon_days=14)
-    s = datetime.fromisoformat(start.replace("Z", "+00:00"))
-    e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    s = datetime.fromisoformat(start)
+    e = datetime.fromisoformat(end)
     assert (e - s).days > 90

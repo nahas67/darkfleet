@@ -2,7 +2,12 @@
 
 Requirement coverage: OPS-004 (deterministic keys), OPS-005 (on-disk artifact
 cache that survives restart), OPS-006 (real hit/miss counters), OPS-013 (durable
-scan/evidence records) and the OPS-014 DEMO/REAL + ``synthetic`` isolation guard.
+scan/evidence records) and the OPS-014 ``runtime_mode``/``synthetic`` isolation
+guard.
+
+The guard still reconciles two modes, because a record written by an older build
+can carry ``DEMO``. What changed is which mode this product writes: every record
+it creates now says ``REAL``. Both directions are asserted below.
 
 No network, no mocks on the persistence path -- every assertion touches a real
 ``tmp_path`` on the real filesystem, including a genuinely truncated npz file.
@@ -336,6 +341,7 @@ def test_multiple_artifacts_share_one_digest_entry(tmp_path: Path) -> None:
 
 
 def _record(scan_id: str = "scan-0001", **extra: object) -> dict[str, object]:
+    """The record shape this product writes today: a REAL, non-synthetic scan."""
     record: dict[str, object] = {
         "scan_id": scan_id,
         "detections": [
@@ -344,7 +350,12 @@ def _record(scan_id: str = "scan-0001", **extra: object) -> dict[str, object]:
         "ais_correlations": [{"mmsi": "563000000", "score": 0.62}],
     }
     record.update(extra)
-    return mark_synthetic(record, synthetic=True)
+    return mark_synthetic(record, synthetic=False)
+
+
+def _synthetic_record(scan_id: str = "scan-synth") -> dict[str, object]:
+    """A record claiming to be synthetic. The store must never accept one."""
+    return mark_synthetic({"scan_id": scan_id, "vessels": 3}, synthetic=True)
 
 
 def test_run_store_save_get_round_trip(tmp_path: Path) -> None:
@@ -357,9 +368,23 @@ def test_run_store_save_get_round_trip(tmp_path: Path) -> None:
     loaded = store.get("scan-0001")
     assert loaded is not None
     assert loaded["scan_id"] == "scan-0001"
-    assert loaded["runtime_mode"] == "DEMO"
-    assert loaded["synthetic"] is True
+    assert loaded["runtime_mode"] == "REAL"
+    assert loaded["synthetic"] is False
     assert loaded["detections"] == record["detections"]
+
+
+def test_the_store_refuses_a_synthetic_record_entirely(tmp_path: Path) -> None:
+    """There is no world for a synthetic record to be honestly filed in.
+
+    Nothing this build writes is synthetic, so a record that claims to be is not
+    merely mislabelled -- it cannot exist, and it must not reach disk where a
+    later read might serve it as though it were a measurement.
+    """
+    store = RunStore(tmp_path / "runs")
+    with pytest.raises(ValueError):
+        store.save(_synthetic_record())
+    assert store.list_ids() == []
+    assert RunStore(tmp_path / "runs").get("scan-synth") is None
 
 
 def test_run_store_survives_new_instance(tmp_path: Path) -> None:
@@ -416,7 +441,10 @@ def test_run_store_rejects_real_record_claiming_synthetic(tmp_path: Path) -> Non
     assert store.list_ids() == []
 
 
-def test_run_store_rejects_demo_record_without_synthetic_flag(tmp_path: Path) -> None:
+def test_run_store_rejects_a_legacy_mode_record_that_is_not_labelled(
+    tmp_path: Path,
+) -> None:
+    """A ``DEMO`` record is only accepted when it also says ``synthetic: true``."""
     store = RunStore(tmp_path / "runs")
     with pytest.raises(ValueError):
         store.save({"scan_id": "scan-bad", "runtime_mode": "DEMO"})
@@ -428,15 +456,17 @@ def test_run_store_rejects_demo_record_without_synthetic_flag(tmp_path: Path) ->
         store.save({"scan_id": "scan-bad", "runtime_mode": "PAPER", "synthetic": True})
     with pytest.raises(ValueError):
         store.save({"scan_id": "scan-bad", "runtime_mode": "DEMO", "synthetic": "yes"})
+    with pytest.raises(ValueError):
+        store.save({"scan_id": "scan-bad", "runtime_mode": "REAL"})
     assert store.list_ids() == []
 
 
 def test_run_store_rejects_missing_or_invalid_scan_id(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs")
     with pytest.raises(ValueError):
-        store.save({"runtime_mode": "DEMO", "synthetic": True})
+        store.save({"runtime_mode": "REAL", "synthetic": False})
     with pytest.raises(ValueError):
-        store.save({"scan_id": "../escape", "runtime_mode": "DEMO", "synthetic": True})
+        store.save({"scan_id": "../escape", "runtime_mode": "REAL", "synthetic": False})
     with pytest.raises(ValueError):
         store.get("")
     with pytest.raises(ValueError):
@@ -451,26 +481,32 @@ def test_run_store_error_is_valueerror_subclass(tmp_path: Path) -> None:
 
 
 def test_mark_synthetic_stamps_both_fields() -> None:
-    demo = mark_synthetic({"scan_id": "s"}, synthetic=True)
-    assert demo["runtime_mode"] == "DEMO"
-    assert demo["synthetic"] is True
-
     real = mark_synthetic({"scan_id": "s"}, synthetic=False)
     assert real["runtime_mode"] == "REAL"
     assert real["synthetic"] is False
 
-    explicit = mark_synthetic({"scan_id": "s"}, synthetic=True, runtime_mode="DEMO")
-    assert explicit["runtime_mode"] == "DEMO"
-
+    # There is exactly one legal combination, so asking for anything else is an
+    # error rather than a second stamped answer.
     with pytest.raises(ValueError):
-        mark_synthetic({"scan_id": "s"}, synthetic=True, runtime_mode="REAL")
+        mark_synthetic({"scan_id": "s"}, synthetic=False, runtime_mode="DEMO")
+    with pytest.raises(ValueError):
+        mark_synthetic({"scan_id": "s"}, synthetic=False, runtime_mode="PAPER")
+
+
+def test_mark_synthetic_cannot_launder_a_synthetic_record(tmp_path: Path) -> None:
+    """The stamper still lets ``synthetic=True`` through, so the store must stop it."""
+    stamped = mark_synthetic({"scan_id": "s"}, synthetic=True)
+    assert stamped["synthetic"] is True
+    with pytest.raises(ValueError):
+        RunStore(tmp_path / "runs").save(stamped)
 
 
 def test_mark_synthetic_does_not_mutate_input() -> None:
     original: dict[str, object] = {"scan_id": "s"}
-    marked = mark_synthetic(original, synthetic=True)
+    marked = mark_synthetic(original, synthetic=False)
     assert "runtime_mode" not in original
-    assert marked["runtime_mode"] == "DEMO"
+    assert "synthetic" not in original
+    assert marked["runtime_mode"] == "REAL"
 
 
 def test_real_record_is_accepted_when_consistent(tmp_path: Path) -> None:
