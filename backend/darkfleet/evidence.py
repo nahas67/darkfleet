@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import __classification_schema__, __processing_version__, __version__
+from .geoid import describe_datum
 from .marine import describe_position
 from .marine import provenance as marine_provenance
 
@@ -89,6 +90,9 @@ def target_evidence(
                 # rather than as a bare coordinate pair. Never invented: an
                 # unmatched position reports kind/primary explicitly.
                 "marine_region": describe_position(lat, lon),
+                # GEO-003: SAR does not measure height. Declared so no consumer
+                # infers an altitude from the apparent footprint.
+                "vertical_datum": describe_datum(lat, lon),
             },
             "apparent_footprint_m": {"length": target["lenM"], "width": target["widM"]},
             "orientation_deg": target["hdg"],
