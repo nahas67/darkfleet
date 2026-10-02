@@ -154,7 +154,7 @@ export function aisMarks(result: ScanResult): AisMark[] {
   for (const t of result.targets ?? []) {
     const c = t?.corr;
     if (!c?.matched || !c.mmsi) continue;
-    push(c.mmsi, c.vesselName, c.predictedLat, c.predictedLon, true);
+    push(c.mmsi, c.vesselName ?? null, c.predictedLat, c.predictedLon, true);
   }
   for (const a of (result.ais_only ?? []) as readonly AisOnlyTarget[]) {
     push(a?.mmsi, a?.vesselName ?? null, a?.lat, a?.lon, false);

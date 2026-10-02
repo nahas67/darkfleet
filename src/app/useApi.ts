@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DarkFleet typed API client — the ONLY place in the frontend that fetches.
  *
  * Response shapes mirror `backend/darkfleet/api/models.py` exactly. This module
@@ -10,6 +10,46 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
+
+// ---------------------------------------------------------------------------
+// WIRE CONTRACT - GENERATED, RE-EXPORTED
+//
+// The seven interfaces below used to be written out by hand here. They were
+// removed in IR1: the backend validates them, the OpenAPI schema declares them,
+// and src/api/contract.ts is generated from that schema. Two hand-written
+// mirrors of one shape is exactly how the `cls` / `classification` drift shipped
+// undetected -- the frontend declared a field the backend never sent, and a
+// detection's class was `undefined` in every live render path.
+//
+// The Revisit* family below is deliberately NOT generated, because /api/revisit
+// still returns an untyped JSON body. Giving it a declared response model is a
+// tracked follow-up, not something to pretend already exists.
+//
+// A local `ProviderProbe` used to sit here as "the raw probe that gets normalised
+// into ProviderHealthEntry". Once ProviderHealthEntry became generated, the two
+// were the same shape -- the /api/providers/health row IS the probe -- so the
+// duplicate was deleted rather than kept in sync by hand.
+// ---------------------------------------------------------------------------
+export type {
+  DebugLayerResponse,
+  HealthResponse,
+  LayerStats,
+  ScanAccepted,
+  ScanStateResponse,
+  ScanTargetsResponse,
+  SceneListResponse,
+  SceneSummary,
+} from '../types/api.ts';
+import type {
+  DebugLayerResponse,
+  HealthResponse,
+  LayerStats,
+  ScanAccepted,
+  ScanStateResponse,
+  ScanTargetsResponse,
+  SceneListResponse,
+  SceneSummary,
+} from '../types/api.ts';
 
 import type {
   AisOnlyTarget,
@@ -35,13 +75,6 @@ export const API_BASE = '/api';
 // These mirror the backend Pydantic response models. snake_case is intentional:
 // renaming here would break the contract with the server.
 
-export interface ScanAccepted {
-  scan_id: string;
-  status: string;
-  runtime_mode: RuntimeMode;
-  synthetic: boolean;
-}
-
 export interface StageEventOut {
   stage: string;
   timestamp: string;
@@ -49,88 +82,7 @@ export interface StageEventOut {
   terminal: boolean;
 }
 
-export interface ScanStateResponse {
-  scan_id: string;
-  stage: string;
-  terminal: boolean;
-  runtime_mode: string;
-  synthetic: boolean;
-  known: boolean;
-  source: 'runner' | 'run_store';
-  started_at: string | null;
-  finished_at: string | null;
-  failed_at: string | null;
-  error: string | null;
-  history: StageEventOut[];
-  record_persisted: boolean;
-}
-
-export interface ScanTargetsResponse {
-  scan_id: string;
-  stage: string;
-  runtime_mode: string;
-  synthetic: boolean;
-  /** The extent this scan covered. Empty when the record carried none. */
-  aoi: number[];
-  count: number;
-  ais_only_count: number;
-  counts: Record<string, number>;
-  /**
-   * Typed, not `Record<string, unknown>`. The loose escape hatch meant the
-   * payload shape was never actually checked anywhere, so a backend field rename
-   * would have surfaced as `undefined` at runtime instead of at build time.
-   */
-  targets: VesselTarget[];
-  ais_only: AisOnlyTarget[];
-  provenance: Record<string, unknown>;
-  /** Source scene, or null when the record carried none. */
-  scene: SarScene | null;
-  /** Acquisition instant of the SAR pass, or null when unrecorded. */
-  acquisition_time: string | null;
-}
-
-export interface SceneSummary {
-  id: string;
-  provider: string;
-  platform: string;
-  product: string;
-  polarization: string;
-  acquisition_time: string;
-  bbox: number[];
-  resolution_meters: number | null;
-  georeferencing: string | null;
-  sea_clutter_level: string | null;
-  runtime_mode: RuntimeMode;
-  synthetic: boolean;
-}
-
-export interface SceneListResponse {
-  runtime_mode: RuntimeMode;
-  synthetic: boolean;
-  provider: string;
-  status: string;
-  note: string | null;
-  count: number;
-  scenes: SceneSummary[];
-}
-
 /** One live provider probe. `detail` is redacted by the backend. */
-export interface ProviderProbe {
-  provider: string;
-  status: string;
-  detail: string;
-  last_check: string;
-  latency_ms: number | null;
-  error: string | null;
-  capabilities: string[];
-}
-
-export interface HealthResponse {
-  checked_at: string;
-  runtime_mode: string;
-  probe: string;
-  providers: ProviderProbe[];
-}
 
 export interface TargetEvidenceResponse {
   scan_id: string;
@@ -150,35 +102,6 @@ export interface EvidenceDocumentResponse {
   evidence: Record<string, unknown>;
 }
 
-export interface LayerStats {
-  size: number;
-  min: number | null;
-  max: number | null;
-  mean: number | null;
-  std: number | null;
-  p01: number | null;
-  p50: number | null;
-  p99: number | null;
-  nan_count: number;
-  finite_fraction: number;
-  true_count: number | null;
-}
-
-export interface DebugLayerResponse {
-  scan_id: string;
-  layer: DebugLayerId;
-  kind: 'array' | 'table';
-  source: string | null;
-  shape: number[];
-  dtype: string | null;
-  stats: LayerStats | null;
-  columns: string[] | null;
-  rows: number | null;
-  row_limit: number | null;
-  truncated: boolean;
-  grid_size: number | null;
-  grid: number[][] | null;
-}
 
 /**
  * Scene search parameters.
@@ -526,7 +449,6 @@ const PROVIDER_STATES: readonly ProviderState[] = [
   'DEGRADED',
   'AUTH_REQUIRED',
   'RATE_LIMITED',
-  'NO_COVERAGE',
   'UNAVAILABLE',
   'NOT_CONFIGURED',
 ];
@@ -536,32 +458,42 @@ export function isProviderState(value: string): value is ProviderState {
 }
 
 /** The AIS archive probe is the only `*ais*` provider the backend registers. */
-export function isAisProvider(probe: ProviderProbe): boolean {
+export function isAisProvider(probe: ProviderHealthEntry): boolean {
   return (
     probe.provider.toLowerCase().includes('ais') ||
-    probe.capabilities.some((c) => c.toLowerCase().includes('ais'))
+    (probe.capabilities ?? []).some((c) => c.toLowerCase().includes('ais'))
   );
 }
 
-export function toProviderHealthEntry(probe: ProviderProbe): ProviderHealthEntry {
+export function toProviderHealthEntry(probe: ProviderHealthEntry): ProviderHealthEntry {
   const status = isProviderState(probe.status) ? probe.status : 'UNAVAILABLE';
   const detail = isProviderState(probe.status)
     ? probe.detail
     : `Unrecognised provider status "${probe.status}": ${probe.detail}`;
+  // `detail` carries the human reason and is always present; `error` carries
+  // the raw failure when there is one. The previous adapter invented a
+  // `message` field the contract never declared, so every consumer reading
+  // `.message` rendered an empty reason for every provider.
   return {
     provider: probe.provider,
     status,
-    message: detail,
+    detail,
     last_check: probe.last_check,
     error: probe.error,
-    coverage: probe.capabilities.length ? probe.capabilities.join(', ') : null,
+    // `capabilities` is the contract's name. The adapter previously invented a
+    // `coverage` string, which was neither in the contract nor a capability list,
+    // and every consumer of it silently read undefined.
+    capabilities: probe.capabilities,
   };
 }
 
 export function toProvidersHealth(response: HealthResponse): ProvidersHealth {
   const sar: ProviderHealthEntry[] = [];
   const ais: ProviderHealthEntry[] = [];
-  for (const probe of response.providers) {
+  // `providers` is optional in the contract: the backend omits it when no
+  // probe was attempted. An absent list is an absent list, not an empty
+  // panel claiming every provider was checked and found nothing.
+  for (const probe of response.providers ?? []) {
     (isAisProvider(probe) ? ais : sar).push(toProviderHealthEntry(probe));
   }
   return { sar, ais };

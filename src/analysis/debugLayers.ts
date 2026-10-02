@@ -529,10 +529,14 @@ export function debugLayerView(def: DebugLayerDef, input: DebugLayerViewInput = 
     state: 'AVAILABLE',
     detail: detailParts.join(' · '),
     reason: null,
-    source: response.source,
-    dtype: response.dtype,
+    // The backend OMITS source/dtype/stats rather than sending null, so the
+    // generated contract marks them optional. DebugLayerView uses `null` as
+    // its single absent marker, so omitted and explicitly-null collapse here --
+    // once, at the boundary, instead of at every consumer.
+    source: response.source ?? null,
+    dtype: response.dtype ?? null,
     shape,
-    stats: response.stats,
+    stats: response.stats ?? null,
     statRows: rows,
     statsMissing,
     columns: Array.isArray(response.columns) ? response.columns : [],

@@ -2,7 +2,7 @@
  * The globe bridge: the wiring CP9 described and never built.
  *
  * A minimal fake viewer stands in for Cesium. That is the point of the split in
- * `scanLayers.ts` â€” the decisions are testable without WebGL, so what is asserted
+ * `scanLayers.ts` — the decisions are testable without WebGL, so what is asserted
  * here is which entities were added and, more importantly, which were refused.
  *
  * @license
@@ -19,6 +19,7 @@ import {
   pushScanResult,
 } from './globeBridge.ts';
 import { toGlobeScanResult } from '../app/SpatialShell.tsx';
+import { ContractViolation, validateScanTargetsResponse } from '../api/validate.ts';
 import type { ScanTargetsResponse } from '../app/useApi.ts';
 import type { ScanResult } from '../types/api.ts';
 
@@ -284,6 +285,11 @@ describe('layerCounts', () => {
 describe('toGlobeScanResult', () => {
   const base: ScanTargetsResponse = {
     scan_id: 'DF-0001',
+    // Present because the validator requires it. The first version of this
+    // fixture omitted `stage`, so the count-mismatch test below was actually
+    // asserting the stage check -- it failed for the wrong reason while reading
+    // as though it had covered something it had not.
+    stage: 'COMPLETE',
     runtime_mode: 'REAL',
     synthetic: false,
     aoi: [103.8, 1.24, 103.86, 1.28],
@@ -313,15 +319,27 @@ describe('toGlobeScanResult', () => {
     expect(toGlobeScanResult({ ...base, runtime_mode: 'DEMO' as never })).toBeNull();
   });
 
-  it('defaults missing collections to empty rather than throwing', () => {
-    const adapted = toGlobeScanResult({
-      ...base,
-      targets: undefined as never,
-      ais_only: undefined as never,
-      aoi: undefined as never,
-    });
-    expect(adapted?.targets).toEqual([]);
-    expect(adapted?.ais_only).toEqual([]);
-    expect(adapted?.aoi).toEqual([]);
+  it('rejects a payload with missing collections rather than defaulting them', () => {
+    // This test used to assert the opposite: that `toGlobeScanResult` turned
+    // undefined collections into empty ones. That defensiveness is exactly what
+    // hid the `cls` / `classification` drift -- a missing field became a plausible
+    // default instead of a visible failure.
+    //
+    // The guarantee now lives one layer up, in the validator, which refuses the
+    // payload outright. Defaulting is not merely moved, it is removed: a scan
+    // response missing its targets is an inconsistent record, not an empty scan,
+    // and the two must not look the same.
+    for (const missing of ['targets', 'ais_only', 'aoi'] as const) {
+      const raw = { ...base, [missing]: undefined } as unknown;
+      expect(() => validateScanTargetsResponse(raw)).toThrow(ContractViolation);
+    }
+  });
+
+  it('refuses a payload whose declared count disagrees with its targets', () => {
+    // Also previously defaulted away. A record claiming 12 targets while
+    // carrying 1 is inconsistent, and rendering 1 silently would misreport what
+    // the scan found.
+    const raw = { ...base, count: 12 } as unknown;
+    expect(() => validateScanTargetsResponse(raw)).toThrow(/count/i);
   });
 });

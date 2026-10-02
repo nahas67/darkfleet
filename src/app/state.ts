@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DarkFleet shared application store for the vNext spatial shell.
  *
  * Everything in this module is pure or a synchronous store: reducers, selectors
@@ -308,7 +308,6 @@ const PROVIDER_SEVERITY: readonly ProviderState[] = [
   'DEGRADED',
   'RATE_LIMITED',
   'AUTH_REQUIRED',
-  'NO_COVERAGE',
   'UNAVAILABLE',
   'NOT_CONFIGURED',
 ];
@@ -340,7 +339,7 @@ export function summarizeProviders(
   return {
     state: worst.status,
     label: providerLabel(worst.status),
-    detail: entries.map((e) => `${e.provider}: ${e.message}`).join(' | '),
+    detail: entries.map((e) => `${e.provider}: ${e.error || e.detail}`).join(' | '),
     checked: true,
   };
 }
@@ -355,8 +354,6 @@ export function providerLabel(status: ProviderState): string {
       return 'Auth required';
     case 'RATE_LIMITED':
       return 'Rate limited';
-    case 'NO_COVERAGE':
-      return 'No coverage';
     case 'UNAVAILABLE':
       return 'Unavailable';
     case 'NOT_CONFIGURED':
@@ -373,7 +370,6 @@ export function providerTone(status: ProviderState): 'ok' | 'warn' | 'bad' | 'id
     case 'DEGRADED':
     case 'RATE_LIMITED':
     case 'AUTH_REQUIRED':
-    case 'NO_COVERAGE':
       return 'warn';
     case 'UNAVAILABLE':
       return 'bad';

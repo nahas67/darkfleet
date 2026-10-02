@@ -1,4 +1,4 @@
-"""Typed request/response contracts for the DarkFleet HTTP API (API-011).
+﻿"""Typed request/response contracts for the DarkFleet HTTP API (API-011).
 
 Every field the API accepts or returns is declared here once. The frontend
 mirrors these shapes; it never re-derives them, and this module never
@@ -28,6 +28,9 @@ import numpy as np
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from darkfleet.jobs.models import ScanStage
+
+from ..providers import ProviderStatus
+from .targets import AisOnlyTarget, ScanScene, VesselTarget
 
 __all__ = [
     "ApiError",
@@ -192,7 +195,16 @@ class ScanStateResponse(BaseModel):
 
 
 class ScanTargetsResponse(BaseModel):
-    """``GET /api/scans/{id}/targets`` for a completed scan."""
+    """``GET /api/scans/{id}/targets`` for a completed scan.
+
+    ``extra="forbid"`` is deliberate and matches ``src/api/validate.ts``, which
+    rejects an unrecognised top-level key. If the server allowed extras while the
+    browser refused them, an ordinary additive backend change would break every
+    client at runtime with a message neither side authored. Forbidding here means
+    the drift is caught at the boundary where it was introduced.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     scan_id: str
     stage: str
@@ -200,19 +212,31 @@ class ScanTargetsResponse(BaseModel):
     synthetic: bool
     #: The extent this scan covered. Needed by any surface that has to describe
     #: the same water (acquisition planning, exports), so it travels with the
-    #: targets rather than requiring a second request.
-    aoi: list[float] = Field(default_factory=list)
+    #: targets rather than requiring a second request. Required: the record
+    #: always holds it, and an absent AOI would leave the map with nothing to frame.
+    aoi: list[float]
     count: int
     ais_only_count: int
-    counts: dict[str, int] = Field(default_factory=dict)
-    targets: list[dict[str, Any]] = Field(default_factory=list)
-    ais_only: list[dict[str, Any]] = Field(default_factory=list)
+    #: Required, not defaulted. The route always sends these four, and `count` and
+    #: `ais_only_count` are already required -- leaving the collections optional
+    #: would make the schema claim a response can omit the very arrays its own
+    #: count fields describe. It would also make the generated TypeScript mark
+    #: them optional, pushing every consumer into defensive `?? []` code.
+    counts: dict[str, int]
+    #: IR1/Checkpoint B: these were ``list[dict[str, Any]]``, so FastAPI validated
+    #: nothing inside a detection and a backend rename surfaced in the browser as
+    #: ``undefined``. They are now real models, and the frontend is generated from
+    #: the resulting OpenAPI schema rather than restating them by hand.
+    targets: list[VesselTarget]
+    ais_only: list[AisOnlyTarget]
     provenance: dict[str, Any] = Field(default_factory=dict)
     #: Source scene and acquisition instant. Both are already in the persisted
     #: record; they are exposed here because the evidence inspector and the
     #: timeline both need them, and without them the client would have to guess
-    #: or fetch a second time.
-    scene: dict[str, Any] | None = None
+    #: or fetch a second time. Typed, not ``dict[str, Any]``: the timeline reads
+    #: ``scene.item_id`` and ``scene.polarization``, which cannot be done safely
+    #: against an untyped object.
+    scene: ScanScene | None = None
     acquisition_time: str | None = None
 
 
@@ -239,7 +263,7 @@ class SceneListResponse(BaseModel):
     runtime_mode: RuntimeModeLiteral
     synthetic: bool
     provider: str
-    status: str = Field(description="ProviderStatus value for the probe behind these scenes.")
+    status: ProviderStatus = Field(description="ProviderStatus value for the probe behind these scenes.")
     note: str | None = None
     count: int
     scenes: list[SceneSummary] = Field(default_factory=list)
@@ -249,7 +273,7 @@ class ProviderHealthEntry(BaseModel):
     """One provider's live probe result. Never carries a credential."""
 
     provider: str
-    status: str = Field(description="ProviderStatus value.")
+    status: ProviderStatus = Field(description="ProviderStatus value.")
     detail: str
     last_check: datetime
     latency_ms: float | None = None

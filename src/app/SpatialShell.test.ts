@@ -809,8 +809,10 @@ describe('useApi typed client', () => {
     expect(health.ais.map((e) => e.provider)).toEqual(['ais-local']);
     expect(health.sar[0].status).toBe('DEGRADED');
     expect(health.ais[0].status).toBe('AUTH_REQUIRED');
-    // The backend's `detail` field becomes the declared `message` field.
-    expect(health.sar[0].message).toBe('live probe returned 503');
+    // The backend's `detail` field carries the human reason, unchanged.
+    // It used to be asserted as `message` -- a field the contract never declared,
+    // so this assertion was reading `undefined` and could never have failed.
+    expect(health.sar[0].detail).toBe('live probe returned 503');
   });
 
   it('reports the worst provider state, not the best', () => {

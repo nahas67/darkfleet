@@ -58,7 +58,16 @@ export interface SarContactRow {
   readonly aisConf: number;
   readonly lenM: number;
   readonly lenUncM: number;
-  readonly hdg: number;
+  /**
+   * Heading in degrees true, or null when the detector measured none.
+   *
+   * Nullable because the contract says so. It was declared `number` here, which
+   * meant the only ways to compile were to substitute 0 or to assert a cast.
+   * Both are wrong: 0 degrees true is north, a real bearing, so rendering an
+   * unmeasured heading as 0 would point a vessel the wrong way and look
+   * authoritative while doing it.
+   */
+  readonly hdg: number | null;
 }
 
 export interface AisContactRow {

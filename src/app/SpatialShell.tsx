@@ -1,5 +1,5 @@
 ﻿/**
- * DarkFleet vNext spatial shell â€” the ONE product surface.
+ * DarkFleet vNext spatial shell — the ONE product surface.
  *
  * Layout contract:
  *  - The full-screen Cesium globe is the only primary viewport. There is no
@@ -47,7 +47,8 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react';
-import type { BoundingBox, LayerId, ProvidersHealth, ProviderHealthEntry, ScanResult, VesselTarget } from '../types/api.ts';
+import type { BoundingBox, LayerId, ProvidersHealth, ProviderHealthEntry, ScanResult } from '../types/api.ts';
+import { ContractViolation, validateScanTargetsResponse } from '../api/validate.ts';
 import type { ScanRequest } from '../types/api.ts';
 import {
   ADVANCED_LAYER_IDS,
@@ -510,6 +511,7 @@ function useScanTargets(
   terminal: boolean,
 ): ScanTargetsResponse | null {
   const [targets, setTargets] = useState<ScanTargetsResponse | null>(null);
+  const [contractError, setContractError] = useState<string | null>(null);
   useEffect(() => {
     if (!scanId) {
       setTargets(null);
@@ -520,16 +522,31 @@ function useScanTargets(
       .getScanTargets(scanId)
       .then((response) => {
         if (cancelled) return;
-        setTargets(response);
+        // Validate before ANY consumer sees it. Previously this was assigned
+        // straight into component state, so a backend rename surfaced as
+        // `undefined` at the point of use -- which is exactly how a detection's
+        // classification went missing from every render path without a single
+        // test failing.
+        const validated = validateScanTargetsResponse(response);
+        setTargets(validated);
+        setContractError(null);
         // Publish to the store so the globe bridge can draw it. This is the only
         // handoff from the shell to the map: the shell does not know what Cesium
         // is, and the bridge does not fetch.
-        appStore.setScanResult(toGlobeScanResult(response));
+        appStore.setScanResult(toGlobeScanResult(validated));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // A contract violation is NOT "no data yet" -- it is a real fault and must
+        // be shown as one, or the operator sees an empty map with no explanation.
+        if (err instanceof ContractViolation) {
+          setContractError(err.message);
+          setTargets(null);
+          appStore.setScanResult(null);
+          return;
+        }
         // Not readable yet (409 while the job runs) is an unknown state, not an
         // empty scan. The stage dependency re-runs this once the job lands.
-        if (cancelled) return;
         setTargets(null);
         // Clear the globe too: the previous scan's marks are real measurements,
         // but of somewhere else, and leaving them up while a new scan loads
@@ -540,6 +557,12 @@ function useScanTargets(
       cancelled = true;
     };
   }, [client, scanId, stage, terminal]);
+  if (contractError) {
+    throw new Error(
+      `API contract violation - the map and panels are withheld because the ` +
+        `backend sent a payload this build cannot read. ${contractError}`,
+    );
+  }
   return targets;
 }
 
@@ -556,20 +579,23 @@ function useScanTargets(
  */
 export function toGlobeScanResult(response: ScanTargetsResponse): ScanResult | null {
   if (response.runtime_mode !== 'REAL' || response.synthetic !== false) return null;
-  const targets = Array.isArray(response.targets) ? response.targets : [];
-  const aisOnly = Array.isArray(response.ais_only) ? response.ais_only : [];
+  // No casts here any more. `response` has already been through
+  // validateScanTargetsResponse, so `targets` is a real VesselTarget[] and
+  // `ais_only` a real AisOnlyTarget[]. The previous version asserted both with
+  // `as unknown as`, which is the pattern that let the cls/classification drift
+  // reach the map unnoticed.
   return {
     scan_id: response.scan_id,
     runtime_mode: 'REAL',
     synthetic: false,
-    scene: (response.scene ?? {}) as ScanResult['scene'],
-    aoi: Array.isArray(response.aoi) ? response.aoi : [],
+    scene: response.scene ?? ({} as ScanResult['scene']),
+    aoi: response.aoi,
     acquisition_time: response.acquisition_time ?? '',
     config: {},
-    targets: targets as unknown as VesselTarget[],
-    ais_only: aisOnly as unknown as ScanResult['ais_only'],
-    counts: response.counts ?? {},
-    provenance: (response.provenance ?? {}) as unknown as ScanResult['provenance'],
+    targets: response.targets,
+    ais_only: response.ais_only,
+    counts: response.counts,
+    provenance: response.provenance as unknown as ScanResult['provenance'],
     processing_time_ms: 0,
     created_at: '',
   };
@@ -809,10 +835,10 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
       {scenes && (
         <>
           <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
-            {scenes.count} scenes Â· {scenes.provider} Â· {scenes.status}
+            {scenes.count} scenes · {scenes.provider} · {scenes.status}
           </p>
           <ul className="space-y-1.5">
-            {scenes.scenes.map((scene) => (
+            {(scenes.scenes ?? []).map((scene) => (
               <li
                 key={scene.id}
                 className="rounded-[6px] border border-[var(--df-border)] px-2 py-1.5 text-[10px]"
@@ -821,7 +847,7 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
                   {scene.platform} {scene.product}
                 </span>
                 <p className="mt-0.5 font-mono text-[9px] text-[var(--df-text-dim)]">
-                  {scene.id} Â· {scene.acquisition_time}
+                  {scene.id} · {scene.acquisition_time}
                 </p>
               </li>
             ))}
@@ -1009,7 +1035,7 @@ export function ScanLauncher({
       .getScenes()
       .then((response) => {
         if (cancelled) return;
-        setScenes(response.scenes);
+        setScenes(response.scenes ?? []);
       })
       .catch(() => {
         // A failed catalogue read is an unknown state. The field stays empty
@@ -1182,7 +1208,7 @@ function ProviderList({
   return (
     <div>
       <h3 className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
-        {title} Â· {providerLabel(summary.state)}
+        {title} · {providerLabel(summary.state)}
       </h3>
       <ul className="space-y-1">
         {entries.map((entry) => (
@@ -1191,9 +1217,9 @@ function ProviderList({
             <span className={`ml-1.5 ${TONE_CLASS[providerTone(entry.status)]}`}>
               {providerLabel(entry.status)}
             </span>
-            {entry.message && (
+            {(entry.error || entry.detail) && (
               <p className="mt-0.5 text-[10px] leading-snug text-[var(--df-text-dim)]">
-                {entry.message}
+                {entry.error || entry.detail}
               </p>
             )}
           </li>
@@ -1293,7 +1319,7 @@ function AnalyticsSurface({
       {targets && (
         <>
           <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]">
-            {targets.scan_id} Â· {targets.runtime_mode} provenance
+            {targets.scan_id} · {targets.runtime_mode} provenance
           </p>
           <dl className="space-y-0.5">
             {Object.entries(targets.counts).map(([key, value]) => (

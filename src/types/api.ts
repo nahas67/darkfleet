@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DarkFleet wire contracts — mirror of the backend Pydantic models.
  *
  * These are TYPES ONLY. The frontend holds no detector, correlation,
@@ -9,27 +9,53 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
+// ---------------------------------------------------------------------------
+// WIRE CONTRACT - GENERATED, DO NOT HAND-EDIT
+//
+// Every shape below comes from src/api/contract.ts, which is generated from the
+// FastAPI OpenAPI schema by `python -m tools.export_contract`. It used to be
+// written out by hand here, and it drifted: the frontend declared
+// `classification` while the backend emitted `cls`, so a detection's class was
+// `undefined` in every live render path. Two hand-written mirrors of one shape
+// will always drift eventually.
+//
+// Regenerate:  python -m tools.export_contract
+// Prove current: python -m tools.export_contract --check
+// ---------------------------------------------------------------------------
+export { CLASSIFICATION_VALUES } from '../api/contract.ts';
 
-/** The 7 canonical classifications. No dark_vessel / threatLevel aliases. */
-export type TargetClassification =
-  | 'SAR_MATCHED_AIS'
-  | 'SAR_UNMATCHED'
-  | 'AIS_ONLY'
-  | 'STATIONARY_OR_INFRASTRUCTURE'
-  | 'SEA_CLUTTER'
-  | 'LOW_CONFIDENCE'
-  | 'UNRESOLVED';
+export type {
+  AisAssociation,
+  AisOnlyTarget,
+  DebugLayerResponse,
+  EvidenceDocumentResponse,
+  HealthResponse,
+  LayerStats,
+  ProviderHealthEntry,
+  ScanAccepted,
+  ScanStateResponse,
+  ScanTargetsResponse,
+  SceneListResponse,
+  SceneSummary,
+  ScoreDecomposition,
+  StageEventOut,
+  VesselTarget,
+} from '../api/contract.ts';
 
-/** Runtime-checkable form of {@link TargetClassification}. */
-export const CLASSIFICATION_VALUES: readonly TargetClassification[] = [
-  'SAR_MATCHED_AIS',
-  'SAR_UNMATCHED',
-  'AIS_ONLY',
-  'STATIONARY_OR_INFRASTRUCTURE',
-  'SEA_CLUTTER',
-  'LOW_CONFIDENCE',
-  'UNRESOLVED',
-];
+import type {
+  AisOnlyTarget,
+  ProviderHealthEntry,
+  ProviderStatus as ProviderState,
+  ScanScene,
+  TargetClassification,
+  VesselTarget,
+} from '../api/contract.ts';
+
+// Re-export the two names this module's own consumers import from `types/api.ts`,
+// so `types/api.ts` stays the single import site for the frontend.
+export type { ProviderState, TargetClassification };
+
+
 
 /**
  * Runtime mode as REPORTED BY THE BACKEND.
@@ -70,25 +96,12 @@ export const SCAN_PIPELINE: ScanStage[] = [
 ];
 
 /** Provider capability states. NEVER inferred from the presence of an env var. */
-export type ProviderState =
-  | 'AVAILABLE'
-  | 'DEGRADED'
-  | 'AUTH_REQUIRED'
-  | 'RATE_LIMITED'
-  | 'NO_COVERAGE'
-  | 'UNAVAILABLE'
-  | 'NOT_CONFIGURED';
-
+// The provider status set is GENERATED (see src/api/contract.ts), not restated
+// here. The previous hand-written union carried a seventh value,
+// 'NO_COVERAGE', that the backend can never emit -- so the UI could display a
+// status no real probe produces. Absence of coverage is reported by the backend
+// as NOT_CONFIGURED or UNAVAILABLE with an explanatory `detail`.
 export type BoundingBox = [minLon: number, minLat: number, maxLon: number, maxLat: number];
-
-export interface ProviderHealthEntry {
-  provider: string;
-  status: ProviderState;
-  message: string;
-  last_check?: string | null;
-  error?: string | null;
-  coverage?: string | null;
-}
 
 export interface ProvidersHealth {
   sar: ProviderHealthEntry[];
@@ -106,63 +119,6 @@ export interface SarScene {
   asset_href: string;
   crs: string | null;
   resolution_m: number | null;
-}
-
-export interface ScoreDecomposition {
-  spatialScore: number;
-  temporalScore: number;
-  headingScore: number;
-  sizeScore: number;
-  compositeScore: number;
-  matchRadiusMeters: number;
-  distanceOffsetMeters: number;
-  timeDeltaSeconds: number;
-}
-
-export interface AisAssociation {
-  matched: boolean;
-  mmsi: string | null;
-  vesselName: string | null;
-  distanceOffsetMeters: number | null;
-  timeDeltaSeconds: number | null;
-  predictedLat: number | null;
-  predictedLon: number | null;
-  aisAssociationConfidence: number;
-  scoreDecomposition: ScoreDecomposition | null;
-}
-
-export interface VesselTarget {
-  id: string;
-  classification: TargetClassification;
-  lat: number;
-  lon: number;
-  /** SAR detection confidence, 0..1, explainable via the evidence endpoint. */
-  sarConf: number;
-  /** AIS association confidence, 0 when no association was established. */
-  aisConf: number;
-  /** Apparent SAR footprint length in metres (NOT an exact vessel length). */
-  lenM: number;
-  /** Apparent SAR footprint width in metres. */
-  widM: number;
-  /** Explicit uncertainty on the apparent footprint. Never dropped. */
-  lenUncM: number;
-  hdg: number;
-  wake: boolean;
-  meanDb: number;
-  maxDb: number;
-  area: number;
-  corr: AisAssociation;
-  assessment: string | null;
-  tags: string[];
-}
-
-export interface AisOnlyTarget {
-  cls: 'AIS_ONLY';
-  mmsi: string;
-  vesselName: string | null;
-  lat: number;
-  lon: number;
-  timestamp: string;
 }
 
 export interface Provenance {
@@ -188,7 +144,15 @@ export interface ScanResult {
   scan_id: string;
   runtime_mode: RuntimeMode;
   synthetic: boolean;
-  scene: SarScene;
+  /**
+   * The scene the scan read. Typed as the GENERATED `ScanScene`, not `SarScene`.
+   *
+   * `SarScene` describes a row from `/api/scenes` (a discovery result). This is the
+   * scene a specific scan actually opened, declared by the backend as `ScanScene`.
+   * They are different payloads; conflating them is how the timeline ended up
+   * reading `scene.item_id` off a type that did not guarantee the field.
+   */
+  scene: ScanScene | Record<string, never>;
   aoi: number[];
   acquisition_time: string;
   config: Record<string, unknown>;

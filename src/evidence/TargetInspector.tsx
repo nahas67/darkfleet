@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Contextual evidence inspector (UI-012, UI-021, UI-022, UI-023).
  *
  * A right-side floating panel for the selected target. Header carries the
@@ -62,7 +62,8 @@ import {
 } from '../timeline/Timeline.tsx';
 import type { AisObservation, TimelineScanInput, TimelineTarget } from '../timeline/Timeline.tsx';
 import { Timeline } from '../timeline/Timeline.tsx';
-import type { SarScene, TargetClassification, TargetEvidence, VesselTarget } from '../types/api.ts';
+import type { TargetClassification, TargetEvidence, VesselTarget } from '../types/api.ts';
+import type { ScanScene } from '../api/contract.ts';
 
 // Re-exported so consumers have a single import for the shared vocabulary.
 export {
@@ -322,7 +323,7 @@ export interface EvidenceBlocks {
 export interface InspectorInput {
   readonly target: VesselTarget;
   readonly evidence?: TargetEvidence | null;
-  readonly scene?: SarScene | null;
+  readonly scene?: ScanScene | null;
   readonly aisObservations?: readonly AisObservation[] | null;
 }
 
@@ -765,7 +766,7 @@ export interface TargetInspectorProps {
    */
   readonly evidence?: TargetEvidence | null;
   /** Scene the target was read from, for source/product/polarisation. */
-  readonly scene?: SarScene | null;
+  readonly scene?: ScanScene | null;
   /** The active scan, used by the TIMELINE tab. */
   readonly scan?: TimelineScanInput | null;
   /** AIS observations around the acquisition. */

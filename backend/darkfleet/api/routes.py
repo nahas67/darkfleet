@@ -59,6 +59,7 @@ from darkfleet.api.models import (
     TargetEvidenceResponse,
     jsonable,
 )
+from darkfleet.api.targets import ScanScene
 from darkfleet.config.settings import Settings
 from darkfleet.detectors import DetectorRegistry
 from darkfleet.evidence import target_evidence
@@ -848,7 +849,15 @@ def scan_targets(scan_id: str, state: State) -> ScanTargetsResponse:
         targets=targets,
         ais_only=ais_only,
         provenance=dict(record.get("provenance") or {}),
-        scene=dict(record["scene"]) if isinstance(record.get("scene"), dict) else None,
+        # Validated into ScanScene rather than passed through as a dict. The record
+        # is written by the pipeline and is authoritative; if it ever stopped
+        # matching the declared shape this raises here instead of shipping an
+        # untyped object the timeline would then read fields from unsafely.
+        scene=(
+            ScanScene.model_validate(record["scene"])
+            if isinstance(record.get("scene"), dict)
+            else None
+        ),
         acquisition_time=(
             str(record["acquisition_time"]) if record.get("acquisition_time") else None
         ),
@@ -886,7 +895,7 @@ def list_scenes(
         runtime_mode="REAL",
         synthetic=False,
         provider=provider,
-        status=ProviderStatus.AVAILABLE.value if scenes else ProviderStatus.UNAVAILABLE.value,
+        status=ProviderStatus.AVAILABLE if scenes else ProviderStatus.UNAVAILABLE,
         note=None if scenes else "no scene coverage for the requested area/time",
         count=len(scenes),
         scenes=scenes,
@@ -1235,7 +1244,7 @@ def provider_health(state: State) -> HealthResponse:
         providers=[
             ProviderHealthEntry(
                 provider=name,
-                status=probe["status"].value,
+                status=probe["status"],
                 detail=redact(probe["detail"]),
                 last_check=checked_at,
                 latency_ms=probe["latency_ms"],
