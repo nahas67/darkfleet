@@ -4,7 +4,7 @@
 #   docker compose up --build
 #
 # API : http://localhost:8000   (OpenAPI docs at /docs)
-# Web : http://localhost:8080
+# Web : http://localhost:8080 (or $DARKFLEET_WEB_PORT when 8080 is taken)
 
 # Every scan is a REAL scan against a live provider. This deployment has no
 # synthetic code path to turn on: there is no such mode, so no flag exists and
@@ -66,7 +66,9 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8080:80"
+      # Overridable because 8080 is often taken (e.g. by another dev server).
+      # Default is unchanged: set DARKFLEET_WEB_PORT only when you need to.
+      - "${DARKFLEET_WEB_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s
