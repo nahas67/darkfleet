@@ -1,0 +1,301 @@
+/*
+ * DarkFleet design system.
+ *
+ * Built from scratch for the current product generation. Two constraints drove
+ * the choices:
+ *
+ *  - The globe is the primary surface. Chrome is thin, angular and low-luminance,
+ *    because anything brighter than the imagery costs the operator contrast.
+ *  - Colour is a data channel, not decoration. Saturated colour is reserved for
+ *    classification, coverage and status. Everything structural is desaturated.
+ */
+
+@import 'tailwindcss';
+
+:root {
+  --df-void: #040705;
+  --df-base: #070c09;
+  --df-surface: #0b110d;
+  --df-raised: #111812;
+  --df-structural: #1e2820;
+  --df-structural-bright: #2c3a2f;
+
+  --df-text: #d8e4dc;
+  --df-text-2: #8fa396;
+  --df-text-dim: #5c6e63;
+
+  --df-green: #3fb950;
+  --df-cyan: #3fa9c4;
+  --df-amber: #d9a03c;
+  --df-red: #d4553f;
+  --df-violet: #7c6bb0;
+
+  --df-label: 'Barlow Condensed', 'Roboto Condensed', system-ui, sans-serif;
+  --df-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --df-body: Inter, system-ui, -apple-system, sans-serif;
+}
+
+@theme {
+  --color-void: var(--df-void);
+  --color-base: var(--df-base);
+  --color-surface: var(--df-surface);
+  --color-raised: var(--df-raised);
+  --color-structural: var(--df-structural);
+  --color-structural-bright: var(--df-structural-bright);
+  --color-ink: var(--df-text);
+  --color-ink-2: var(--df-text-2);
+  --color-ink-dim: var(--df-text-dim);
+  --color-tac: var(--df-green);
+  --color-info: var(--df-cyan);
+  --color-warn: var(--df-amber);
+  --color-fault: var(--df-red);
+  --color-assoc: var(--df-violet);
+  --font-mono: var(--df-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  /* No horizontal document scrolling at any supported width. A command console
+     that scrolls sideways loses panels off-screen. */
+  overflow: hidden;
+}
+
+body {
+  background: var(--df-void);
+  color: var(--df-text);
+  font-family: var(--df-body);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------------------------------------------------------------------ primitives */
+
+.df-label {
+  font-family: var(--df-label);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--df-text-2);
+}
+
+/*
+ * Rail captions are deliberately smaller than panel labels, and set here rather
+ * than with a Tailwind text-* utility: `.df-label` and Tailwind's utility both
+ * target `font-size`, so the utility lost on specificity and the label rendered
+ * at 11px in a 58px rail, clipping 'ANALYTICS' by a character.
+ */
+.df-rail-label {
+  font-family: var(--df-label);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: inherit;
+}
+
+.df-mono {
+  font-family: var(--df-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Every number in the product is monospaced so a telemetry column does not
+   shimmer as values update. */
+.df-num {
+  font-family: var(--df-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.df-panel {
+  background: color-mix(in srgb, var(--df-surface) 88%, transparent);
+  border: 1px solid var(--df-structural);
+  backdrop-filter: blur(6px);
+}
+
+.df-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--df-structural);
+  background: color-mix(in srgb, var(--df-raised) 70%, transparent);
+}
+
+.df-rule {
+  height: 1px;
+  background: var(--df-structural);
+}
+
+/* Angled panel edge. Reads as instrumentation; a rounded card reads as a
+   consumer app. */
+.df-clipped {
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
+}
+
+.df-hairline {
+  border-color: var(--df-structural);
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.df-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-family: var(--df-label);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--df-text-2);
+  background: transparent;
+  border: 1px solid var(--df-structural);
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.df-btn:hover:not(:disabled) {
+  color: var(--df-text);
+  border-color: var(--df-structural-bright);
+  background: color-mix(in srgb, var(--df-raised) 60%, transparent);
+}
+
+.df-btn[aria-pressed='true'],
+.df-btn[data-active='true'] {
+  color: var(--df-text);
+  border-color: color-mix(in srgb, var(--df-cyan) 55%, transparent);
+  background: color-mix(in srgb, var(--df-cyan) 12%, transparent);
+}
+
+.df-btn:disabled {
+  /* Disabled controls must look unavailable, not merely be unclickable. */
+  color: var(--df-text-dim);
+  border-color: color-mix(in srgb, var(--df-structural) 60%, transparent);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.df-input {
+  height: 24px;
+  padding: 0 8px;
+  font-family: var(--df-mono);
+  font-size: 11px;
+  color: var(--df-text);
+  background: color-mix(in srgb, var(--df-raised) 80%, transparent);
+  border: 1px solid var(--df-structural);
+  outline: none;
+}
+
+.df-input:focus-visible,
+.df-btn:focus-visible,
+[role='tab']:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--df-cyan);
+  outline-offset: 1px;
+}
+
+.df-input[aria-invalid='true'] {
+  border-color: var(--df-red);
+}
+
+/* ------------------------------------------------------------------ scrollbars */
+
+.df-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--df-structural-bright) transparent;
+}
+
+.df-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.df-scroll::-webkit-scrollbar-thumb {
+  background: var(--df-structural-bright);
+}
+
+.df-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------------ globe */
+
+/* Cesium's own chrome is disabled in code; these rules neutralise the residue
+   that its widgets stylesheet still lays down, so no control from the library
+   appears over the tactical world. */
+.cesium-widget-credits,
+.cesium-viewer-bottom {
+  display: none !important;
+}
+
+/* Attribution is never removed. It is restyled to fit the console. */
+.cesium-credit-textContainer,
+.cesium-credit-expand-link {
+  display: none !important;
+}
+
+.cesium-credit-lightbox-overlay {
+  display: none !important;
+}
+
+.cesium-widget canvas {
+  display: block;
+  outline: none;
+}
+
+/* The globe must never intercept keyboard from the panels around it. */
+.cesium-widget {
+  outline: none;
+}
+
+/* ------------------------------------------------------------------ motion */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------ utilities */
+
+.df-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.df-scroll-x {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}

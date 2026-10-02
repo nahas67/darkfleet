@@ -27,7 +27,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Final, NoReturn, TypedDict, cast
 from xml.etree import ElementTree
@@ -39,6 +39,21 @@ from fastapi.responses import StreamingResponse
 
 from darkfleet import __classification_schema__, __processing_version__, __version__
 from darkfleet.ais.archive import AisArchive
+from darkfleet.ais.delivery import (
+    DEFAULT_WINDOW_SECONDS as AIS_WINDOW_SECONDS,
+)
+from darkfleet.ais.delivery import (
+    AisCoverageOut,
+    AisCoverageState,
+    ScanAisResponse,
+    ScanAisWindow,
+    TargetAisResponse,
+    VesselTrackResponse,
+    as_utc,
+    coverage_for,
+    identity_from,
+    to_out,
+)
 from darkfleet.api.models import (
     DEFERRED_EXPORT_FORMATS,
     SUPPORTED_EXPORT_FORMATS,
@@ -2188,3 +2203,242 @@ def summarise_target(
         "evidence": jsonable(evidence),
         "narrative": narrative,
     }
+
+# =====================================================================
+# AIS DELIVERY (GREEN-3)
+#
+# The archive already existed and was queryable; nothing exposed it. These
+# routes add delivery over the SAME store -- there is deliberately no second
+# AIS persistence path.
+#
+# Every response carries a coverage block. A panel that cannot distinguish
+# "no observations" from "no source covers this place and time" will
+# eventually render an unobserved ocean as an empty one, which is the specific
+# failure this design refuses.
+# =====================================================================
+
+
+def _scan_ais_window(record: dict[str, Any], fallback_iso: str | None) -> ScanAisWindow | None:
+    """The acquisition window a scan correlated AIS over.
+
+    Taken from the scan's own recorded acquisition time so the delivered
+    observations and the correlation decision are drawn over the same instants.
+    Falls back to `fallback_iso` (the record's scene metadata) and finally to
+    None, which is reported rather than invented.
+    """
+    raw = record.get("acquisition_time") or fallback_iso
+    if not raw:
+        return None
+    try:
+        moment = as_utc(str(raw))
+    except (ValueError, TypeError):
+        return None
+    if moment is None:
+        return None
+    delta = timedelta(seconds=AIS_WINDOW_SECONDS)
+    return ScanAisWindow(start=moment - delta, end=moment + delta)
+
+
+def _archive_for(state: State) -> AisArchive:
+    return AisArchive(state.data_dir)
+
+
+@router.get("/ais/coverage", response_model=AisCoverageOut)
+def ais_coverage(state: State) -> AisCoverageOut:
+    """What the AIS archive can and cannot speak to. Probes nothing external."""
+    archive = _archive_for(state)
+    report = archive.coverage()
+    observations = int(report.get("observations", 0) or 0)
+    oldest = report.get("oldest")
+    newest = report.get("newest")
+    if observations == 0 or not oldest or not newest:
+        return AisCoverageOut(
+            state=AisCoverageState.NOT_CONFIGURED,
+            detail=(
+                "No AIS archive is present in this deployment. AIS history is "
+                "unavailable, which is not the same as an empty sea."
+            ),
+            sources=[],
+        )
+    return AisCoverageOut(
+        state=AisCoverageState.AVAILABLE,
+        detail=(
+            f"Local AIS archive holds {observations} observation(s) from "
+            f"{len(report.get('sources') or [])} source(s), {oldest} to {newest}."
+        ),
+        observation_count=observations,
+        archive_oldest=report.get("oldest"),
+        archive_newest=report.get("newest"),
+        sources=[str(s) for s in (report.get("sources") or [])],
+    )
+
+
+@router.get("/scans/{scan_id}/ais", response_model=ScanAisResponse)
+def scan_ais(scan_id: str, state: State) -> ScanAisResponse:
+    """AIS observations behind one scan: its AOI, over its correlation window."""
+    record = _safe_store_get(state.store, scan_id)
+    if record is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="UNKNOWN_SCAN",
+            status_value="UNKNOWN_SCAN",
+            message=f"No persisted scan {scan_id!r}; a completed scan is required.",
+            scan_id=scan_id,
+        )
+
+    scene = dict(record.get("scene") or {})
+    window = _scan_ais_window(record, scene.get("acquisition_time"))
+    bbox = record.get("aoi")
+    box = tuple(float(v) for v in bbox) if isinstance(bbox, (list, tuple)) and len(bbox) == 4 else None
+
+    archive = _archive_for(state)
+    if window is None:
+        return ScanAisResponse(
+            scan_id=scan_id,
+            coverage=AisCoverageOut(
+                state=AisCoverageState.NO_COVERAGE,
+                detail=(
+                    "No acquisition time is recorded for this scan, so no AIS "
+                    "window can be formed. No observation count is reported."
+                ),
+            ),
+            bbox=box,  # type: ignore[arg-type]
+            observations=[],
+            note="No AIS window could be derived from this record.",
+        )
+
+    rows = archive.query(window.start, window.end, bbox=box)  # type: ignore[arg-type]
+    delivered = [to_out(row) for row in rows]
+    return ScanAisResponse(
+        scan_id=scan_id,
+        coverage=coverage_for(archive, window.start, window.end, len(delivered)),
+        window=window,
+        bbox=box,  # type: ignore[arg-type]
+        observations=delivered,
+        note=(
+            "Observed AIS positions only. Nothing here is a prediction: a "
+            "propagated position is a hypothesis derived from speed and course, "
+            "and is never returned by this endpoint."
+        ),
+    )
+
+
+@router.get("/targets/{target_id}/ais-observations", response_model=TargetAisResponse)
+def target_ais_observations(
+    target_id: str,
+    state: State,
+    scan_id: str | None = Query(default=None, description="Disambiguates repeated target ids."),
+) -> TargetAisResponse:
+    """The observations behind the MMSI correlation actually associated.
+
+    When the target has no association this returns zero observations and
+    `associated: false`. It never substitutes a nearby vessel: a different
+    MMSI is a different claim.
+    """
+    owners = _locate_target(state, target_id, scan_id)
+    owner = owners[0]
+    target = owner["target"]
+    record = owner["record"]
+
+    corr = dict(target.get("corr") or {})
+    mmsi = corr.get("mmsi")
+    window = _scan_ais_window(dict(record), dict(record.get("scene") or {}).get("acquisition_time"))
+
+    archive = _archive_for(state)
+    if not mmsi:
+        return TargetAisResponse(
+            target_id=target_id,
+            mmsi=None,
+            associated=False,
+            coverage=coverage_for(archive, window.start, window.end, None) if window else AisCoverageOut(
+                state=AisCoverageState.NO_COVERAGE,
+                detail="No acquisition time is recorded, so no AIS window can be formed.",
+            ),
+            window=window,
+            observations=[],
+            note=(
+                "This target has no AIS association. That is a measurement about "
+                "correlation, not a finding about the vessel."
+            ),
+        )
+
+    if window is None:
+        return TargetAisResponse(
+            target_id=target_id,
+            mmsi=str(mmsi),
+            associated=True,
+            coverage=AisCoverageOut(
+                state=AisCoverageState.NO_COVERAGE,
+                detail="No acquisition time is recorded, so no AIS window can be formed.",
+            ),
+            observations=[],
+            note="No acquisition window available for this target.",
+        )
+
+    rows = archive.query(window.start, window.end, mmsi=str(mmsi))
+    delivered = [to_out(row) for row in rows]
+    return TargetAisResponse(
+        target_id=target_id,
+        mmsi=str(mmsi),
+        associated=True,
+        coverage=coverage_for(archive, window.start, window.end, len(delivered)),
+        window=window,
+        observations=delivered,
+        note="Observed positions only. Association confidence is reported on the target.",
+    )
+
+
+@router.get("/vessels/{mmsi}/track", response_model=VesselTrackResponse)
+def vessel_track(mmsi: str, state: State) -> VesselTrackResponse:
+    """One vessel's observed history from the local AIS archive."""
+    normalised = str(mmsi).strip()
+    if len(normalised) != 9 or not normalised.isdigit():
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST,
+            error="INVALID_MMSI",
+            status_value="INVALID_MMSI",
+            message=(
+                f"{mmsi!r} is not a 9-digit MMSI. No track can be looked up for an "
+                "identifier that cannot exist."
+            ),
+            detail={"mmsi": mmsi},
+        )
+
+    archive = _archive_for(state)
+    report = archive.coverage()
+    oldest = as_utc(report.get("oldest"))
+    newest = as_utc(report.get("newest"))
+    if not report.get("observations") or oldest is None or newest is None:
+        return VesselTrackResponse(
+            mmsi=normalised,
+            coverage=AisCoverageOut(
+                state=AisCoverageState.NOT_CONFIGURED,
+                detail=(
+                    "No AIS archive is present in this deployment. A vessel history "
+                    "is unavailable, which is not evidence that the vessel never "
+                    "broadcast."
+                ),
+            ),
+            observations=[],
+            note="AIS history is unavailable in this deployment.",
+        )
+
+    # Pad by a day either side so an observation stamped exactly on the archive
+    # boundary is not silently dropped by an inclusive-range edge effect.
+    rows = archive.query(
+        oldest - timedelta(days=1),
+        newest + timedelta(days=1),
+        mmsi=normalised,
+    )
+    delivered = [to_out(row) for row in rows]
+    identity = identity_from(delivered)
+    return VesselTrackResponse(
+        mmsi=normalised,
+        coverage=coverage_for(archive, oldest, newest, len(delivered)),
+        observations=delivered,
+        note=(
+            "Observed positions in archive time order. Unreported fields are null "
+            "and are not inferred from adjacent observations."
+        ),
+        **identity,
+    )

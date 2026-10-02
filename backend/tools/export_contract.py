@@ -66,6 +66,15 @@ SCHEMAS: tuple[str, ...] = (
     "EvidenceDocumentResponse",
     "DebugLayerResponse",
     "LayerStats",
+    # AIS delivery (GREEN-3). Order matters only for readability: the generator
+    # follows $ref edges, so a dependency listed after its dependent is still
+    # emitted before it.
+    "AisObservationOut",
+    "AisCoverageOut",
+    "ScanAisWindow",
+    "ScanAisResponse",
+    "TargetAisResponse",
+    "VesselTrackResponse",
 )
 
 HEADER = """// GENERATED FILE - DO NOT EDIT BY HAND.

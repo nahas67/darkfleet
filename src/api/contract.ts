@@ -229,6 +229,75 @@ export interface LayerStats {
   readonly true_count?: number | null;
 }
 
+export interface AisObservationOut {
+  readonly timestamp: string;
+  readonly mmsi: string;
+  readonly lat: number;
+  readonly lon: number;
+  /** knots; null when not reported */
+  readonly sog?: number | null;
+  /** degrees true; null when not reported */
+  readonly cog?: number | null;
+  /** degrees true; null when not reported or the AIS 511 sentinel was sent */
+  readonly heading?: number | null;
+  readonly nav_status?: string | null;
+  readonly ship_name?: string | null;
+  readonly callsign?: string | null;
+  readonly imo?: string | null;
+  readonly ship_type?: string | null;
+  readonly length_m?: number | null;
+  readonly width_m?: number | null;
+  readonly source?: string | null;
+}
+
+export interface AisCoverageOut {
+  readonly state: AisCoverageState;
+  readonly detail: string;
+  readonly observation_count?: number | null;
+  readonly window_start?: string | null;
+  readonly window_end?: string | null;
+  readonly archive_oldest?: string | null;
+  readonly archive_newest?: string | null;
+  readonly sources?: string[];
+}
+
+export interface ScanAisWindow {
+  readonly start: string;
+  readonly end: string;
+}
+
+export interface ScanAisResponse {
+  readonly scan_id: string;
+  readonly coverage: AisCoverageOut;
+  readonly window?: ScanAisWindow | null;
+  readonly bbox?: unknown[] | null;
+  readonly observations?: AisObservationOut[];
+  readonly note: string;
+}
+
+export interface TargetAisResponse {
+  readonly target_id: string;
+  readonly mmsi?: string | null;
+  readonly associated: boolean;
+  readonly coverage: AisCoverageOut;
+  readonly window?: ScanAisWindow | null;
+  readonly observations?: AisObservationOut[];
+  readonly note: string;
+}
+
+export interface VesselTrackResponse {
+  readonly mmsi: string;
+  readonly coverage: AisCoverageOut;
+  readonly ship_name?: string | null;
+  readonly callsign?: string | null;
+  readonly imo?: string | null;
+  readonly ship_type?: string | null;
+  readonly length_m?: number | null;
+  readonly width_m?: number | null;
+  readonly observations?: AisObservationOut[];
+  readonly note: string;
+}
+
 export interface ScanScene {
   readonly provider?: string;
   readonly collection?: string;
@@ -246,6 +315,9 @@ export type ProviderStatus = "AVAILABLE" | "DEGRADED" | "UNAVAILABLE" | "AUTH_RE
 
 /** The 16 states of a scan, declared in pipeline order. */
 export type ScanStage = "QUEUED" | "SEARCHING_SCENE" | "READING_SAR" | "PREPROCESSING" | "MASKING" | "FILTERING" | "DETECTING" | "EXTRACTING" | "GEOLOCATING" | "LOADING_AIS" | "ALIGNING" | "CORRELATING" | "SCORING" | "PERSISTING" | "COMPLETE" | "FAILED";
+
+/** Whether the archive can answer a question, and how completely. */
+export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
 
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
@@ -265,9 +337,16 @@ export type ContractSchemaName =
   | 'EvidenceDocumentResponse'
   | 'DebugLayerResponse'
   | 'LayerStats'
+  | 'AisObservationOut'
+  | 'AisCoverageOut'
+  | 'ScanAisWindow'
+  | 'ScanAisResponse'
+  | 'TargetAisResponse'
+  | 'VesselTrackResponse'
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'
+  | 'AisCoverageState'
 ;
 
 /**

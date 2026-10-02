@@ -40,6 +40,27 @@ _SCHEMA = pa.schema(
 )
 
 
+def _connect_utc() -> Any:
+    """A DuckDB connection whose session timezone is pinned to UTC.
+
+    Parquet stores these timestamps as ``timestamp[us, tz=UTC]``, but DuckDB
+    renders a ``TIMESTAMP WITH TIME ZONE`` in the SESSION timezone. Without this,
+    the same archive read on two machines returns two different offsets for the
+    same row -- observed returning ``17:30+05:30`` for an observation recorded at
+    ``12:00Z``. The instant is preserved, so nothing is corrupted, but the
+    serialised value stops being UTC and every downstream display shifts.
+
+    Worse, range filters compare a tz-aware column against query parameters. If
+    the session is not UTC, a bound built from a UTC datetime can silently
+    exclude rows at the window edge -- a wrong answer rather than a wrong label.
+    Pinning the session makes reads reproducible and keeps ``>= start`` meaning
+    what it says.
+    """
+    con = duckdb.connect()
+    con.execute("SET TimeZone='UTC'")
+    return con
+
+
 def _part_path(root: Path, day: datetime, source: str) -> Path:
     return root / f"{day.year:04d}" / f"{day.month:02d}" / f"{day.day:02d}" / f"part-{source}.parquet"
 
@@ -128,7 +149,7 @@ class AisArchive:
             clauses.append("source = ?")
             params.append(source)
         where = " AND ".join(clauses)
-        con = duckdb.connect()
+        con = _connect_utc()
         try:
             rel = con.execute(
                 f"SELECT * FROM read_parquet({[str(f) for f in files]!r}) WHERE {where} "
@@ -145,7 +166,7 @@ class AisArchive:
         files = sorted(self.root.rglob("part-*.parquet"))
         if not files:
             return {"days": 0, "observations": 0, "sources": [], "newest": None, "oldest": None}
-        con = duckdb.connect()
+        con = _connect_utc()
         try:
             row = con.execute(
                 f"SELECT COUNT(*), MIN(timestamp), MAX(timestamp) "

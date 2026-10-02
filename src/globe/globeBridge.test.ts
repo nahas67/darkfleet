@@ -18,9 +18,9 @@ import {
   layerCounts,
   pushScanResult,
 } from './globeBridge.ts';
-import { toGlobeScanResult } from '../app/SpatialShell.tsx';
+import { assertReal } from '../api/client.ts';
 import { ContractViolation, validateScanTargetsResponse } from '../api/validate.ts';
-import type { ScanTargetsResponse } from '../app/useApi.ts';
+import type { ScanTargetsResponse } from '../api/contract';
 import type { ScanResult } from '../types/api.ts';
 
 interface FakeEntity {
@@ -282,7 +282,37 @@ describe('layerCounts', () => {
 
 // ------------------------------------------- the last honesty checkpoint
 
-describe('toGlobeScanResult', () => {
+describe('the REAL-only guard', () => {
+  // This guard used to live in the retired shell as `toGlobeScanResult`, which is
+  // why this test file had to import a presentation module. It now lives in
+  // api/client.ts, next to the code that applies it, so the assertion and the
+  // behaviour cannot drift apart.
+  const base = {
+    runtime_mode: 'REAL',
+    synthetic: false,
+  };
+
+  it('accepts a real, non-synthetic record', () => {
+    expect(assertReal(base)).toBe(true);
+  });
+
+  it('refuses a payload that claims to be synthetic', () => {
+    // The single most important assertion in this file. A globe full of
+    // fabricated marks is the worst failure this tool could have.
+    expect(assertReal({ ...base, synthetic: true })).toBe(false);
+    expect(assertReal({ ...base, runtime_mode: 'DEMO' })).toBe(false);
+  });
+
+  it('refuses a record that omits the guarantees rather than assuming them', () => {
+    // Absence is not consent. A payload that does not state REAL/synthetic:false
+    // is refused, because defaulting it to real would draw whatever arrived.
+    expect(assertReal({} as never)).toBe(false);
+    expect(assertReal({ runtime_mode: 'REAL' } as never)).toBe(false);
+  });
+
+});
+
+describe('scan response validation', () => {
   const base: ScanTargetsResponse = {
     scan_id: 'DF-0001',
     // Present because the validator requires it. The first version of this
@@ -302,22 +332,6 @@ describe('toGlobeScanResult', () => {
     scene: {},
     acquisition_time: '2026-09-27T11:24:58.180786Z',
   } as unknown as ScanTargetsResponse;
-
-  it('adapts a real response', () => {
-    const adapted = toGlobeScanResult(base);
-    expect(adapted).not.toBeNull();
-    expect(adapted?.runtime_mode).toBe('REAL');
-    expect(adapted?.synthetic).toBe(false);
-    expect(adapted?.aoi).toEqual([103.8, 1.24, 103.86, 1.28]);
-    expect(adapted?.targets).toHaveLength(1);
-  });
-
-  it('refuses a payload that claims to be synthetic', () => {
-    // The single most important assertion in this file. A globe full of
-    // fabricated marks is the worst failure this tool could have.
-    expect(toGlobeScanResult({ ...base, synthetic: true })).toBeNull();
-    expect(toGlobeScanResult({ ...base, runtime_mode: 'DEMO' as never })).toBeNull();
-  });
 
   it('rejects a payload with missing collections rather than defaulting them', () => {
     // This test used to assert the opposite: that `toGlobeScanResult` turned

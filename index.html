@@ -3,21 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DarkFleet — SAR + AIS Vessel Correlation Platform</title>
-    <meta name="description" content="Autonomous orbital reconnaissance & SAR/AIS maritime vessel correlation platform for detecting covert dark fleet activity." />
-    <meta property="og:title" content="DarkFleet — SAR + AIS Vessel Correlation Platform" />
-    <meta property="og:description" content="Autonomous orbital reconnaissance & SAR/AIS maritime vessel correlation platform for detecting covert dark fleet activity." />
+    <title>DarkFleet &mdash; Maritime SAR/AIS Intelligence</title>
+    <!--
+      The previous description claimed the platform was "for detecting covert dark
+      fleet activity". That is the framing this product rejects: a radar return
+      with no AIS association is a measurement about correlation, and the product
+      makes no claim about intent. The copy below describes what it does.
+    -->
+    <meta
+      name="description"
+      content="Open-source maritime spatial-intelligence platform. Correlates Sentinel-1 SAR vessel detections with AIS observations to produce evidence, confidence and uncertainty. Every result is traceable to a real acquisition."
+    />
+    <meta property="og:title" content="DarkFleet &mdash; Maritime SAR/AIS Intelligence" />
+    <meta
+      property="og:description"
+      content="Evidence-oriented SAR/AIS correlation over real Sentinel-1 acquisitions and timestamped AIS observations."
+    />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="stylesheet" href="/cesium/Widgets/widgets.css">
+    <!-- Cesium's own stylesheet is imported in src/main.tsx, where Vite can
+         resolve and fingerprint it. Linking /cesium/Widgets/widgets.css here as
+         well duplicated it and emitted a build-time warning. CESIUM_BASE_URL is
+         still required: it is where the plugin serves Workers/Assets/ThirdParty. -->
     <script>window.CESIUM_BASE_URL = '/cesium';</script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
-  <body class="bg-[#050709] text-slate-100 antialiased overflow-x-hidden selection:bg-cyan-500/30 selection:text-cyan-200">
+  <body>
     <div id="root"></div>
+    <noscript>
+      DarkFleet renders an interactive 3D globe and requires JavaScript.
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
