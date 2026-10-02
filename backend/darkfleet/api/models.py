@@ -207,6 +207,12 @@ class ScanTargetsResponse(BaseModel):
     targets: list[dict[str, Any]] = Field(default_factory=list)
     ais_only: list[dict[str, Any]] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
+    #: Source scene and acquisition instant. Both are already in the persisted
+    #: record; they are exposed here because the evidence inspector and the
+    #: timeline both need them, and without them the client would have to guess
+    #: or fetch a second time.
+    scene: dict[str, Any] | None = None
+    acquisition_time: str | None = None
 
 
 class SceneSummary(BaseModel):

@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ScanSurface, SpatialShell } from './SpatialShell.tsx';
+import { ScanLauncher, ScanSurface, SpatialShell } from './SpatialShell.tsx';
 import {
   ADVANCED_LAYER_IDS,
   appStore,
@@ -47,8 +47,15 @@ import {
   withScanAccepted,
 } from './useScan.ts';
 import type { ScanState } from './useScan.ts';
-import { createApiClient, scenesUrl, toProvidersHealth, ApiError } from './useApi.ts';
-import type { FetchLike, HealthResponse } from './useApi.ts';
+import {
+  createApiClient,
+  normaliseScanTargets,
+  normaliseTarget,
+  scenesUrl,
+  toProvidersHealth,
+  ApiError,
+} from './useApi.ts';
+import type { FetchLike, HealthResponse, ScanTargetsResponse } from './useApi.ts';
 import { LAYER_DEFS } from '../globe/registry.ts';
 import { SCAN_PIPELINE } from '../types/api.ts';
 import type { RuntimeMode, ScanStage } from '../types/api.ts';
@@ -448,11 +455,21 @@ describe('Rail, dock and Escape', () => {
     expect(html).toContain('role="toolbar"');
   });
 
-  it('keeps the timeline placeholder disabled with a reason', () => {
+  it('mounts the real timeline, not the CP15 placeholder', () => {
     const html = renderShell({ openSurface: 'TIME' });
-    expect(html).toContain('data-df-timeline');
-    const button = html.match(/<button[^>]*not available until CP15[^>]*>/)?.[0] ?? '';
-    expect(button).toContain('disabled');
+    // The placeholder asserted here was dead code: it claimed the backend had
+    // no timeline source. The real Timeline renders an acquisition-only state
+    // when no scan is loaded, and never fabricates playback.
+    expect(html).not.toContain('not available until CP15');
+    expect(html).toMatch(/data-df-timeline|SAR acquisition|Timeline/i);
+  });
+
+  it('mounts the contacts surface on AIS and the inspector on CORRELATE', () => {
+    // Both components were delivered but unreachable from the shell.
+    expect(renderShell({ openSurface: 'AIS' })).toMatch(/data-df-contacts|SAR TARGETS|AIS CONTACTS/i);
+    expect(renderShell({ openSurface: 'CORRELATE' })).toMatch(
+      /data-df-inspector|OBSERVED|Select a target|No target selected/i,
+    );
   });
 });
 
@@ -708,7 +725,11 @@ describe('useApi typed client', () => {
     ]);
     expect(client.scanEventsUrl('scan-1')).toBe('/api/scans/scan-1/events');
     expect(client.scanExportUrl('scan-1', 'json')).toBe('/api/scans/scan-1/export/json');
-    expect(client.scanExportUrl('scan-1', 'csv')).toBe('/api/scans/scan-1/export/csv');
+    // Every format the shell offers must be one the backend actually serves.
+    // `csv` was offered here and answered 400.
+    for (const format of ['json', 'geojson', 'kml', 'png', 'pdf'] as const) {
+      expect(client.scanExportUrl('scan-1', format)).toBe(`/api/scans/scan-1/export/${format}`);
+    }
   });
 
   it('percent-encodes path segments', () => {
@@ -802,5 +823,147 @@ describe('AppStore', () => {
   it('exports a process store defaulting to DEMO with no surface open', () => {
     expect(appStore.getState().mode).toBe('DEMO');
     expect(appStore.getState().openSurface).toBeNull();
+  });
+});
+// ------------------------------------------------- wire payload normalisation
+//
+// Two real mismatches between the persisted record and the declared frontend
+// types were invisible while the payload was typed `Record<string, unknown>`.
+// These tests pin the real wire shape so they cannot regress.
+
+describe('wire target normalisation', () => {
+  // Exactly the field names the backend persists (verified against a live scan).
+  const WIRE = {
+    id: 'DF-001',
+    cls: 'SAR_UNMATCHED',
+    lat: 1.267269,
+    lon: 103.85533,
+    sarConf: 0.54,
+    aisConf: 0,
+    lenM: 15,
+    widM: 3,
+    lenUncM: 6,
+    hdg: 118,
+    wake: false,
+    meanDb: -8.4,
+    maxDb: -1.2,
+    area: 12,
+    assessment: 'Unmatched surface radar return.',
+    tags: ['low-contrast'],
+    corr: {
+      matched: false,
+      mmsi: null,
+      vesselName: null,
+      distanceOffsetMeters: null,
+      timeDeltaSeconds: null,
+      predictedLat: null,
+      predictedLon: null,
+      scoreDecomposition: null,
+    },
+  };
+
+  it('maps the persisted `cls` field onto `classification`', () => {
+    const t = normaliseTarget(WIRE);
+    expect(t).not.toBeNull();
+    expect(t!.classification).toBe('SAR_UNMATCHED');
+    expect((t as unknown as Record<string, unknown>).cls).toBeUndefined();
+  });
+
+  it('lifts aisConf into corr.aisAssociationConfidence', () => {
+    const t = normaliseTarget({ ...WIRE, aisConf: 0.71 });
+    expect(t!.corr.aisAssociationConfidence).toBe(0.71);
+  });
+
+  it('falls back to UNRESOLVED for an unknown classification', () => {
+    expect(normaliseTarget({ ...WIRE, cls: 'DARK_VESSEL' })!.classification).toBe(
+      'UNRESOLVED',
+    );
+    expect(normaliseTarget({ ...WIRE, cls: undefined })!.classification).toBe('UNRESOLVED');
+  });
+
+  it('never invents a numeric measurement', () => {
+    const t = normaliseTarget({ id: 'DF-002', cls: 'SEA_CLUTTER' })!;
+    // Absent numbers stay 0 rather than becoming a plausible-looking value.
+    expect(t.lenM).toBe(0);
+    expect(t.sarConf).toBe(0);
+    expect(t.corr.mmsi).toBeNull();
+    expect(t.corr.aisAssociationConfidence).toBe(0);
+  });
+
+  it('rejects a row with no id', () => {
+    expect(normaliseTarget({ cls: 'SEA_CLUTTER' })).toBeNull();
+    expect(normaliseTarget(null)).toBeNull();
+    expect(normaliseTarget('nope')).toBeNull();
+  });
+
+  it('does not throw when the payload omits its lists', () => {
+    const out = normaliseScanTargets({
+      scan_id: 'DF-1',
+      stage: 'COMPLETE',
+      runtime_mode: 'REAL',
+      synthetic: false,
+      count: 0,
+      ais_only_count: 0,
+      counts: {},
+    } as unknown as ScanTargetsResponse);
+    expect(out.targets).toEqual([]);
+    expect(out.ais_only).toEqual([]);
+  });
+
+  it('keeps every usable row and drops the unusable ones', () => {
+    const out = normaliseScanTargets({
+      scan_id: 'DF-1',
+      stage: 'COMPLETE',
+      runtime_mode: 'REAL',
+      synthetic: false,
+      count: 2,
+      ais_only_count: 0,
+      counts: {},
+      targets: [WIRE, { cls: 'SEA_CLUTTER' }],
+      ais_only: [],
+      provenance: {},
+      scene: null,
+      acquisition_time: null,
+    } as unknown as ScanTargetsResponse);
+    expect(out.targets).toHaveLength(1);
+    expect(out.targets[0].classification).toBe('SAR_UNMATCHED');
+  });
+});
+
+// ---------------------------------------------------------- scan launcher
+
+describe('scan launcher', () => {
+  const renderLauncher = (overrides: Record<string, unknown> = {}): string =>
+    renderToStaticMarkup(
+      createElement(ScanLauncher, {
+        scan: IDLE_SCAN_STATE,
+        store: createStore(),
+        onStart: () => {},
+        ...overrides,
+      } as never),
+    );
+
+  it('offers a way to start a scan at all', () => {
+    // The Scan surface used to be status-only: startScan had no caller, so a
+    // scan could not be launched from anywhere in the UI.
+    const html = renderLauncher();
+    expect(html).toContain('data-df-scan-launcher');
+    expect(html).toContain('Run DEMO scan');
+    expect(html).toContain('df-scan-bbox');
+  });
+
+  it('labels the mode it will actually run', () => {
+    expect(renderLauncher({ store: createStore({ mode: 'REAL' }) })).toContain('Run REAL scan');
+  });
+
+  it('disables the control while a scan is in flight', () => {
+    const html = renderLauncher({ scan: { ...IDLE_SCAN_STATE, connection: 'STREAMING' } });
+    expect(html).toContain('Scan in flight');
+    expect(html).toMatch(/<button[^>]*disabled/);
+  });
+
+  it('exposes the bbox field with an accessible name', () => {
+    const html = renderLauncher();
+    expect(html).toContain('Bounding box: min_lon, min_lat, max_lon, max_lat');
   });
 });

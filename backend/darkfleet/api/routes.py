@@ -911,6 +911,10 @@ def scan_targets(scan_id: str, state: State) -> ScanTargetsResponse:
         targets=targets,
         ais_only=ais_only,
         provenance=dict(record.get("provenance") or {}),
+        scene=dict(record["scene"]) if isinstance(record.get("scene"), dict) else None,
+        acquisition_time=(
+            str(record["acquisition_time"]) if record.get("acquisition_time") else None
+        ),
     )
 
 

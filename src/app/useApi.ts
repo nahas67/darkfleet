@@ -12,12 +12,20 @@
  */
 
 import type {
+  AisOnlyTarget,
   BoundingBox,
   DebugLayerId,
   ProviderHealthEntry,
   ProvidersHealth,
   ProviderState,
   RuntimeMode,
+  SarScene,
+  ScoreDecomposition,
+  TargetClassification,
+  VesselTarget,
+} from '../types/api.ts';
+import { CLASSIFICATION_VALUES } from '../types/api.ts';
+import type {
   ScanRequest,
 } from '../types/api.ts';
 
@@ -65,9 +73,18 @@ export interface ScanTargetsResponse {
   count: number;
   ais_only_count: number;
   counts: Record<string, number>;
-  targets: Array<Record<string, unknown>>;
-  ais_only: Array<Record<string, unknown>>;
+  /**
+   * Typed, not `Record<string, unknown>`. The loose escape hatch meant the
+   * payload shape was never actually checked anywhere, so a backend field rename
+   * would have surfaced as `undefined` at runtime instead of at build time.
+   */
+  targets: VesselTarget[];
+  ais_only: AisOnlyTarget[];
   provenance: Record<string, unknown>;
+  /** Source scene, or null when the record carried none. */
+  scene: SarScene | null;
+  /** Acquisition instant of the SAR pass, or null when unrecorded. */
+  acquisition_time: string | null;
 }
 
 export interface SceneSummary {
@@ -168,7 +185,12 @@ export interface SceneQuery {
   runtime_mode?: RuntimeMode;
 }
 
-export type ExportFormat = 'json' | 'csv' | 'geojson';
+/**
+ * Export formats the backend actually serves. `csv` was offered here and is NOT
+ * in the backend's supported set, so the link 400'd. png and pdf are rendered
+ * server-side from the persisted record.
+ */
+export type ExportFormat = 'json' | 'geojson' | 'kml' | 'png' | 'pdf';
 
 // -------------------------------------------------------------------- errors
 
@@ -252,6 +274,100 @@ async function requestJson<T>(
 }
 
 /**
+ * Re-type the wire target into the declared `VesselTarget`.
+ *
+ * The backend persists the canonical field name `cls` (it is what the parity
+ * suite, the KML/GeoJSON exports and the PDF renderer all read, so the wire
+ * format is NOT being changed for the client's convenience). Two fields also
+ * had to be reconciled here, and both were invisible while the payload was
+ * typed as `Record<string, unknown>`:
+ *
+ *  - `cls` -> `classification`. Every surface reads `classification`; against
+ *    the real API it was `undefined`.
+ *  - `AisAssociation.aisAssociationConfidence` does not exist on the wire. The
+ *    value lives on the target as `aisConf`, so it is lifted into place here
+ *    rather than left as a declared-but-absent phantom field.
+ *
+ * Nothing is defaulted to a fabricated value: a missing number stays `null` and
+ * a missing classification stays `UNRESOLVED`.
+ */
+export function normaliseTarget(wire: unknown): VesselTarget | null {
+  if (typeof wire !== 'object' || wire === null) return null;
+  const t = wire as Record<string, unknown>;
+  if (typeof t.id !== 'string') return null;
+
+  const corrWire = (typeof t.corr === 'object' && t.corr !== null ? t.corr : {}) as Record<
+    string,
+    unknown
+  >;
+  const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+  const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+
+  const clsRaw = str(t.cls) ?? str(t.classification);
+  const classification = (CLASSIFICATION_VALUES as readonly string[]).includes(clsRaw ?? '')
+    ? (clsRaw as TargetClassification)
+    : 'UNRESOLVED';
+
+  return {
+    id: t.id,
+    classification,
+    lat: num(t.lat) ?? 0,
+    lon: num(t.lon) ?? 0,
+    sarConf: num(t.sarConf) ?? 0,
+    aisConf: num(t.aisConf) ?? 0,
+    lenM: num(t.lenM) ?? 0,
+    widM: num(t.widM) ?? 0,
+    lenUncM: num(t.lenUncM) ?? 0,
+    hdg: num(t.hdg) ?? 0,
+    wake: t.wake === true,
+    meanDb: num(t.meanDb) ?? 0,
+    maxDb: num(t.maxDb) ?? 0,
+    area: num(t.area) ?? 0,
+    assessment: str(t.assessment),
+    tags: Array.isArray(t.tags) ? t.tags.filter((v): v is string => typeof v === 'string') : [],
+    corr: {
+      matched: corrWire.matched === true,
+      mmsi: str(corrWire.mmsi),
+      vesselName: str(corrWire.vesselName),
+      distanceOffsetMeters: num(corrWire.distanceOffsetMeters),
+      timeDeltaSeconds: num(corrWire.timeDeltaSeconds),
+      predictedLat: num(corrWire.predictedLat),
+      predictedLon: num(corrWire.predictedLon),
+      // Lifted from the target; the wire never carries it inside corr.
+      aisAssociationConfidence: num(t.aisConf) ?? 0,
+      scoreDecomposition:
+        typeof corrWire.scoreDecomposition === 'object' && corrWire.scoreDecomposition !== null
+          ? (corrWire.scoreDecomposition as ScoreDecomposition)
+          : null,
+    },
+  };
+}
+
+/**
+ * Re-type the whole targets payload. Drops rows that are not usable.
+ *
+ * Defensive about the container itself: a client boundary must not throw on a
+ * payload that omits a list. A missing list normalises to an empty list, which
+ * the surfaces render as an explicit "no scan targets" state rather than as a
+ * crash or as fabricated rows.
+ */
+export function normaliseScanTargets(
+  response: ScanTargetsResponse,
+): ScanTargetsResponse {
+  const rawTargets = Array.isArray(response.targets) ? response.targets : [];
+  const rawAisOnly = Array.isArray(response.ais_only) ? response.ais_only : [];
+  return {
+    ...response,
+    targets: rawTargets
+      .map(normaliseTarget)
+      .filter((t): t is VesselTarget => t !== null),
+    ais_only: rawAisOnly.filter(
+      (a): a is AisOnlyTarget => typeof a === 'object' && a !== null,
+    ),
+  };
+}
+
+/**
  * Build a client. `fetchImpl` defaults to the platform fetch; tests inject a
  * stub so no test ever touches the network.
  */
@@ -276,7 +392,7 @@ export function createApiClient(fetchImpl?: FetchLike): ApiClient {
       requestJson<ScanTargetsResponse>(
         doFetch,
         `${API_BASE}/scans/${encodeURIComponent(scanId)}/targets`,
-      ),
+      ).then(normaliseScanTargets),
 
     getScenes: (query = {}) =>
       requestJson<SceneListResponse>(doFetch, scenesUrl(query)),

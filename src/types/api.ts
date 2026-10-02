@@ -20,6 +20,17 @@ export type TargetClassification =
   | 'LOW_CONFIDENCE'
   | 'UNRESOLVED';
 
+/** Runtime-checkable form of {@link TargetClassification}. */
+export const CLASSIFICATION_VALUES: readonly TargetClassification[] = [
+  'SAR_MATCHED_AIS',
+  'SAR_UNMATCHED',
+  'AIS_ONLY',
+  'STATIONARY_OR_INFRASTRUCTURE',
+  'SEA_CLUTTER',
+  'LOW_CONFIDENCE',
+  'UNRESOLVED',
+];
+
 export type RuntimeMode = 'DEMO' | 'REAL';
 
 /** The 15 canonical job stages, in pipeline order. */
@@ -129,7 +140,7 @@ export interface VesselTarget {
   maxDb: number;
   area: number;
   corr: AisAssociation;
-  assessment: string;
+  assessment: string | null;
   tags: string[];
 }
 

@@ -45,6 +45,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LayerId, ProvidersHealth, ProviderHealthEntry, RuntimeMode } from '../types/api.ts';
+import type { ScanRequest } from '../types/api.ts';
 import {
   ADVANCED_LAYER_IDS,
   appStore,
@@ -63,9 +64,13 @@ import type {
   SurfaceId,
 } from './state.ts';
 import { createApiClient, scanExportUrl, toProvidersHealth } from './useApi.ts';
-import type { ApiClient, ScanTargetsResponse, SceneListResponse } from './useApi.ts';
+import type { ApiClient, ScanTargetsResponse, SceneListResponse, SceneSummary } from './useApi.ts';
 import { stageLabel, stagePosition, useScan } from './useScan.ts';
 import type { ScanState } from './useScan.ts';
+import { AnalysisWorkbench } from '../analysis/AnalysisWorkbench.tsx';
+import { Contacts } from '../contacts/Contacts.tsx';
+import { TargetInspector } from '../evidence/TargetInspector.tsx';
+import { Timeline } from '../timeline/Timeline.tsx';
 
 type IconComponent = React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
 
@@ -189,6 +194,17 @@ export function SpatialShell({
     if (scan.state.scanId) store.setActiveScanId(scan.state.scanId);
   }, [scan.state.scanId, store]);
 
+  // The active scan's targets are fetched ONCE here and shared by every surface
+  // that needs them (contacts, inspector, timeline). Each surface fetching its
+  // own copy would mean three requests and three chances to disagree.
+  //
+  // The fetch keys on the JOB STAGE as well as the id. A scan that is still
+  // running answers 409 for /targets, so a fetch that races the job leaves the
+  // surfaces empty; without a stage dependency they would stay empty until a
+  // manual page reload even after the scan finished.
+  const activeScanId = scan.state.scanId ?? state.activeScanId;
+  const targets = useScanTargets(client, activeScanId, scan.state.stage, scan.state.terminal);
+
   const openSurface = state.openSurface;
   const toggle = useCallback((id: SurfaceId) => store.toggleSurface(id), [store]);
   const close = useCallback(() => store.closeSurface(), [store]);
@@ -230,6 +246,8 @@ export function SpatialShell({
             providers={providers}
             providersError={providersError}
             scan={scan.state}
+            targets={targets}
+            onStartScan={scan.startScan}
             onRefreshProviders={() => setRefreshProviders((n) => n + 1)}
             onViewerReady={onViewerReady}
           />
@@ -523,33 +541,134 @@ interface SurfaceBodyProps {
   providers: ProvidersHealth | null;
   providersError: string | null;
   scan: ScanState;
+  targets: ScanTargetsResponse | null;
+  onStartScan: (request: ScanRequest) => void;
   onRefreshProviders: () => void;
   onViewerReady?: (viewer: unknown) => void;
 }
 
+/**
+ * The active scan's target list, fetched once and shared. `null` means either
+ * "no scan" or "not readable yet" — never an empty list standing in for either.
+ *
+ * `stage` and `terminal` are dependencies on purpose: a scan that has not
+ * finished answers 409, so re-reading only on `scanId` would strand the
+ * surfaces empty after the job completes.
+ */
+function useScanTargets(
+  client: ApiClient,
+  scanId: string | null,
+  stage: string | null,
+  terminal: boolean,
+): ScanTargetsResponse | null {
+  const [targets, setTargets] = useState<ScanTargetsResponse | null>(null);
+  useEffect(() => {
+    if (!scanId) {
+      setTargets(null);
+      return undefined;
+    }
+    let cancelled = false;
+    client
+      .getScanTargets(scanId)
+      .then((response) => {
+        if (!cancelled) setTargets(response);
+      })
+      .catch(() => {
+        // Not readable yet (409 while the job runs) is an unknown state, not an
+        // empty scan. The stage dependency re-runs this once the job lands.
+        if (!cancelled) setTargets(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, scanId, stage, terminal]);
+  return targets;
+}
+
 function SurfaceBody(props: SurfaceBodyProps) {
+  const { state, store, client, targets } = props;
+  const selected = useMemo(
+    () => targets?.targets.find((t) => t.id === state.selectedTargetId) ?? null,
+    [targets, state.selectedTargetId],
+  );
+  const selectTarget = useCallback((id: string | null) => store.selectTarget(id), [store]);
+
   switch (props.surface) {
     case 'LAYERS':
-      return <LayersSurface state={props.state} store={props.store} />;
+      return <LayersSurface state={state} store={store} />;
     case 'SEARCH':
-      return <SceneBrowser client={props.client} />;
+      return <SceneBrowser client={client} />;
     case 'TIME':
-      return <TimelineSurface />;
+      return (
+        <Timeline
+          scan={
+            targets
+              ? {
+                  scan_id: targets.scan_id,
+                  acquisition_time: targets.acquisition_time,
+                  scene: targets.scene
+                    ? { acquisition_time: targets.scene.acquisition_time }
+                    : null,
+                }
+              : null
+          }
+          targetId={state.selectedTargetId}
+          onClose={store.closeSurface}
+        />
+      );
     case 'SCAN':
-      return <ScanSurface scan={props.scan} store={props.store} />;
+      return (
+        <ScanLauncher
+          scan={props.scan}
+          store={store}
+          onStart={props.onStartScan}
+          client={client}
+        />
+      );
     case 'SAR':
-      return <SarSurface state={props.state} providers={props.providers} />;
+      return (
+        <>
+          <SarSurface state={state} providers={props.providers} />
+          <div className="mt-4 border-t border-[var(--df-border)] pt-3">
+            <AnalysisWorkbench client={client} scanId={state.activeScanId} />
+          </div>
+        </>
+      );
     case 'AIS':
-      return <AisSurface state={props.state} providers={props.providers} />;
+      return (
+        <>
+          <Contacts
+            targets={targets?.targets ?? null}
+            aisOnly={targets?.ais_only ?? null}
+            selectedTargetId={state.selectedTargetId}
+            onSelectTarget={selectTarget}
+            onClose={store.closeSurface}
+          />
+          <div className="mt-4 border-t border-[var(--df-border)] pt-3">
+            <AisSurface state={state} providers={props.providers} />
+          </div>
+        </>
+      );
     case 'CORRELATE':
-      return <CorrelateSurface state={props.state} providers={props.providers} />;
+      return (
+        <>
+          <TargetInspector
+            target={selected}
+            scene={targets?.scene ?? null}
+            client={client}
+          />
+          <div className="mt-4 border-t border-[var(--df-border)] pt-3">
+            <CorrelateSurface state={state} providers={props.providers} />
+          </div>
+        </>
+      );
     case 'ANALYTICS':
-      return <AnalyticsSurface state={props.state} scan={props.scan} />;
+      return <AnalyticsSurface state={state} scan={props.scan} targets={targets} />;
     case 'MORE':
     case 'VIEW':
       return (
         <SettingsSurface
-          state={props.state}
+          state={state}
           providers={props.providers}
           providersError={props.providersError}
           onRefreshProviders={props.onRefreshProviders}
@@ -739,24 +858,132 @@ function SceneBrowser({ client }: { client?: ApiClient }) {
   );
 }
 
-/** Timeline is a declared placeholder: disabled with a stated reason. */
-function TimelineSurface() {
+/**
+ * Scan launcher. The Scan surface previously only DISPLAYED scan state, so a
+ * scan could be started from nowhere in the UI: `useScan().startScan` and
+ * `client.createScan` both existed with no caller. This wires them.
+ *
+ * The bbox is entered explicitly. There is no "use the whole world" default,
+ * because a REAL scan over an arbitrary extent would either return nothing or
+ * silently download an unreasonable amount of data.
+ */
+export function ScanLauncher({
+  scan,
+  store,
+  onStart,
+  client,
+}: {
+  scan: ScanState;
+  store: AppStore;
+  onStart: (request: ScanRequest) => void;
+  client?: ApiClient;
+}) {
+  const [bboxText, setBboxText] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
+  const busy = scan.connection === 'CONNECTING' || scan.connection === 'STREAMING';
+  const mode = store.getState().mode;
+
+  // The backend owns the footprints. A DEMO scene is synthesised on a fixed
+  // grid, so a hardcoded default bbox is rejected with BBOX_SCENE_MISMATCH;
+  // the scene catalogue is the authoritative source for a valid extent.
+  useEffect(() => {
+    let cancelled = false;
+    (client ?? createApiClient())
+      .getScenes()
+      .then((response) => {
+        if (cancelled) return;
+        setScenes(response.scenes);
+      })
+      .catch(() => {
+        // A failed catalogue read is an unknown state. The field stays empty
+        // and the operator types an extent; nothing is invented.
+        if (!cancelled) setScenes(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const sceneForMode = useMemo(
+    () => scenes?.find((s) => s.runtime_mode === mode) ?? scenes?.[0] ?? null,
+    [scenes, mode],
+  );
+  const suggested = bboxText ?? sceneForMode?.bbox?.join(', ') ?? '';
+
+  const submit = useCallback(() => {
+    const parts = suggested
+      .split(',')
+      .map((p: string) => Number(p.trim()))
+      .filter((n: number) => Number.isFinite(n));
+    if (parts.length !== 4) {
+      setParseError('Enter four numbers: min_lon, min_lat, max_lon, max_lat.');
+      return;
+    }
+    const [minLon, minLat, maxLon, maxLat] = parts as [number, number, number, number];
+    if (minLon >= maxLon || minLat >= maxLat) {
+      setParseError('min_lon must be below max_lon and min_lat below max_lat.');
+      return;
+    }
+    setParseError(null);
+    onStart({
+      runtime_mode: mode,
+      bbox: [minLon, minLat, maxLon, maxLat],
+      ...(sceneForMode ? { scene_id: sceneForMode.id } : {}),
+    });
+  }, [suggested, onStart, mode, sceneForMode]);
+
   return (
-    <div data-df-timeline className="space-y-2">
+    <div data-df-scan-launcher className="space-y-3">
+      <div className="space-y-1">
+        <label
+          htmlFor="df-scan-bbox"
+          className="block font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]"
+        >
+          Area of interest
+        </label>
+        <input
+          id="df-scan-bbox"
+          type="text"
+          value={suggested}
+          onChange={(event) => setBboxText(event.target.value)}
+          disabled={busy}
+          placeholder="min_lon, min_lat, max_lon, max_lat"
+          aria-label="Bounding box: min_lon, min_lat, max_lon, max_lat"
+          aria-invalid={parseError !== null}
+          className="w-full rounded-[6px] border border-[var(--df-border)] bg-transparent px-2 py-1.5 font-mono text-[11px] text-[var(--df-text)] placeholder:text-[var(--df-text-dim)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)] disabled:opacity-50"
+        />
+        {sceneForMode && (
+          <p className="font-mono text-[9px] text-[var(--df-text-dim)]">
+            extent of {sceneForMode.id}
+            {sceneForMode.synthetic ? ' (synthetic)' : ''}
+          </p>
+        )}
+        {parseError && (
+          <p className="flex items-start gap-1.5 text-[10px] text-[var(--df-danger)]">
+            <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+            {parseError}
+          </p>
+        )}
+      </div>
+
       <button
         type="button"
-        disabled
-        aria-label="Timeline playback â€” not available until CP15"
-        title="Temporal playback is not implemented yet"
-        className="flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border)] px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--df-text-dim)]"
+        onClick={submit}
+        disabled={busy || suggested.trim() === ''}
+        className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-[var(--df-border-active)] px-2 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--df-accent)] transition hover:bg-[var(--df-accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--df-accent)] disabled:opacity-40"
       >
-        <Clock className="h-3 w-3" aria-hidden />
-        Not available
+        <Sparkles className="h-3 w-3" aria-hidden />
+        {busy ? 'Scan in flight' : `Run ${mode} scan`}
       </button>
       <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
-        Temporal playback ships with the multi-pass work in CP15. The backend exposes no timeline
-        endpoint yet, so no time control is offered here rather than faking one.
+        Runs in {mode} mode. DEMO synthesises a labelled scene; REAL queries the live provider and
+        never falls back to DEMO data.
       </p>
+
+      <div className="border-t border-[var(--df-border)] pt-3">
+        <ScanSurface scan={scan} store={store} />
+      </div>
     </div>
   );
 }
@@ -956,30 +1183,17 @@ function CorrelateSurface({
  * Analytics surface. Every number here is a passthrough from the backend's
  * `counts` record; the frontend computes nothing (API-011).
  */
-function AnalyticsSurface({ state, scan }: { state: AppState; scan: ScanState }) {
-  const [targets, setTargets] = useState<ScanTargetsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const client = useMemo(() => createApiClient(), []);
+function AnalyticsSurface({
+  state,
+  scan,
+  targets,
+}: {
+  state: AppState;
+  scan: ScanState;
+  targets: ScanTargetsResponse | null;
+}) {
   const scanId = scan.scanId ?? state.activeScanId;
-
-  useEffect(() => {
-    if (!scanId) {
-      setTargets(null);
-      return;
-    }
-    let cancelled = false;
-    client
-      .getScanTargets(scanId)
-      .then((response) => {
-        if (!cancelled) setTargets(response);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Target query failed.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, scanId]);
+  const error = null;
 
   return (
     <div data-df-analytics className="space-y-3">
@@ -1067,7 +1281,7 @@ function SettingsSurface({
         </h3>
         {state.activeScanId ? (
           <div className="flex flex-wrap gap-1.5">
-            {(['json', 'csv', 'geojson'] as const).map((format) => (
+            {(['json', 'geojson', 'kml', 'png', 'pdf'] as const).map((format) => (
               <a
                 key={format}
                 href={scanExportUrl(state.activeScanId as string, format)}
@@ -1088,11 +1302,13 @@ function SettingsSurface({
 
       <div className="space-y-1 border-t border-[var(--df-border)] pt-2">
         <h3 className="font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--df-text-dim)]">
-          Gated features
+          Gated layers
         </h3>
         <p className="text-[10px] leading-snug text-[var(--df-text-dim)]">
-          {ADVANCED_LAYER_IDS.length} analysis layers and timeline playback are declared but
-          unavailable until CP15. They cannot be enabled from this shell.
+          {ADVANCED_LAYER_IDS.length} analysis layers are declared without a data source and cannot
+          be enabled from this shell. The analysis workbench under SAR exposes all 13 debug layers
+          the backend actually serves; anything it cannot serve is shown as unavailable rather
+          than drawn.
         </p>
       </div>
     </div>
