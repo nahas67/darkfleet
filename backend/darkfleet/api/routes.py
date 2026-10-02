@@ -62,6 +62,7 @@ from darkfleet.api.models import (
 from darkfleet.config.settings import Settings
 from darkfleet.detectors import DetectorRegistry
 from darkfleet.evidence import target_evidence
+from darkfleet.exports.render import render_pdf, render_png
 from darkfleet.jobs.models import ScanStage, is_terminal
 from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent
 from darkfleet.narrative import summarise
@@ -1600,7 +1601,9 @@ def export_scan(scan_id: str, fmt: str, state: State) -> Response:
     """Export a completed scan (API-010).
 
     ``geojson``, ``kml`` and ``json`` are served with full provenance. ``png`` and
-    ``pdf`` land in CP12 and answer 501 with a clear message -- never a stub file.
+    ``pdf`` are rendered SERVER-SIDE from the persisted record and the stored
+    raster layers, so an exported artefact carries the same provenance as the
+    API response -- never a browser screenshot.
     """
     requested = fmt.strip().lower()
     if requested in DEFERRED_EXPORT_FORMATS:
@@ -1608,7 +1611,7 @@ def export_scan(scan_id: str, fmt: str, state: State) -> Response:
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail=ExportFormatNotImplemented(
                 message=(
-                    f"{requested.upper()} export is not implemented; it is scheduled for CP12. "
+                    f"{requested.upper()} export is not implemented. "
                     f"Use one of: {', '.join(SUPPORTED_EXPORT_FORMATS)}."
                 ),
                 requested_format=requested,
@@ -1655,10 +1658,87 @@ def export_scan(scan_id: str, fmt: str, state: State) -> Response:
             media_type=_KML_MEDIA_TYPE,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+    if requested == "png":
+        return Response(
+            content=_render_png(record, scan_id=scan_id, state=state),
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if requested == "pdf":
+        return Response(
+            content=_render_pdf(record, scan_id=scan_id),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     return Response(
         content=json.dumps(jsonable(record), indent=2, sort_keys=True, default=str),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _export_layers(record: Mapping[str, Any], state: State) -> tuple[np.ndarray, np.ndarray, list[tuple[float, float]]]:
+    """Fetch the stored raster layers an image export needs.
+
+    Raises 409 when the layers were not retained, because a PNG of an empty
+    frame would look like a scene with no returns in it.
+    """
+    key = _debug_cache_key(record)
+    if key is None:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="LAYERS_NOT_AVAILABLE",
+            status_value="LAYERS_NOT_AVAILABLE",
+            message=f"Scan {record.get('scan_id')} carries no debug layer index, so it cannot be rendered.",
+        )
+    db = state.cache().get(key, "raw")
+    land = state.cache().get(key, "landmask")
+    components = state.cache().get(key, "components")
+    if db is None:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="LAYERS_NOT_AVAILABLE",
+            status_value="LAYERS_NOT_AVAILABLE",
+            message=f"The raster for {record.get('scan_id')} is no longer in the cache, so it cannot be rendered.",
+        )
+    valid = (
+        np.isfinite(np.asarray(db, dtype=np.float64))
+        if land is None
+        else np.isfinite(np.asarray(db, dtype=np.float64)) & ~np.asarray(land, dtype=bool)
+    )
+    centroids: list[tuple[float, float]] = []
+    if components is not None:
+        for row in np.asarray(components).tolist():
+            if len(row) >= 4:
+                centroids.append((float(row[2]), float(row[3])))
+    return np.asarray(db, dtype=np.float64), valid, centroids
+
+
+def _render_png(record: Mapping[str, Any], *, scan_id: str, state: State) -> bytes:
+    db, valid, centroids = _export_layers(record, state)
+    return render_png(
+        scan_id=scan_id,
+        runtime_mode=str(record.get("runtime_mode", "REAL")),
+        db=db,
+        valid=valid,
+        centroids=centroids,
+        provenance=dict(record.get("provenance") or {}),
+        title=(
+            f"{record.get('scene', {}).get('provider', '?')} / "
+            f"{record.get('aoi') and ', '.join(f'{v:.3f}' for v in record['aoi'])}"
+        ),
+    )
+
+
+def _render_pdf(record: Mapping[str, Any], *, scan_id: str) -> bytes:
+    return render_pdf(
+        scan_id=scan_id,
+        runtime_mode=str(record.get("runtime_mode", "REAL")),
+        title=f"AOI {record.get('aoi')}",
+        scene=dict(record.get("scene") or {}),
+        provenance=dict(record.get("provenance") or {}),
+        targets=[t for t in (record.get("targets") or []) if isinstance(t, dict)],
+        ais_only=[t for t in (record.get("ais_only") or []) if isinstance(t, dict)],
     )
 
 

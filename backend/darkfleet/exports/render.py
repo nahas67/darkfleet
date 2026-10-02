@@ -17,19 +17,26 @@ from ..providers import Georeferencing
 
 _PNG_DPI = 150
 
+#: Colour for pixels excluded from the analysis (land, or no valid measurement).
+#: It is deliberately NOT a grey: the data ramp is pure greyscale (r == g == b),
+#: so any colour with unequal channels is unambiguous. An earlier version used
+#: (40, 40, 40), which collided with a plausible data value and made valid water
+#: indistinguishable from excluded land in the exported image.
+NO_DATA_RGB = (26, 26, 74)
+
 
 def _mono_rgb(db: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Backscatter -> greyscale RGB, NaN rendered as mid-grey 'no data'."""
+    """Backscatter -> greyscale RGB; excluded pixels in the NO_DATA colour."""
     finite = db[valid]
     if finite.size == 0:
-        return np.full((*db.shape, 3), 40, dtype=np.uint8)
+        return np.full((*db.shape, 3), NO_DATA_RGB, dtype=np.uint8)
     lo = float(np.percentile(finite, 2))
     hi = float(np.percentile(finite, 98))
     span = max(hi - lo, 1e-6)
     norm = np.clip((db - lo) / span, 0.0, 1.0)
     grey = (norm * 255.0).astype(np.uint8)
     rgb = np.stack([grey, grey, grey], axis=-1)
-    rgb[~valid] = (40, 40, 40)
+    rgb[~valid] = NO_DATA_RGB
     return rgb
 
 
@@ -63,7 +70,7 @@ def render_png(
     rgb = _detection_overlay(_mono_rgb(np.asarray(db, dtype=np.float64), valid), centroids)
     img = Image.fromarray(rgb, mode="RGB")
 
-    caption_h = 132
+    caption_h = 156
     canvas = Image.new("RGB", (img.width, img.height + caption_h), (8, 12, 16))
     canvas.paste(img, (0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -71,7 +78,8 @@ def render_png(
     sar = provenance.get("sar", {})
     mode_tag = "DEMO DATA — SYNTHETIC" if runtime_mode == "DEMO" else "REAL DATA"
     accent = (255, 199, 107) if runtime_mode == "DEMO" else (102, 240, 195)
-    y = img.height + 12
+    valid_frac = float(valid.mean()) if valid.size else 0.0
+    y = img.height + 10
     draw.text((12, y), f"{title}", fill=(240, 247, 250))
     y += 18
     draw.text((12, y), f"{mode_tag}   scan {scan_id}   detections {len(centroids)}", fill=accent)
@@ -89,6 +97,18 @@ def render_png(
         f"cfg {provenance.get('processing', {}).get('config_hash', '?')}  "
         f"v{__version__}",
         fill=(150, 175, 185),
+    )
+    y += 18
+    # The valid fraction is stated because an excluded area must never be read
+    # as an observed absence of returns.
+    draw.rectangle((12, y + 2, 26, y + 12), fill=NO_DATA_RGB, outline=(70, 90, 110))
+    draw.text(
+        (32, y),
+        f"excluded from analysis {100.0 * (1.0 - valid_frac):.1f}%   "
+        f"analysed {100.0 * valid_frac:.1f}%   "
+        f"stretch {float(np.nanpercentile(db[valid], 2)):.1f}.."
+        f"{float(np.nanpercentile(db[valid], 98)):.1f} dB",
+        fill=(130, 160, 172),
     )
 
     buf = io.BytesIO()

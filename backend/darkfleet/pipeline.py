@@ -307,12 +307,14 @@ def _as_utc(value: str) -> datetime:
 
 
 def _resolve_asset(provider: str, product: str, bbox: tuple[float, float, float, float], dr: str | None) -> SarAsset:
+    # A blank range means "no time filter"; the STAC helper omits the key.
+    window = dr.strip() if dr and dr.strip() else ""
     if provider == "planetary-computer":
-        assets = search_planetary_computer(bbox, dr or "", product=product, limit=2)
+        assets = search_planetary_computer(bbox, window, product=product, limit=2)
         vv = [a for a in assets if a.polarization == "VV"]
         return (vv or assets)[0]
     if provider == "earthsearch":
-        assets = search_earthsearch_grd(bbox, dr or "", limit=2)
+        assets = search_earthsearch_grd(bbox, window, limit=2)
         vv = [a for a in assets if a.polarization == "VV"]
         return (vv or assets)[0]
     raise RealDataUnavailableError(f"unknown provider {provider}", details={"provider": provider})

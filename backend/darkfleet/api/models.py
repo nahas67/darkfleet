@@ -53,11 +53,13 @@ __all__ = [
 
 RuntimeModeLiteral = Literal["DEMO", "REAL"]
 
-#: Export formats served today. PNG/PDF deliberately land in CP12 and answer 501.
-SUPPORTED_EXPORT_FORMATS: Final[tuple[str, ...]] = ("geojson", "kml", "json")
+#: Export formats served today. PNG and PDF are rendered server-side from the
+#: persisted record, so an exported artefact carries the same provenance as the
+#: API response instead of being a browser screenshot.
+SUPPORTED_EXPORT_FORMATS: Final[tuple[str, ...]] = ("geojson", "kml", "json", "png", "pdf")
 
 #: Export formats that are known but not implemented yet (answered with 501).
-DEFERRED_EXPORT_FORMATS: Final[tuple[str, ...]] = ("png", "pdf")
+DEFERRED_EXPORT_FORMATS: Final[tuple[str, ...]] = ()
 
 
 def _validate_bbox(values: list[float]) -> list[float]:

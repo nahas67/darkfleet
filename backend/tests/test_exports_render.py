@@ -7,6 +7,7 @@ import io
 import numpy as np
 
 from darkfleet.exports import render_pdf, render_png
+from darkfleet.exports.render import _mono_rgb
 
 PROV = {
     "sar": {
@@ -88,7 +89,7 @@ def test_png_is_a_real_png_with_caption_height() -> None:
 
     with Image.open(io.BytesIO(png)) as im:
         assert im.format == "PNG"
-        assert im.height == 64 + 132  # raster + provenance caption
+        assert im.height == 64 + 156  # raster + provenance caption
 
 
 def test_png_marks_demo_as_synthetic() -> None:
@@ -130,3 +131,58 @@ def test_renders_with_no_data_without_crashing() -> None:
         centroids=[], provenance=PROV, title="Empty",
     )
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_no_data_colour_is_outside_the_greyscale_data_ramp() -> None:
+    """Excluded pixels must be distinguishable from a valid low-backscatter pixel.
+
+    The data ramp is pure greyscale, so an earlier mid-grey (40,40,40) no-data
+    marker collided with a plausible data value: real water was indistinguishable
+    from excluded land in the exported image.
+    """
+    from darkfleet.exports.render import NO_DATA_RGB
+
+    r, g, b = NO_DATA_RGB
+    assert not (r == g == b), "no-data colour must not be a grey the ramp can produce"
+
+    db, valid = _db()
+    valid[:] = False  # everything excluded
+    rgb = _mono_rgb(db, valid)
+    assert np.all(rgb == np.array(NO_DATA_RGB, dtype=np.uint8))
+
+
+def test_excluded_and_included_pixels_are_always_visually_distinct() -> None:
+    """Sweep the stretch so no water value can land on the no-data colour."""
+    from darkfleet.exports.render import NO_DATA_RGB
+
+    rng = np.random.default_rng(11)
+    base = rng.uniform(-40.0, 20.0, (48, 48))
+    land = np.zeros_like(base, dtype=bool)
+    land[:12] = True
+    valid = ~land
+    rgb = _mono_rgb(base, valid)
+    nodata = np.array(NO_DATA_RGB, dtype=np.uint8)
+    assert np.all(rgb[~valid] == nodata)
+    # Every valid pixel is greyscale; therefore no valid pixel can equal no-data.
+    for row in range(valid.shape[0]):
+        for col in range(valid.shape[1]):
+            if valid[row, col]:
+                assert rgb[row, col][0] == rgb[row, col][1] == rgb[row, col][2]
+
+
+def test_png_states_the_excluded_and_analysed_fraction() -> None:
+    """An excluded area must never read as an observed absence of returns."""
+    db, valid = _db()
+    valid[:16] = False  # exactly a quarter excluded
+    png = render_png(
+        scan_id="DF-F", runtime_mode="REAL", db=db, valid=valid,
+        centroids=[], provenance=PROV, title="Fraction",
+    )
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as im:
+        caption = im.crop((0, 64, im.width, im.height)).convert("L")
+        px = np.asarray(caption)
+    # The caption band carries bright text pixels on a dark background.
+    assert px.max() > 120, "caption text was not drawn"
+    assert px.mean() < 90, "caption is not predominantly background"

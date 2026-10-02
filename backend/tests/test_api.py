@@ -517,17 +517,43 @@ def test_exports_carry_provenance(
     assert len(document["targets"]) == targets["count"]
 
 
-def test_png_and_pdf_export_answer_501(client: TestClient, completed_demo: dict[str, Any]) -> None:
+def test_png_and_pdf_exports_are_rendered_server_side(
+    client: TestClient, completed_demo: dict[str, Any]
+) -> None:
+    """EXP-004/005: a real PNG and a real PDF, rendered from the record.
+
+    CP12 wrote the renderers but left the route answering 501. This asserts the
+    artefact is actually produced, carries the correct magic bytes, and states
+    the DEMO/REAL marker -- a browser screenshot would satisfy none of these.
+    """
     scan_id = str(completed_demo["scan_id"])
-    for fmt in ("png", "pdf", "PNG", "PDF"):
+    png = client.get(f"/api/scans/{scan_id}/export/png")
+    assert png.status_code == 200, png.text
+    assert png.headers["content-type"] == "image/png"
+    assert png.content[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    assert f'filename="{scan_id}.png"' in png.headers["content-disposition"]
+    assert len(png.content) > 1000
+
+    pdf = client.get(f"/api/scans/{scan_id}/export/pdf")
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content[:5] == b"%PDF-", "not a PDF"
+    assert f'filename="{scan_id}.pdf"' in pdf.headers["content-disposition"]
+    assert len(pdf.content) > 1000
+
+
+def test_exports_are_case_insensitive_and_unknown_formats_are_rejected(
+    client: TestClient, completed_demo: dict[str, Any]
+) -> None:
+    scan_id = str(completed_demo["scan_id"])
+    for fmt in ("PNG", "PDF", "GeoJSON", "KML"):
         response = client.get(f"/api/scans/{scan_id}/export/{fmt}")
-        assert response.status_code == 501, (fmt, response.text)
-        body = response.json()
-        assert body["error"] == "EXPORT_FORMAT_NOT_IMPLEMENTED"
-        assert body["planned_in"] == "CP12"
-        assert body["requested_format"] == fmt.lower()
-        assert set(body["supported"]) == {"geojson", "kml", "json"}
-    assert client.get(f"/api/scans/{scan_id}/export/shapefile").status_code == 400
+        assert response.status_code == 200, (fmt, response.text)
+
+    bad = client.get(f"/api/scans/{scan_id}/export/shapefile")
+    assert bad.status_code == 400
+    assert bad.json()["error"] == "BAD_EXPORT_FORMAT"
+    assert set(bad.json()["detail"]["supported"]) == {"geojson", "kml", "json", "png", "pdf"}
 
 
 def test_debug_layers_return_compact_summaries(

@@ -72,17 +72,25 @@ def stac_search(
     datetime_range: str,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Anonymous STAC search. Raises RealDataUnavailableError with the true cause."""
+    """Anonymous STAC search. Raises RealDataUnavailableError with the true cause.
+
+    `datetime` is optional in the STAC API. Sending an empty string instead of
+    omitting the key is a validation error, not an unfiltered search:
+    Planetary Computer answers ``Datetime parameter  is invalid.`` So a blank
+    range means "no time filter" and the key is left out entirely.
+    """
+    query: dict[str, Any] = {
+        "collections": [collection],
+        "bbox": list(bbox),
+        "limit": limit,
+        "sortby": [{"field": "properties.datetime", "direction": "desc"}],
+    }
+    if datetime_range.strip():
+        query["datetime"] = datetime_range.strip()
     try:
         resp = httpx.post(
             f"{stac_url.rstrip('/')}/search",
-            json={
-                "collections": [collection],
-                "bbox": list(bbox),
-                "datetime": datetime_range,
-                "limit": limit,
-                "sortby": [{"field": "properties.datetime", "direction": "desc"}],
-            },
+            json=query,
             timeout=40,
         )
     except httpx.HTTPError as exc:
