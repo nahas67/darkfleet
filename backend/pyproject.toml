@@ -53,3 +53,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The default suite is fully offline. Tests that need the live provider are
+# marked `live` and must be asked for explicitly:
+#   pytest -m live
+addopts = "-m 'not live'"
+markers = [
+    "live: needs network access to a real provider; run with -m live",
+]

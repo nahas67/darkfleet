@@ -206,6 +206,50 @@ def sign_planetary_computer_asset(asset: SarAsset) -> SarAsset:
     return asset
 
 
+def stac_items(
+    stac_url: str,
+    collection: str,
+    bbox: tuple[float, float, float, float],
+    datetime_range: str,
+    limit: int = 50,
+    *,
+    ascending: bool = False,
+) -> list[dict[str, Any]]:
+    """Raw STAC items, chronologically ascending, for acquisition planning.
+
+    Separate from :func:`stac_search` because planning needs every item in the
+    window in time order, whereas a scan needs one asset. `sortby` ascending is
+    the point: a plan whose newest pass is missing is not a plan.
+    """
+    query: dict[str, Any] = {
+        "collections": [collection],
+        "bbox": list(bbox),
+        "limit": limit,
+        "sortby": [{"field": "properties.datetime", "direction": "asc"}],
+    }
+    if datetime_range.strip():
+        query["datetime"] = datetime_range.strip()
+    try:
+        resp = httpx.post(f"{stac_url.rstrip('/')}/search", json=query, timeout=60)
+    except httpx.HTTPError as exc:
+        raise RealDataUnavailableError(
+            f"STAC endpoint unreachable: {stac_url}", details={"provider": stac_url, "error": str(exc)}
+        ) from exc
+    if resp.status_code in (401, 403):
+        raise RealDataUnavailableError(
+            "STAC search requires authentication.",
+            details={"provider": stac_url, "http": resp.status_code},
+            suggestions=["Provide credentials for this STAC catalog."],
+        )
+    if resp.status_code >= 400:
+        raise RealDataUnavailableError(
+            "STAC search rejected the query (unknown collection or bad parameters).",
+            details={"provider": stac_url, "http": resp.status_code},
+        )
+    features = resp.json().get("features") or []
+    return [f for f in features if isinstance(f, dict)]
+
+
 def search_earthsearch_grd(
     bbox: tuple[float, float, float, float],
     datetime_range: str,

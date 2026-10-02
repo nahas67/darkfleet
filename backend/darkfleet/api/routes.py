@@ -73,7 +73,10 @@ from darkfleet.providers.stac import (
     cdse_sentinel1_status,
     search_earthsearch_grd,
     search_planetary_computer,
+    stac_items,
 )
+from darkfleet.revisit import acquisitions_from_items, plan_revisit
+from darkfleet.revisit import window_for as revisit_window
 from darkfleet.storage.cache import ArtifactCache, CacheKey
 from darkfleet.storage.runs import RunStore, run_store_for_data_dir
 from darkfleet.temporal import analyse as temporal_analyse
@@ -151,44 +154,6 @@ _CORRELATION_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
     ),
 }
 
-_SSE_MEDIA_TYPE = "text/event-stream"
-_KML_MEDIA_TYPE = "application/vnd.google-earth.kml+xml"
-_GEOJSON_MEDIA_TYPE = "application/geo+json"
-_MAX_TABLE_ROWS: Final[int] = 500
-_MAX_GRID: Final[int] = 96
-
-#: DEMO scene catalogue. These are the only scenes the synthetic pipeline knows;
-#: each carries ``synthetic=True`` and is never mixed with REAL results.
-DEMO_SCENES: Final[tuple[dict[str, Any], ...]] = (
-    {
-        "id": "SIM-S1C-MALACCA-001",
-        "platform": "Sentinel-1C",
-        "polarization": "VV+VH",
-        "acquisitionTime": "2026-09-18T14:32:18Z",
-        "resolutionMeters": 10,
-        "bbox": [103.65, 1.10, 104.05, 1.40],
-        "seaClutterLevel": "MODERATE",
-    },
-    {
-        "id": "SIM-S1A-HORMUZ-002",
-        "platform": "Sentinel-1A",
-        "polarization": "VV",
-        "acquisitionTime": "2026-09-18T09:14:02Z",
-        "resolutionMeters": 10,
-        "bbox": [56.30, 26.40, 56.90, 26.90],
-        "seaClutterLevel": "HIGH",
-    },
-    {
-        "id": "SIM-S1A-ADEN-003",
-        "platform": "Sentinel-1A",
-        "polarization": "VV",
-        "acquisitionTime": "2026-09-17T21:47:55Z",
-        "resolutionMeters": 10,
-        "bbox": [47.50, 11.90, 48.30, 12.40],
-        "seaClutterLevel": "LOW",
-    },
-)
-
 #: Query keys whose values must never reach a response or a log line.
 _SECRET_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)\b((?:sas|token|key|secret|password|passwd|credential|authorization)[a-z_]*)"
@@ -200,6 +165,12 @@ def redact(text: str) -> str:
     """Blank out anything shaped like ``key=value`` credentials."""
     return _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", str(text))
 
+
+_SSE_MEDIA_TYPE = "text/event-stream"
+_KML_MEDIA_TYPE = "application/vnd.google-earth.kml+xml"
+_GEOJSON_MEDIA_TYPE = "application/geo+json"
+_MAX_TABLE_ROWS: Final[int] = 500
+_MAX_GRID: Final[int] = 96
 
 # ------------------------------------------------------------- app plumbing
 
@@ -391,63 +362,10 @@ def _scene_summary_from_asset(asset: SarAsset, bbox: list[float], runtime_mode: 
         bbox=list(bbox),
         resolution_meters=asset.resolution_meters,
         georeferencing=asset.georeferencing.value,
-        runtime_mode="DEMO" if runtime_mode == "DEMO" else "REAL",
-        synthetic=runtime_mode == "DEMO",
+        # Invariant, not a choice: every scene this API lists is a real one.
+        runtime_mode="REAL",
+        synthetic=False,
     )
-
-
-def _demo_scene_summary(scene: Mapping[str, Any]) -> SceneSummary:
-    return SceneSummary(
-        id=str(scene["id"]),
-        provider="demo-synthesizer",
-        platform=str(scene["platform"]),
-        product="SIM",
-        polarization=str(scene["polarization"]),
-        acquisition_time=str(scene["acquisitionTime"]),
-        bbox=[float(value) for value in scene["bbox"]],
-        resolution_meters=float(scene["resolutionMeters"]),
-        georeferencing="DEMO_GRID",
-        sea_clutter_level=str(scene.get("seaClutterLevel", "MODERATE")),
-        runtime_mode="DEMO",
-        synthetic=True,
-    )
-
-
-def _resolve_demo_scene(scene_id: str | None, bbox: tuple[float, float, float, float]) -> Mapping[str, Any]:
-    """Pick the DEMO scene, refusing a bbox the synthetic scene does not cover."""
-    if scene_id is None:
-        scene = DEMO_SCENES[0]
-    else:
-        matches = [s for s in DEMO_SCENES if s["id"] == scene_id]
-        if not matches:
-            raise api_error(
-                status.HTTP_400_BAD_REQUEST,
-                error="UNKNOWN_SCENE",
-                status_value="UNKNOWN_SCENE",
-                message=f"Unknown DEMO scene {scene_id!r}.",
-                detail={"known_scenes": [s["id"] for s in DEMO_SCENES]},
-                suggestions=["List DEMO scenes with GET /api/scenes."],
-            )
-        scene = matches[0]
-    scene_bbox = (
-        float(scene["bbox"][0]),
-        float(scene["bbox"][1]),
-        float(scene["bbox"][2]),
-        float(scene["bbox"][3]),
-    )
-    if tuple(round(value, 6) for value in bbox) != tuple(round(value, 6) for value in scene_bbox):
-        raise api_error(
-            status.HTTP_400_BAD_REQUEST,
-            error="BBOX_SCENE_MISMATCH",
-            status_value="INVALID_REQUEST",
-            message=(
-                f"DEMO scene {scene['id']} defines its own footprint "
-                f"{list(scene_bbox)}; request bbox {list(bbox)} does not match. "
-                "DEMO synthesis is deterministic per scene, so the bbox is not free-form."
-            ),
-            detail={"scene_bbox": list(scene_bbox), "request_bbox": list(bbox)},
-        )
-    return scene
 
 
 # ------------------------------------------------------- scan job plumbing
@@ -534,12 +452,10 @@ def _scan_work(spec: ScanSpec) -> Iterator[tuple[ScanStage, str]]:
         try:
             outcome.update(
                 run_scan(
-                    runtime_mode=spec.runtime_mode,
                     bbox=list(spec.bbox),
                     data_dir=spec.data_dir,
                     cfar_config=spec.cfar_config,
                     datetime_range=spec.datetime_range,
-                    scene=dict(spec.scene),
                     provider=spec.provider,
                     product=spec.product,
                     on_stage=lambda stage, detail: events.put((ScanStage(stage), detail)),
@@ -697,51 +613,43 @@ def _debug_cache_key(record: Mapping[str, Any]) -> CacheKey | None:
 def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
     """Queue one scan and return immediately (API-001).
 
-    REAL validates the provider and proves AOI coverage *before* accepting the
-    job, so an unusable request is a 4xx/5xx with a ProviderStatus rather than a
-    job that fails later. There is no REAL -> DEMO fallback anywhere below.
+    The provider is validated and AOI coverage is proven *before* the job is
+    accepted, so an unusable request is a 4xx/5xx with a ProviderStatus rather
+    than a job that fails later. There is no degraded path: if the provider
+    cannot serve the extent, the scan does not happen.
     """
     bbox = (float(body.bbox[0]), float(body.bbox[1]), float(body.bbox[2]), float(body.bbox[3]))
 
-    # A synthetic scene is reachable ONLY when the deployment explicitly enabled
-    # it, which shipping configuration and Docker never do. There is no client
-    # flag: a caller cannot ask for fabricated observations.
-    if state.settings.allow_synthetic_scenes:
-        scene = _resolve_demo_scene(body.scene_id, bbox)
-        provider = "demo-synthesizer"
-        synthetic = True
-    else:
-        provider = body.provider
-        if provider not in KNOWN_PROVIDERS:
-            raise _unknown_provider(provider)
-        if body.product not in PROVIDER_PRODUCTS[provider]:
-            raise api_error(
-                status.HTTP_400_BAD_REQUEST,
-                error="UNSUPPORTED_PRODUCT",
-                status_value=ProviderStatus.NOT_CONFIGURED.value,
-                message=f"Provider {provider} does not serve product {body.product!r}.",
-                provider=provider,
-                detail={"supported": sorted(PROVIDER_PRODUCTS[provider])},
-            )
-        assets = _search_provider(provider, body.product, bbox, body.datetime_range)
-        if not assets:
-            raise api_error(
-                status.HTTP_404_NOT_FOUND,
-                error="NO_SCENE_COVERAGE",
-                status_value=ProviderStatus.UNAVAILABLE.value,
-                message=(
-                    f"{provider} returned no asset for bbox {list(bbox)} "
-                    f"and datetime {body.datetime_range or 'any'}."
-                ),
-                provider=provider,
-                detail={"bbox": list(bbox), "datetime": body.datetime_range},
-                suggestions=["Widen the bbox or the datetime range."],
-            )
-        scene = _scene_from_asset(assets[0], bbox)
-        synthetic = False
+    provider = body.provider
+    if provider not in KNOWN_PROVIDERS:
+        raise _unknown_provider(provider)
+    if body.product not in PROVIDER_PRODUCTS[provider]:
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST,
+            error="UNSUPPORTED_PRODUCT",
+            status_value=ProviderStatus.NOT_CONFIGURED.value,
+            message=f"Provider {provider} does not serve product {body.product!r}.",
+            provider=provider,
+            detail={"supported": sorted(PROVIDER_PRODUCTS[provider])},
+        )
+    assets = _search_provider(provider, body.product, bbox, body.datetime_range)
+    if not assets:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="NO_SCENE_COVERAGE",
+            status_value=ProviderStatus.UNAVAILABLE.value,
+            message=(
+                f"{provider} returned no asset for bbox {list(bbox)} "
+                f"and datetime {body.datetime_range or 'any'}."
+            ),
+            provider=provider,
+            detail={"bbox": list(bbox), "datetime": body.datetime_range},
+            suggestions=["Widen the bbox or the datetime range."],
+        )
+    scene = _scene_from_asset(assets[0], bbox)
 
     spec = ScanSpec(
-        runtime_mode="DEMO" if synthetic else "REAL",
+        runtime_mode="REAL",
         bbox=bbox,
         scene=scene,
         provider=provider,
@@ -753,15 +661,15 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
     )
     job = state.runner.submit(
         lambda: _scan_work(spec),
-        runtime_mode="DEMO" if synthetic else "REAL",
-        synthetic=synthetic,
+        runtime_mode="REAL",
+        synthetic=False,
     )
     spec.bind(job.scan_id)
     return ScanAccepted(
         scan_id=job.scan_id,
         status=job.stage.value,
-        runtime_mode="DEMO" if synthetic else "REAL",
-        synthetic=synthetic,
+        runtime_mode="REAL",
+        synthetic=False,
     )
 
 
@@ -954,45 +862,13 @@ def list_scenes(
     ),
     datetime: str | None = Query(default=None, description="STAC datetime interval."),
     provider: str = Query(default="planetary-computer"),
-    runtime_mode: str | None = Query(
-        default=None,
-        description=(
-            "Only honoured when the deployment enabled synthetic scenes. Ignored "
-            "otherwise, so it cannot be used to request fabricated data."
-        ),
-    ),
 ) -> SceneListResponse:
     """Scene discovery (API-005).
 
-    Proxies the live provider search; a provider failure is an explicit error
-    response. The synthetic catalogue is returned only when
-    ``settings.allow_synthetic_scenes`` is on, which shipping configuration and
-    Docker never do. When it is off, a ``runtime_mode=DEMO`` request is refused
-    rather than silently upgraded, so a caller is never misled about which data
-    it received.
+    Proxies the live provider search. A provider failure is an explicit error
+    response: there is no synthetic catalogue and no fallback list, so every
+    scene returned here is a real acquisition the provider actually holds.
     """
-    if runtime_mode and runtime_mode.upper() == "DEMO" and not state.settings.allow_synthetic_scenes:
-        raise api_error(
-            status.HTTP_404_NOT_FOUND,
-            error="SYNTHETIC_SCENES_DISABLED",
-            status_value="INVALID_REQUEST",
-            message=(
-                "Synthetic scenes are not available in this deployment. Every scan is a "
-                "REAL scan against a live provider."
-            ),
-            suggestions=["Drop runtime_mode, or request a live provider scene."],
-        )
-    if state.settings.allow_synthetic_scenes:
-        return SceneListResponse(
-            runtime_mode="DEMO",
-            synthetic=True,
-            provider="demo-synthesizer",
-            status=ProviderStatus.AVAILABLE.value,
-            note="Deterministic synthetic scenes; no provider was contacted.",
-            count=len(DEMO_SCENES),
-            scenes=[_demo_scene_summary(scene) for scene in DEMO_SCENES],
-        )
-
     if provider not in KNOWN_PROVIDERS:
         raise _unknown_provider(provider)
     box = _parse_bbox_query(bbox)
@@ -1903,6 +1779,52 @@ def _observations(state: State, *, max_scans: int) -> list[dict[str, Any]]:
                 }
             )
     return rows
+
+
+@router.get("/revisit")
+def revisit_plan(
+    state: State,
+    bbox: str = Query(description="Comma separated min_lon,min_lat,max_lon,max_lat."),
+    provider: str = Query(default="planetary-computer"),
+    history_days: int = Query(default=120, ge=1, le=730),
+    horizon_days: int = Query(default=30, ge=0, le=180),
+) -> Response:
+    """SAR acquisition plan for an area (GEO-002).
+
+    Answers "when can this water actually be imaged, and where are the gaps?"
+    from the provider catalogue rather than an orbit prediction, so every number
+    is measured from acquisitions that genuinely exist.
+
+    A provider failure is an explicit 5xx with the real cause. There is no
+    simulated plan and no predicted pass.
+    """
+    if provider not in KNOWN_PROVIDERS:
+        raise _unknown_provider(provider)
+    box = _parse_bbox_query(bbox)
+    start, end = revisit_window(history_days=history_days, horizon_days=horizon_days)
+    conf = state.settings
+    collection = (
+        conf.pc.rtc_collection if provider == "planetary-computer" else conf.earthsearch.grd_collection
+    )
+    url = conf.pc.stac_url if provider == "planetary-computer" else conf.earthsearch.stac_url
+    try:
+        items = stac_items(url, collection, box, f"{start}/{end}", limit=200)
+    except RealDataUnavailableError as exc:
+        raise _unavailable(exc, provider) from exc
+
+    plan = plan_revisit(
+        acquisitions_from_items(items),
+        window_start=datetime.fromisoformat(start),
+        window_end=datetime.fromisoformat(end),
+    )
+    payload = plan.to_dict()
+    payload["provider"] = provider
+    payload["collection"] = collection
+    payload["requested_bbox"] = list(box)
+    return Response(
+        content=json.dumps(payload, indent=2, sort_keys=True, default=str),
+        media_type="application/json",
+    )
 
 
 @router.get("/tracks")
