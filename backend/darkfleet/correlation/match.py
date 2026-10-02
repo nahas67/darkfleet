@@ -38,7 +38,7 @@ class Candidate(TypedDict):
 def grid_to_wgs84(
     x: float, y: float, width: int, height: int, bbox: tuple[float, float, float, float]
 ) -> tuple[float, float]:
-    """Legacy-exact linear DEMO-grid mapping (y=0 is north)."""
+    """Legacy-exact linear raster mapping (y=0 is north)."""
     min_lon, min_lat, max_lon, max_lat = bbox
     lon = min_lon + (x / width) * (max_lon - min_lon)
     lat = max_lat - (y / height) * (max_lat - min_lat)

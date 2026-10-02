@@ -109,28 +109,32 @@ def _assert_consistent(record: Mapping[str, Any]) -> None:
 
 def mark_synthetic(
     record: Mapping[str, Any],
-    synthetic: bool,
+    synthetic: bool = False,
     runtime_mode: RuntimeMode | None = None,
 ) -> dict[str, Any]:
-    """Return a copy of ``record`` with both isolation fields stamped correctly.
+    """Return a copy of ``record`` with both isolation fields stamped.
 
-    There is only one legal combination, so this is now an assertion rather than
-    a mapping: ``synthetic=False`` and ``runtime_mode="REAL"``. Passing anything
-    else raises :class:`RunRecordError`, so the helper cannot be used to launder a
-    mislabelled or synthetic record. The parameters are kept so callers do not
-    have to change, and so an attempt to pass ``synthetic=True`` fails loudly at
-    the call site rather than silently producing a real-looking record.
+    There is only one legal combination, so this is an assertion rather than a
+    mapping: ``synthetic=False`` and ``runtime_mode="REAL"``. Passing anything
+    else raises :class:`RunRecordError` HERE, at the call site, rather than
+    waiting for :meth:`RunStore.save` to reject the record further downstream.
+
+    The earlier version only asserted the mode, so ``mark_synthetic(record,
+    synthetic=True)`` produced a record stamped ``runtime_mode="REAL"`` alongside
+    ``synthetic=True`` -- a contradictory pair that only the store caught. A
+    helper that cannot produce a wrong record should not be able to.
     """
+    if synthetic is not False:
+        raise RunRecordError(
+            f"{SYNTHETIC_FIELD}={synthetic!r} is not storable; this project has no "
+            "synthetic path, so a record can never be marked synthetic"
+        )
     mode = ONLY_RUNTIME_MODE
     if runtime_mode is not None:
-        requested = _validate_runtime_mode(runtime_mode)
-        if requested != mode:
-            raise RunRecordError(
-                f"runtime_mode={requested!r} contradicts synthetic={synthetic}"
-            )
+        _validate_runtime_mode(runtime_mode)  # raises on anything but "REAL"
     stamped = dict(record)
     stamped[RUNTIME_MODE_FIELD] = mode
-    stamped[SYNTHETIC_FIELD] = synthetic
+    stamped[SYNTHETIC_FIELD] = False
     return stamped
 
 

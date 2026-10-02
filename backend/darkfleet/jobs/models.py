@@ -55,10 +55,20 @@ class ScanStage(StrEnum):
 
 
 class RuntimeMode(StrEnum):
-    """Which world a scan ran against. Recorded as submitted, never inferred."""
+    """Which world a scan ran against.
+
+    Only ``REAL`` exists. The enum is kept as a single-member enum rather than
+    being deleted, because the value is still persisted on every record and read
+    by consumers; removing the type would mean either loosening those fields to
+    bare ``str`` or churning the record schema for no gain. A one-member enum is
+    also self-documenting at every use site: ``RuntimeMode.REAL`` reads correctly
+    and there is no second choice to accidentally reach for.
+
+    ``DEMO`` was removed rather than deprecated. There is no synthetic path, so
+    naming a mode that cannot be entered would be a lie in the type itself.
+    """
 
     REAL = "REAL"
-    DEMO = "DEMO"
 
 
 #: Forward pipeline order, QUEUED through COMPLETE. FAILED is NOT here: it is an

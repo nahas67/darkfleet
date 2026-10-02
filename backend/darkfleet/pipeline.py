@@ -1,8 +1,10 @@
-"""The single authoritative scan pipeline. (Backend authority, DEMO + REAL)
+"""The single authoritative scan pipeline.
 
-Yields real (ScanStage, detail) transitions as work completes — no timers, no
-invented percentages. DEMO and REAL share every stage; only the data source
-differs, and REAL never falls back to synthetic.
+Yields real (ScanStage, detail) transitions as work completes: no timers, no
+invented percentages. Every stage runs for every scan, because there is only one
+kind of scan. A provider that cannot serve the request raises
+:class:`~darkfleet.providers.RealDataUnavailableError` rather than yielding
+substitute pixels.
 """
 
 from __future__ import annotations

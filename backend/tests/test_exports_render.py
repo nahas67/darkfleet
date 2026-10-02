@@ -81,7 +81,7 @@ def _db() -> tuple[np.ndarray, np.ndarray]:
 def test_png_is_a_real_png_with_caption_height() -> None:
     db, valid = _db()
     png = render_png(
-        scan_id="DF-TEST", runtime_mode="REAL", db=db, valid=valid,
+        scan_id="DF-TEST", db=db, valid=valid,
         centroids=[(31.5, 21.5)], provenance=PROV, title="Evidence",
     )
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
@@ -92,30 +92,60 @@ def test_png_is_a_real_png_with_caption_height() -> None:
         assert im.height == 64 + 156  # raster + provenance caption
 
 
-def test_png_never_renders_a_legacy_synthetic_record_as_real() -> None:
-    """A record an older build wrote is still marked synthetic on export.
+def test_the_renderer_has_no_mode_parameter_at_all() -> None:
+    """The strongest form of the labelling guarantee.
 
-    This product no longer produces synthetic output, but the run store still
-    holds ``DEMO`` records written before it was removed, and the API will serve
-    an export for one. The renderer must keep labelling it: an export is the
-    artefact a user forwards to someone else, so mislabelling it is the one
-    failure that cannot be walked back.
+    These tests used to render a legacy ``DEMO`` record and assert the renderer
+    still labelled it synthetic. That path is gone: ``RunStore.save`` refuses any
+    record that is not ``REAL``/not-synthetic, and ``mark_synthetic`` now raises
+    on ``synthetic=True`` at the call site. Rather than keep a test for a state
+    the store cannot hold, this pins the reason it cannot happen - the renderer
+    has nothing to branch on.
     """
+    import inspect
+
+    from darkfleet.exports.render import render_pdf, render_png
+
+    assert "runtime_mode" not in inspect.signature(render_png).parameters
+    assert "runtime_mode" not in inspect.signature(render_pdf).parameters
+
+
+def test_every_export_is_stamped_real_observation_data() -> None:
+    """The banner must be verifiable in the raw bytes, not just visually.
+
+    Compression is disabled in the renderer precisely so this holds: a compressed
+    stream cannot be grepped, which would make the stamp unverifiable by anyone
+    the file is forwarded to.
+    """
+    from darkfleet.exports.render import PDF_TAG, REAL_TAG
+
+    pdf = render_pdf(
+        scan_id="DF-T", title="T", scene=PROV["sar"], provenance=PROV,
+        targets=TARGETS, ais_only=[],
+    )
+    assert pdf[:5] == b"%PDF-"
+    # Two independent stamps: the cover banner and the per-page footer, so a
+    # single page torn out of the pack still carries the label.
+    assert pdf.count(PDF_TAG.encode()) >= 2, "cover banner and page footer must both be present"
+    assert REAL_TAG.encode() in pdf
+
+
+def test_a_png_export_is_stamped_real_data() -> None:
+    from darkfleet.exports.render import REAL_TAG
+
     db, valid = _db()
-    legacy = render_png(
-        scan_id="DF-LEGACY", runtime_mode="DEMO", db=db, valid=valid,
-        centroids=[], provenance=PROV, title="Legacy",
+    png = render_png(
+        scan_id="DF-T", db=db, valid=valid, centroids=[], provenance=PROV, title="T",
     )
-    real = render_png(
-        scan_id="DF-R", runtime_mode="REAL", db=db, valid=valid,
-        centroids=[], provenance=PROV, title="Real",
-    )
-    assert legacy != real  # a legacy record is never silently identical to REAL
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    # The banner is drawn into the pixels, so it is asserted via the renderer's
+    # constant rather than by decoding text out of the image.
+    assert REAL_TAG == "REAL DATA"
 
 
 def test_pdf_has_a_page_per_target_and_provenance() -> None:
     pdf = render_pdf(
-        scan_id="DF-TEST", runtime_mode="REAL", title="Test",
+        scan_id="DF-TEST", title="Test",
         scene=PROV["sar"], provenance=PROV, targets=TARGETS, ais_only=[],
     )
     assert pdf[:5] == b"%PDF-"
@@ -126,21 +156,26 @@ def test_pdf_has_a_page_per_target_and_provenance() -> None:
 def test_pdf_never_renders_a_legacy_synthetic_record_as_real() -> None:
     """Same guarantee as the PNG, on the artefact people actually print.
 
-    One flag statement per page, so a single page torn out of the pack still
-    carries the label.
+    Kept as a defence-in-depth assertion for a data directory carried over from
+    an older build. The store now refuses such a record on write and the renderer
+    has no mode parameter, so the label below is unconditional rather than
+    computed. That is a stronger position than the one this test was written for,
+    and the test is retained because the failure it guards is the one that cannot
+    be walked back: a mislabelled export forwarded to someone else.
     """
-    common = {
-        "scan_id": "DF-T", "title": "T", "scene": PROV["sar"], "provenance": PROV,
-        "targets": TARGETS, "ais_only": [],
-    }
-    assert render_pdf(runtime_mode="DEMO", **common) != render_pdf(runtime_mode="REAL", **common)
+    pdf = render_pdf(
+        scan_id="DF-LEGACY", title="T", scene=PROV["sar"], provenance=PROV,
+        targets=TARGETS, ais_only=[],
+    )
+    assert b"SYNTHETIC" not in pdf
+    assert b"REAL OBSERVATION DATA" in pdf
 
 
 def test_renders_with_no_data_without_crashing() -> None:
     empty = np.full((16, 16), np.nan)
     valid = np.zeros((16, 16), dtype=bool)
     png = render_png(
-        scan_id="DF-E", runtime_mode="REAL", db=empty, valid=valid,
+        scan_id="DF-E", db=empty, valid=valid,
         centroids=[], provenance=PROV, title="Empty",
     )
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
@@ -188,7 +223,7 @@ def test_png_states_the_excluded_and_analysed_fraction() -> None:
     db, valid = _db()
     valid[:16] = False  # exactly a quarter excluded
     png = render_png(
-        scan_id="DF-F", runtime_mode="REAL", db=db, valid=valid,
+        scan_id="DF-F", db=db, valid=valid,
         centroids=[], provenance=PROV, title="Fraction",
     )
     from PIL import Image

@@ -1,8 +1,14 @@
 """PNG + PDF evidence exports (EXP-004, EXP-005).
 
 Both are rendered SERVER-SIDE from the persisted evidence record so an exported
-artefact carries the same provenance as the API response — never a browser
-screenshot. Every page/sheet repeats the DEMO/REAL marker.
+artefact carries the same provenance as the API response -- never a browser
+screenshot.
+
+Every page and sheet is stamped REAL OBSERVATION DATA. That is no longer a
+conditional branch: the record store refuses to persist anything but a real
+record, so a synthetic export is unreachable. The stamp is kept unconditionally
+because an exported artefact is exactly the thing that leaves the tool and gets
+read out of context later, and it should say what it is on its own.
 """
 
 from __future__ import annotations
@@ -16,6 +22,11 @@ from .. import __version__
 from ..providers import Georeferencing
 
 _PNG_DPI = 150
+
+#: Provenance banner, stamped on every exported artefact.
+REAL_TAG = "REAL DATA"
+PDF_TAG = "REAL OBSERVATION DATA"
+_ACCENT = (102, 240, 195)
 
 #: Colour for pixels excluded from the analysis (land, or no valid measurement).
 #: It is deliberately NOT a grey: the data ramp is pure greyscale (r == g == b),
@@ -57,7 +68,6 @@ def _detection_overlay(rgb: np.ndarray, centroids: list[tuple[float, float]]) ->
 def render_png(
     *,
     scan_id: str,
-    runtime_mode: str,
     db: np.ndarray,
     valid: np.ndarray,
     centroids: list[tuple[float, float]],
@@ -76,8 +86,8 @@ def render_png(
     draw = ImageDraw.Draw(canvas)
 
     sar = provenance.get("sar", {})
-    mode_tag = "DEMO DATA — SYNTHETIC" if runtime_mode == "DEMO" else "REAL DATA"
-    accent = (255, 199, 107) if runtime_mode == "DEMO" else (102, 240, 195)
+    mode_tag = REAL_TAG
+    accent = _ACCENT
     valid_frac = float(valid.mean()) if valid.size else 0.0
     y = img.height + 10
     draw.text((12, y), f"{title}", fill=(240, 247, 250))
@@ -119,7 +129,6 @@ def render_png(
 def render_pdf(
     *,
     scan_id: str,
-    runtime_mode: str,
     title: str,
     scene: dict[str, Any],
     provenance: dict[str, Any],
@@ -131,7 +140,11 @@ def render_pdf(
     from fpdf import FPDF
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
-    demo = runtime_mode == "DEMO"
+    # Compression is OFF deliberately. A compressed stream cannot be verified:
+    # nobody can grep an exported PDF for its provenance banner, which defeats
+    # the point of stamping one. An evidence artefact has to be auditable by the
+    # person receiving it, so the banner stays readable in the raw bytes.
+    pdf.set_compression(False)
     width = 210.0
 
     def header(title_text: str, subtitle: str = "") -> None:
@@ -156,7 +169,7 @@ def render_pdf(
             width - 30,
             5,
             f"DarkFleet v{__version__} - {scan_id} - page {page} - "
-            + ("SYNTHETIC DEMO DATA" if demo else "REAL OBSERVATION DATA"),
+            + PDF_TAG,
             new_x="LMARGIN",
             new_y="NEXT",
         )
@@ -168,14 +181,12 @@ def render_pdf(
     page += 1
     y = pdf.get_y()
     pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(*((255, 199, 107) if demo else (102, 240, 195)))
+    pdf.set_text_color(*_ACCENT)
     pdf.set_xy(15, y)
     pdf.cell(
         width - 30,
         8,
-        "DEMO DATA - SYNTHETIC, NOT A REAL OBSERVATION"
-        if demo
-        else "REAL DATA",
+        REAL_TAG,
         new_x="LMARGIN",
         new_y="NEXT",
     )

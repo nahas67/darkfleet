@@ -493,12 +493,31 @@ def test_mark_synthetic_stamps_both_fields() -> None:
         mark_synthetic({"scan_id": "s"}, synthetic=False, runtime_mode="PAPER")
 
 
-def test_mark_synthetic_cannot_launder_a_synthetic_record(tmp_path: Path) -> None:
-    """The stamper still lets ``synthetic=True`` through, so the store must stop it."""
-    stamped = mark_synthetic({"scan_id": "s"}, synthetic=True)
-    assert stamped["synthetic"] is True
+def test_mark_synthetic_refuses_to_stamp_a_synthetic_record() -> None:
+    """The stamper now refuses it HERE, not at the store further downstream.
+
+    The previous version of this helper accepted ``synthetic=True`` and produced
+    a contradictory record stamped ``runtime_mode="REAL"`` alongside
+    ``synthetic=True``, relying on :meth:`RunStore.save` to catch it. Failing at
+    the call site is better: a helper that cannot produce a wrong record should
+    not be able to, and the traceback points at the caller that got it wrong.
+    """
+    with pytest.raises(ValueError, match="synthetic"):
+        mark_synthetic({"scan_id": "s"}, synthetic=True)
+
+
+def test_the_store_also_refuses_a_hand_written_synthetic_record(tmp_path: Path) -> None:
+    """Defence in depth: bypassing the stamper must not reach disk either."""
+    forged = {"scan_id": "s", "runtime_mode": "REAL", "synthetic": True}
     with pytest.raises(ValueError):
-        RunStore(tmp_path / "runs").save(stamped)
+        RunStore(tmp_path / "runs").save(forged)
+
+
+def test_the_store_refuses_a_legacy_demo_mode(tmp_path: Path) -> None:
+    """A record from a pre-upgrade data directory still cannot be written."""
+    legacy = {"scan_id": "s", "runtime_mode": "DEMO", "synthetic": True}
+    with pytest.raises(ValueError):
+        RunStore(tmp_path / "runs").save(legacy)
 
 
 def test_mark_synthetic_does_not_mutate_input() -> None:

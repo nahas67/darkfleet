@@ -23,7 +23,7 @@ class AisObservation(BaseModel):
     ship_type: str = ""
     length_m: float = 0.0
     width_m: float = 0.0
-    source: str = ""  # aistream | aishub | gfw | marinecadastre | file-import | demo
+    source: str = ""  # aistream | aishub | gfw | marinecadastre | file-import
 
     def dedup_key(self) -> str:
         return f"{self.mmsi}|{self.timestamp.isoformat()}"

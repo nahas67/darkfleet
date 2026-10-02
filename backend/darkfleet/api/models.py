@@ -51,7 +51,8 @@ __all__ = [
     "jsonable",
 ]
 
-RuntimeModeLiteral = Literal["DEMO", "REAL"]
+#: The only runtime mode a scan can have. See :class:`darkfleet.jobs.models.RuntimeMode`.
+RuntimeModeLiteral = Literal["REAL"]
 
 #: Export formats served today. PNG and PDF are rendered server-side from the
 #: persisted record, so an exported artefact carries the same provenance as the
@@ -137,10 +138,6 @@ class ScanCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bbox: BBox
-    scene_id: str | None = Field(
-        default=None,
-        description="Optional scene identifier to pin instead of letting the provider choose.",
-    )
     datetime_range: str | None = Field(
         default=None,
         description="STAC datetime interval, e.g. '2026-01-01T00:00:00Z/2026-01-31T00:00:00Z'.",
@@ -220,7 +217,7 @@ class ScanTargetsResponse(BaseModel):
 
 
 class SceneSummary(BaseModel):
-    """One candidate scene. ``synthetic`` marks DEMO scenes without exception."""
+    """One candidate scene. ``synthetic`` is an invariant, always ``False``."""
 
     id: str
     provider: str
@@ -237,7 +234,7 @@ class SceneSummary(BaseModel):
 
 
 class SceneListResponse(BaseModel):
-    """``GET /api/scenes``. REAL proxies the provider; DEMO lists demo scenes."""
+    """``GET /api/scenes``. Proxies the provider; there is no local catalogue."""
 
     runtime_mode: RuntimeModeLiteral
     synthetic: bool

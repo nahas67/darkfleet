@@ -34,6 +34,10 @@ class RealDataUnavailableError(RuntimeError):
         self.code = "REAL_DATA_UNAVAILABLE"
         self.details = details or {}
         self.suggestions = suggestions or [
-            "Switch to DEMO mode for deterministic synthetic analysis.",
-            "Configure a REAL provider (see .env.example).",
+            "Check network reachability of the provider endpoint.",
+            (
+                "Widen the area or the datetime range; this provider may hold no "
+                "acquisition that covers it."
+            ),
+            "Configure a provider credential (see .env.example) if one is required.",
         ]

@@ -5,7 +5,7 @@ from :class:`~darkfleet.config.settings.Settings` during startup, mounts the
 routers, and renders every failure as one consistent error body carrying a
 ``status``. In particular :class:`~darkfleet.providers.RealDataUnavailableError`
 becomes an explicit 503 (or 400) response with a ProviderStatus value -- there is
-no handler that turns a provider failure into DEMO data.
+no handler that turns a provider failure into invented data.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def create_app(
     async def _real_data_unavailable(
         request: Request, exc: RealDataUnavailableError
     ) -> JSONResponse:
-        """A provider failure is a 503 with its ProviderStatus. Never DEMO data."""
+        """A provider failure is a 503 with its ProviderStatus, never substitute data."""
         del request
         http = exc.details.get("http")
         if http in (401, 403):

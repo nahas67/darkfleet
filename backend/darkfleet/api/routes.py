@@ -9,9 +9,9 @@ This module is the adapter between the web and the engine. It owns:
   before the job is allowed to report ``COMPLETE``;
 * **live** provider probing for ``/api/providers/health`` -- a status is the
   result of a real request, never of reading an environment variable;
-* the DEMO/REAL isolation guard: in REAL a provider failure is an explicit error
+* the real-data isolation guard: a provider failure is an explicit error
   carrying a :class:`~darkfleet.providers.ProviderStatus` value, and there is no
-  code path from REAL into DEMO data.
+  code path into invented data.
 """
 
 from __future__ import annotations
@@ -289,7 +289,7 @@ def api_error(
 
 
 def _unavailable(exc: RealDataUnavailableError, provider: str) -> HTTPException:
-    """A provider failure, as an explicit response. Never a DEMO fallback."""
+    """A provider failure, as an explicit response. Never a data fallback."""
     status_value = _provider_status(exc)
     return api_error(
         _provider_http_code(status_value),
@@ -1638,7 +1638,6 @@ def _render_png(record: Mapping[str, Any], *, scan_id: str, state: State) -> byt
     db, valid, centroids = _export_layers(record, state)
     return render_png(
         scan_id=scan_id,
-        runtime_mode=str(record.get("runtime_mode", "REAL")),
         db=db,
         valid=valid,
         centroids=centroids,
@@ -1653,7 +1652,6 @@ def _render_png(record: Mapping[str, Any], *, scan_id: str, state: State) -> byt
 def _render_pdf(record: Mapping[str, Any], *, scan_id: str) -> bytes:
     return render_pdf(
         scan_id=scan_id,
-        runtime_mode=str(record.get("runtime_mode", "REAL")),
         title=f"AOI {record.get('aoi')}",
         scene=dict(record.get("scene") or {}),
         provenance=dict(record.get("provenance") or {}),

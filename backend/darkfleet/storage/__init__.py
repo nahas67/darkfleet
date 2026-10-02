@@ -6,7 +6,8 @@ process restart:
 * :mod:`darkfleet.storage.cache` -- deterministic content-addressed cache for
   derived SAR artifacts (OPS-004, OPS-005, OPS-006).
 * :mod:`darkfleet.storage.runs` -- durable scan/evidence records with a hard
-  DEMO/REAL + ``synthetic`` isolation guard (OPS-013, OPS-014).
+  real-data isolation guard (OPS-013, OPS-014): every record must be ``REAL``
+  and not synthetic, and both fields are asserted on write.
 
 No network access, no in-memory-only state.
 """
