@@ -18,5 +18,10 @@ __pycache__/
 data/ais/
 data/cache/
 data/scans/
+# Scratch data dirs an ad-hoc verification script may create under tests/.
+# A scan writes real artefacts (cache .npz, worldcover clips, scan records);
+# committing them bloats the repo and puts derived data under version control.
+backend/tests/_tmp_*/
+**/_tmp_contract_data/
 # Frontend
 # (package-lock.json is intentionally tracked once Gate 0B creates it)
