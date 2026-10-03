@@ -7,6 +7,7 @@
  */
 
 import { useStore, store, type LayerGroup, type LayerId, type LayerState } from '../state/store';
+import { engine } from '../globe/engine';
 import { groupColor } from '../design/tokens';
 
 type Definition = {
@@ -15,6 +16,11 @@ type Definition = {
   label: string;
   /** Why this layer is unavailable, when it is. Absence of a reason means usable. */
   requires?: 'scan' | 'ais' | 'raster';
+  /**
+   * A fixed reason this layer cannot be enabled. Used where the capability
+   * exists elsewhere but not as a simultaneous globe overlay.
+   */
+  blockedReason?: string;
 };
 
 const DEFINITIONS: readonly Definition[] = [
@@ -26,8 +32,23 @@ const DEFINITIONS: readonly Definition[] = [
   { id: 'AIS_TRACKS', group: 'CONTACTS', label: 'AIS observed track', requires: 'ais' },
   { id: 'AIS_PREDICTED', group: 'CONTACTS', label: 'AIS predicted segment', requires: 'ais' },
   { id: 'CORRELATION_LINKS', group: 'ANALYSIS', label: 'Correlation links', requires: 'scan' },
-  { id: 'LAND_MASK', group: 'ANALYSIS', label: 'Land mask', requires: 'raster' },
-  { id: 'CFAR_DEBUG', group: 'ANALYSIS', label: 'CFAR threshold', requires: 'raster' },
+  {
+    id: 'LAND_MASK',
+    group: 'ANALYSIS',
+    label: 'Land mask',
+    // The globe attaches ONE raster at a time, because the backend serves one
+    // layer per request and compositing them client-side would mean inventing
+    // the blend. The mask is real and rendered server-side -- in ANALYTICS.
+    blockedReason:
+      'The globe draws one SAR raster at a time. View the land mask in ANALYTICS, or run it as the raster layer.',
+  },
+  {
+    id: 'CFAR_DEBUG',
+    group: 'ANALYSIS',
+    label: 'CFAR threshold',
+    blockedReason:
+      'The globe draws one SAR raster at a time. View the CFAR threshold in ANALYTICS, or run it as the raster layer.',
+  },
   { id: 'GRATICULE', group: 'REFERENCE', label: 'Graticule' },
 ];
 
@@ -46,12 +67,12 @@ export function deriveLayers(state: ReturnType<typeof useStore>): LayerState[] {
   const hasAis = state.aisOnly.length > 0 || state.track !== null;
 
   return DEFINITIONS.map((definition) => {
-    let unavailableReason: string | undefined;
-    if (definition.requires === 'scan' && !hasScan) {
+    let unavailableReason: string | undefined = definition.blockedReason;
+    if (!unavailableReason && definition.requires === 'scan' && !hasScan) {
       unavailableReason = 'No completed scan has produced detections.';
-    } else if (definition.requires === 'raster' && !hasRaster) {
+    } else if (!unavailableReason && definition.requires === 'raster' && !hasRaster) {
       unavailableReason = 'This scan has no rendered raster artifact.';
-    } else if (definition.requires === 'ais' && !hasAis) {
+    } else if (!unavailableReason && definition.requires === 'ais' && !hasAis) {
       unavailableReason = 'No AIS source has answered for the current selection.';
     }
     // Visibility defaults on when the layer is usable, and off when it is not, so
@@ -73,6 +94,11 @@ export function LayerConsole() {
   const layers = deriveLayers(state);
 
   const commit = (next: LayerState[]) => {
+    // Drive the engine as well as the store. A toggle that only changes state
+    // is a control that appears to work and does nothing.
+    for (const layer of next) {
+      if (layer.id === 'GRATICULE') engine.setGraticule(layer.visible);
+    }
     store.set({ layers: next });
   };
 

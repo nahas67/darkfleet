@@ -28,8 +28,9 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   const [initError, setInitError] = useState<string | null>(null);
   const [hovered, setHovered] = useState<TargetHandle | null>(null);
 
-  const targets = useStore().targets;
-  const selection = useStore().selection;
+  const state = useStore();
+  const targets = state.targets;
+  const selection = state.selection;
   const rasterBounds = engine.rasterBounds;
 
   useEffect(() => {
@@ -88,7 +89,19 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
           radiusM: t.geolocationUncertaintyM as number,
         })),
     );
-  }, [targets, selection, webgl, initError]);
+    // AIS-only contacts, from real delivered state.
+    engine.setAisContacts(
+      state.aisOnly.map((contact) => ({ mmsi: contact.mmsi, lat: contact.lat, lon: contact.lon })),
+    );
+  }, [targets, selection, state.aisOnly, webgl, initError]);
+
+  // The observed track, split so propagation is visibly a hypothesis.
+  const track = state.track;
+  useEffect(() => {
+    if (!webgl || initError !== null) return;
+    const observed = (track?.observed ?? []).map((fix) => ({ lat: fix.lat, lon: fix.lon }));
+    engine.setTrack(observed, null);
+  }, [track, webgl, initError]);
 
   if (!webgl || initError !== null) {
     return (

@@ -70,6 +70,15 @@ export function DarkFleetCommandApp() {
         width: result.width,
         height: result.height,
       });
+      // The scene footprint is the MEASURED extent the raster was rendered
+      // over -- not the requested AOI. Those differ whenever the window was
+      // clamped, which is exactly the GEO-CORR defect in visual form.
+      engine.setSceneFootprint([
+        result.rectangle.west,
+        result.rectangle.south,
+        result.rectangle.east,
+        result.rectangle.north,
+      ]);
       store.set({
         rasterLoaded: attached,
         rasterError: attached

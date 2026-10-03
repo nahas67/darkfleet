@@ -23,6 +23,7 @@ import {
   Color,
   ColorMaterialProperty,
   ConstantProperty,
+  GridImageryProvider,
   Ellipsoid,
   HeadingPitchRange,
   ImageryLayer,
@@ -37,7 +38,7 @@ import {
 
 import { initializeCesiumViewer } from './cesiumViewer';
 import { classificationColor } from '../design/tokens';
-import type { BBox, SarTarget, ViewMode } from '../state/store';
+import { toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
 
 const TARGET_LAYER = 'targets';
 const RASTER_LAYER = 'sar-raster';
@@ -68,6 +69,9 @@ export class TacticalEngine {
   #trackEntities: Array<unknown> = [];
   #linkEntities: Array<unknown> = [];
   #aoiEntity: unknown = null;
+  #graticuleProvider: ImageryLayer | null = null;
+  #footprintEntity: unknown = null;
+  #aisEntities: Array<unknown> = [];
   #handler: ScreenSpaceEventHandler | null = null;
   #hovered: string | null = null;
 
@@ -139,6 +143,192 @@ export class TacticalEngine {
    * too. Previously the HUD showed whatever altitude the pointer last implied,
    * which went stale the moment the camera moved without a mouse.
    */
+  /**
+   * Toggle the graticule.
+   *
+   * Implemented rather than declared: the layer console offered GRATICULE as an
+   * enabled toggle that drew nothing, which is the "enabled control for
+   * unavailable functionality" the product forbids. A graticule is genuinely
+   * useful on a maritime console for reading a position off the globe, so it is
+   * worth having for real.
+   */
+  setGraticule(visible: boolean): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+
+    if (!visible) {
+      if (this.#graticuleProvider) {
+        try {
+          viewer.imageryLayers.remove(this.#graticuleProvider, true);
+        } catch {
+          /* already removed */
+        }
+        this.#graticuleProvider = null;
+      }
+      return;
+    }
+    if (this.#graticuleProvider) return;
+
+    try {
+      this.#graticuleProvider = viewer.imageryLayers.addImageryProvider(
+        new GridImageryProvider({
+          // 10 lines per hemisphere: coarse enough to stay legible under
+          // symbology, fine enough to read a tenth of a degree off the globe.
+          cells: 18,
+          color: Color.fromCssColorString('#5C6E63').withAlpha(0.5),
+          glowColor: Color.fromCssColorString('#5C6E63').withAlpha(0.12),
+          glowWidth: 2,
+          backgroundColor: Color.TRANSPARENT,
+        }),
+      );
+    } catch (error) {
+      console.error('DarkFleet: graticule layer was not added', error);
+      this.#graticuleProvider = null;
+    }
+  }
+
+  get graticuleVisible(): boolean {
+    return this.#graticuleProvider !== null;
+  }
+
+  /**
+   * Scene footprint for the acquisition a scan read.
+   *
+   * Drawn from the scene's own recorded bounds. If those bounds cannot be
+   * validated, nothing is drawn rather than an approximate rectangle: a
+   * footprint is a statement about where the radar looked.
+   */
+  setSceneFootprint(bbox: readonly number[] | null | undefined): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+    if (this.#footprintEntity) {
+      try {
+        viewer.entities.remove(this.#footprintEntity as never);
+      } catch {
+        /* already gone */
+      }
+      this.#footprintEntity = null;
+    }
+    const box = toBBox(bbox);
+    if (!box) return;
+    const [minLon, minLat, maxLon, maxLat] = box;
+    this.#footprintEntity = viewer.entities.add({
+      name: 'scene-footprint',
+      polygon: {
+        hierarchy: [
+          Cartesian3.fromDegrees(minLon, minLat),
+          Cartesian3.fromDegrees(maxLon, minLat),
+          Cartesian3.fromDegrees(maxLon, maxLat),
+          Cartesian3.fromDegrees(minLon, maxLat),
+        ],
+        // Outlined only. A filled footprint would sit over the imagery it is
+        // meant to describe.
+        material: Color.TRANSPARENT,
+        outline: true,
+        outlineColor: Color.fromCssColorString('#3FA9C4').withAlpha(0.9),
+        height: 0,
+      },
+    });
+  }
+
+  /**
+   * AIS-only contacts: vessels transmitting with no radar return beside them.
+   *
+   * A separate layer from AIS_TRACKS because the two answer different questions.
+   * An AIS-only contact is an open question about coverage and detection
+   * threshold, not a finding about the vessel.
+   */
+  setAisContacts(
+    contacts: ReadonlyArray<{ mmsi: string; lat: number; lon: number }>,
+  ): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+    for (const entity of this.#aisEntities) {
+      try {
+        viewer.entities.remove(entity as never);
+      } catch {
+        /* already gone */
+      }
+    }
+    this.#aisEntities = [];
+    for (const contact of contacts) {
+      if (!Number.isFinite(contact.lat) || !Number.isFinite(contact.lon)) continue;
+      this.#aisEntities.push(
+        viewer.entities.add({
+          name: `ais:${contact.mmsi}`,
+          position: Cartesian3.fromDegrees(contact.lon, contact.lat),
+          point: {
+            pixelSize: 8,
+            color: Color.fromCssColorString('#3FA9C4').withAlpha(0.75),
+            outlineColor: Color.fromCssColorString('#040705'),
+            outlineWidth: 1.5,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: contact.mmsi,
+            font: '10px "JetBrains Mono", monospace',
+            fillColor: Color.fromCssColorString('#3FA9C4'),
+            outlineColor: Color.fromCssColorString('#040705'),
+            outlineWidth: 2,
+            pixelOffset: new Cartesian2(11, -11),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }),
+      );
+    }
+  }
+
+  /**
+   * Correlation links: detection to the AIS position propagated to acquisition time.
+   *
+   * Drawn ONLY for an actual association, and only when both ends are
+   * placeable. A line to a position the product did not compute would be a
+   * fabricated relationship.
+   */
+  setCorrelationLinks(
+    entries: ReadonlyArray<{
+      id: string;
+      lat: number;
+      lon: number;
+      predictedLat: number;
+      predictedLon: number;
+    }>,
+  ): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+    for (const entity of this.#linkEntities) {
+      try {
+        viewer.entities.remove(entity as never);
+      } catch {
+        /* already gone */
+      }
+    }
+    this.#linkEntities = [];
+    for (const entry of entries) {
+      if (![entry.lat, entry.lon, entry.predictedLat, entry.predictedLon].every((v) =>
+        Number.isFinite(v),
+      )) {
+        continue;
+      }
+      this.#linkEntities.push(
+        viewer.entities.add({
+          name: `link:${entry.id}`,
+          polyline: {
+            positions: new ConstantProperty([
+              Cartesian3.fromDegrees(entry.lon, entry.lat, 0),
+              Cartesian3.fromDegrees(entry.predictedLon, entry.predictedLat, 0),
+            ]),
+            width: new ConstantProperty(1.5),
+            material: new ColorMaterialProperty(
+              Color.fromCssColorString('#7C6BB0').withAlpha(0.75),
+            ),
+            clampToGround: new ConstantProperty(false),
+          },
+        }),
+      );
+    }
+  }
+
   #installCameraTelemetry(viewer: Viewer): void {
     // Plausibility bound. Cesium reports a finite height in every frame, but a
     // transient during teardown or a stalled flight produced a value ~10^11 m,
