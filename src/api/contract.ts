@@ -624,6 +624,735 @@ export type ContractSchemaName =
 ;
 
 /**
+ * Property names of {@link ScoreDecomposition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCOREDECOMPOSITION_FIELDS = [
+  'spatialScore',
+  'temporalScore',
+  'headingScore',
+  'sizeScore',
+  'compositeScore',
+  'matchRadiusMeters',
+  'distanceOffsetMeters',
+  'timeDeltaSeconds',
+] as const;
+
+/**
+ * Property names of {@link ProbeResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBERESPONSE_FIELDS = [
+  'scan_id',
+  'pixel',
+  'source',
+  'wgs84_lat',
+  'wgs84_lon',
+  'georeferencing',
+  'provenance',
+] as const;
+
+/**
+ * Property names of {@link RevisitPlanOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const REVISITPLANOUT_FIELDS = [
+  'acquisition_count',
+  'acquisitions',
+  'gaps',
+  'statistics',
+  'window',
+  'next_after',
+  'limitations',
+  'provider',
+  'collection',
+  'requested_bbox',
+] as const;
+
+/**
+ * Property names of {@link TracksOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TRACKSOUT_FIELDS = [
+  'scans_considered',
+  'observations_considered',
+  'track_count',
+  'tracks',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link PatternsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PATTERNSOUT_FIELDS = [
+  'scans_considered',
+  'observations_considered',
+  'pattern_count',
+  'patterns',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link DetectorsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DETECTORSOUT_FIELDS = [
+  'default',
+  'detectors',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link AisAssociation} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const AISASSOCIATION_FIELDS = [
+  'matched',
+  'mmsi',
+  'vesselName',
+  'distanceOffsetMeters',
+  'timeDeltaSeconds',
+  'predictedLat',
+  'predictedLon',
+  'aisAssociationConfidence',
+  'candidatesConsidered',
+  'acceptanceThreshold',
+  'closestRejected',
+  'scoreDecomposition',
+] as const;
+
+/**
+ * Property names of {@link VesselTarget} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const VESSELTARGET_FIELDS = [
+  'id',
+  'classification',
+  'lat',
+  'lon',
+  'geoPixelCentroid',
+  'geoCentreOffset',
+  'sarConf',
+  'aisConf',
+  'lenM',
+  'widM',
+  'lenUncM',
+  'hdg',
+  'wake',
+  'meanDb',
+  'maxDb',
+  'area',
+  'corr',
+  'assessment',
+  'tags',
+] as const;
+
+/**
+ * Property names of {@link AisOnlyTarget} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const AISONLYTARGET_FIELDS = [
+  'cls',
+  'mmsi',
+  'vesselName',
+  'lat',
+  'lon',
+  'timestamp',
+] as const;
+
+/**
+ * Property names of {@link ScanTargetsResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANTARGETSRESPONSE_FIELDS = [
+  'scan_id',
+  'stage',
+  'runtime_mode',
+  'synthetic',
+  'aoi',
+  'count',
+  'ais_only_count',
+  'counts',
+  'targets',
+  'ais_only',
+  'provenance',
+  'scene',
+  'acquisition_time',
+] as const;
+
+/**
+ * Property names of {@link SceneSummary} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENESUMMARY_FIELDS = [
+  'id',
+  'provider',
+  'platform',
+  'product',
+  'polarization',
+  'acquisition_time',
+  'bbox',
+  'resolution_meters',
+  'georeferencing',
+  'sea_clutter_level',
+  'runtime_mode',
+  'synthetic',
+] as const;
+
+/**
+ * Property names of {@link SceneListResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENELISTRESPONSE_FIELDS = [
+  'runtime_mode',
+  'synthetic',
+  'provider',
+  'status',
+  'note',
+  'count',
+  'scenes',
+] as const;
+
+/**
+ * Property names of {@link ScanAccepted} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANACCEPTED_FIELDS = [
+  'scan_id',
+  'status',
+  'runtime_mode',
+  'synthetic',
+] as const;
+
+/**
+ * Property names of {@link StageEventOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const STAGEEVENTOUT_FIELDS = [
+  'stage',
+  'timestamp',
+  'detail',
+  'terminal',
+] as const;
+
+/**
+ * Property names of {@link ScanStateResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANSTATERESPONSE_FIELDS = [
+  'scan_id',
+  'stage',
+  'terminal',
+  'runtime_mode',
+  'synthetic',
+  'known',
+  'source',
+  'started_at',
+  'finished_at',
+  'failed_at',
+  'error',
+  'history',
+  'record_persisted',
+] as const;
+
+/**
+ * Property names of {@link ProviderHealthEntry} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROVIDERHEALTHENTRY_FIELDS = [
+  'provider',
+  'status',
+  'detail',
+  'last_check',
+  'latency_ms',
+  'error',
+  'capabilities',
+] as const;
+
+/**
+ * Property names of {@link HealthResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const HEALTHRESPONSE_FIELDS = [
+  'checked_at',
+  'runtime_mode',
+  'probe',
+  'providers',
+] as const;
+
+/**
+ * Property names of {@link TargetEvidenceResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETEVIDENCERESPONSE_FIELDS = [
+  'scan_id',
+  'runtime_mode',
+  'synthetic',
+  'ambiguous',
+  'candidate_scan_ids',
+  'evidence',
+] as const;
+
+/**
+ * Property names of {@link EvidenceDocumentResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const EVIDENCEDOCUMENTRESPONSE_FIELDS = [
+  'scan_id',
+  'runtime_mode',
+  'synthetic',
+  'ambiguous',
+  'candidate_scan_ids',
+  'evidence',
+] as const;
+
+/**
+ * Property names of {@link DebugLayerResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DEBUGLAYERRESPONSE_FIELDS = [
+  'scan_id',
+  'layer',
+  'kind',
+  'source',
+  'shape',
+  'dtype',
+  'stats',
+  'columns',
+  'rows',
+  'row_limit',
+  'truncated',
+  'data',
+  'grid_size',
+  'grid',
+  'notes',
+] as const;
+
+/**
+ * Property names of {@link LayerStats} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const LAYERSTATS_FIELDS = [
+  'size',
+  'min',
+  'max',
+  'mean',
+  'std',
+  'p01',
+  'p50',
+  'p99',
+  'nan_count',
+  'finite_fraction',
+  'true_count',
+] as const;
+
+/**
+ * Property names of {@link AisObservationOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const AISOBSERVATIONOUT_FIELDS = [
+  'timestamp',
+  'mmsi',
+  'lat',
+  'lon',
+  'sog',
+  'cog',
+  'heading',
+  'nav_status',
+  'ship_name',
+  'callsign',
+  'imo',
+  'ship_type',
+  'length_m',
+  'width_m',
+  'source',
+] as const;
+
+/**
+ * Property names of {@link AisCoverageOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const AISCOVERAGEOUT_FIELDS = [
+  'state',
+  'detail',
+  'observation_count',
+  'window_start',
+  'window_end',
+  'archive_oldest',
+  'archive_newest',
+  'sources',
+] as const;
+
+/**
+ * Property names of {@link ScanAisWindow} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANAISWINDOW_FIELDS = [
+  'start',
+  'end',
+] as const;
+
+/**
+ * Property names of {@link ScanAisResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANAISRESPONSE_FIELDS = [
+  'scan_id',
+  'coverage',
+  'window',
+  'bbox',
+  'observations',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link TargetAisResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETAISRESPONSE_FIELDS = [
+  'target_id',
+  'mmsi',
+  'associated',
+  'coverage',
+  'window',
+  'observations',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link VesselTrackResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const VESSELTRACKRESPONSE_FIELDS = [
+  'mmsi',
+  'coverage',
+  'ship_name',
+  'callsign',
+  'imo',
+  'ship_type',
+  'length_m',
+  'width_m',
+  'observations',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link ProbeRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBEREQUEST_FIELDS = [
+  'row',
+  'col',
+] as const;
+
+/**
+ * Property names of {@link ScanCreateRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANCREATEREQUEST_FIELDS = [
+  'bbox',
+  'datetime_range',
+  'sceneId',
+  'provider',
+  'product',
+  'cfar_config',
+] as const;
+
+/**
+ * Property names of {@link ProbeGeoreferencing} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBEGEOREFERENCING_FIELDS = [
+  'type',
+  'raster_width',
+  'raster_height',
+  'window_bounds',
+  'transform',
+  'resolution_m',
+  'always_xy',
+] as const;
+
+/**
+ * Property names of {@link ProbePixel} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBEPIXEL_FIELDS = [
+  'row',
+  'col',
+  'convention',
+  'centre_offset',
+] as const;
+
+/**
+ * Property names of {@link ProbeProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBEPROVENANCE_FIELDS = [
+  'scan_id',
+  'scene_id',
+  'provider',
+  'platform',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'software_version',
+  'processing_version',
+  'requested_aoi',
+] as const;
+
+/**
+ * Property names of {@link ProbeSource} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROBESOURCE_FIELDS = [
+  'crs',
+  'x',
+  'y',
+] as const;
+
+/**
+ * Property names of {@link AcquisitionOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ACQUISITIONOUT_FIELDS = [
+  'item_id',
+  'acquisition_time',
+  'platform',
+  'collection',
+  'polarizations',
+] as const;
+
+/**
+ * Property names of {@link RevisitGapOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const REVISITGAPOUT_FIELDS = [
+  'start',
+  'end',
+  'days',
+  'window_edge',
+  'exceeds_nominal',
+] as const;
+
+/**
+ * Property names of {@link RevisitStatisticsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const REVISITSTATISTICSOUT_FIELDS = [
+  'platform_count',
+  'acquisitions_per_platform',
+  'interior_gap_count',
+  'median_revisit_days',
+  'min_revisit_days',
+  'max_revisit_days',
+  'flagged_gap_count',
+  'nominal_repeat_days',
+] as const;
+
+/**
+ * Property names of {@link TrackHypothesisOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TRACKHYPOTHESISOUT_FIELDS = [
+  'track_id',
+  'points',
+  'gaps',
+  'supporting_evidence',
+  'contradicting_evidence',
+  'identity_strength',
+  'confidence_statement',
+] as const;
+
+/**
+ * Property names of {@link PatternOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PATTERNOUT_FIELDS = [
+  'pattern_id',
+  'kind',
+  'observed',
+  'hypothesis',
+  'confidence',
+  'unknowns',
+  'evidence',
+] as const;
+
+/**
+ * Property names of {@link DetectorCardOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DETECTORCARDOUT_FIELDS = [
+  'name',
+  'kind',
+  'training_domain',
+  'input_product',
+  'validation_data',
+  'limitations',
+  'weights_digest',
+] as const;
+
+/**
+ * Property names of {@link RejectedCandidate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const REJECTEDCANDIDATE_FIELDS = [
+  'mmsi',
+  'vesselName',
+  'score',
+  'distanceMeters',
+  'timeDeltaSeconds',
+  'shortfall',
+] as const;
+
+/**
+ * Property names of {@link ScanScene} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANSCENE_FIELDS = [
+  'provider',
+  'collection',
+  'item_id',
+  'platform',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'asset_href',
+  'crs',
+  'resolution_m',
+] as const;
+
+/**
+ * Property names of {@link CfarConfig} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const CFARCONFIG_FIELDS = [
+  'trainingCells',
+  'guardCells',
+  'thresholdFactor',
+  'minPixels',
+  'maxPixels',
+  'speckleFilter',
+  'kernelSize',
+  'coastlineBufferMeters',
+] as const;
+
+/**
+ * Property names of {@link TrackGapOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TRACKGAPOUT_FIELDS = [
+  'seconds',
+  'implied_speed_knots',
+  'plausible',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link TrackPointOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TRACKPOINTOUT_FIELDS = [
+  'scan_id',
+  'item_id',
+  'acquisition_time',
+  'lat',
+  'lon',
+  'sar_conf',
+  'classification',
+  'apparent_length_m',
+  'length_unc_m',
+] as const;
+
+/**
  * ScanStage values in the backend's declared pipeline order.
  *
  * Generated. Consumers must not extend or reorder this.

@@ -24,7 +24,15 @@ import { loadArrayLayer, loadTableLayer, tableColumns, tableRows, rowWindowLabel
 import { DEBUG_LAYERS, LAYER_LABELS, RASTER_LAYERS, inPipelineOrder, isRasterLayer, type DebugLayerId, type RasterLayerId } from '../api/debugLayers';
 import { usePixelProbe } from '../api/usePixelProbe';
 import { loadRaster } from '../api/client';
-import { fitScale, isInsideRaster, screenToAnalytical, analyticalToScreen, type AnalyticalPixel, type RasterGeometry } from './pixelMapping';
+import {
+  analyticalToScreen,
+  fitScale,
+  isInsideRaster,
+  readGeometry,
+  screenToAnalytical,
+  type AnalyticalPixel,
+  type RasterGeometry,
+} from './pixelMapping';
 import { store, useStore, type SarTarget } from '../state/store';
 import { CfarLab } from './CfarLab';
 import { DetectorProvenance } from './DetectorProvenance';
@@ -71,11 +79,40 @@ function NoScan() {
 function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget[] }) {
   const [layer, setLayer] = useState<DebugLayerId>('raw');
   const [states, setStates] = useState<Record<string, LayerState>>({});
-  const [selectedRow, setSelectedRow] = useState<string | null>(null);
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const probe = usePixelProbe(scanId);
+  const selection = useStore().selection;
+
+  /**
+   * Which target has been followed into this workspace.
+   *
+   * Reset by the scan-change effect below, and that ordering is load-bearing.
+   * Under StrictMode the effects run twice on mount: without the reset, the first
+   * pass follows the target and sets this ref, `probe.clear()` wipes the readout
+   * on the second pass, and the follow is then skipped because the ref says it
+   * already happened. The result is a target selected elsewhere, shown in the
+   * chip, with "NO PROBE" underneath it and no error anywhere.
+   */
+  const followedRef = useRef<string | null>(null);
 
   const ordered = useMemo(() => inPipelineOrder([...DEBUG_LAYERS]), []);
   const active = states[layer] ?? { status: 'idle' as const };
+
+  /**
+   * The selected target id.
+   *
+   * The STORE's selection wins over anything local. The store is the single
+   * shared reference the whole product selects through, so a target picked on the
+   * globe or in the contact list has to light up here -- through the same
+   * reference, not a second mechanism that could disagree with it. A local focus
+   * is only the fallback for when nothing is selected globally.
+   */
+  const selectedId = selection.kind === 'target' ? selection.targetId : focusedRow;
+
+  const selectedTarget = useMemo(
+    () => targets.find((t) => t.id === selectedId) ?? null,
+    [targets, selectedId],
+  );
 
   // Per-layer caching. Scan artifacts are immutable once written, so a layer that
   // has loaded never needs reloading, and one layer failing must not blank the
@@ -104,21 +141,18 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
   // belong to a different raster now.
   useEffect(() => {
     setStates({});
-    setSelectedRow(null);
+    setFocusedRow(null);
+    // Reset before clearing, so the follow effect below gets its turn again.
+    followedRef.current = null;
     probe.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- probe.clear is stable
   }, [scanId]);
-
-  const selectedTarget = useMemo(
-    () => targets.find((t) => t.id === selectedRow) ?? null,
-    [targets, selectedRow],
-  );
 
   const handleRowSelect = useCallback(
     (row: TableRow) => {
       const targetId = row.target_id;
       if (typeof targetId !== 'string') return;
-      setSelectedRow(targetId);
+      setFocusedRow(targetId);
       // Analytics -> target. Only through the authoritative id; the alternative
       // would be nearest-point matching in the browser, which manufactures a
       // relation the backend never asserted.
@@ -132,14 +166,44 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
     [probe],
   );
 
+  /**
+   * A target selected elsewhere follows the analyst into this workspace.
+   *
+   * Selecting DF-002 on the globe and then opening ANALYTICS must show WHERE that
+   * detection is, not an unhighlighted raster. The centroid comes from the
+   * target record, and the coordinate from the backend probe, so the link is the
+   * authoritative one in both directions.
+   *
+   * Refused rather than approximated: a target with no centroid has no analytical
+   * position, and the probe readout says so instead of the surface implying one.
+   */
+  useEffect(() => {
+    if (selection.kind !== 'target') {
+      followedRef.current = null;
+      return;
+    }
+    if (followedRef.current === selection.targetId) return;
+    const centroid = targets.find((t) => t.id === selection.targetId)?.geoPixelCentroid;
+    // Record the id ONLY once the follow actually happened. Marking it before
+    // this check would mean the first render -- which can precede the targets
+    // arriving -- consumed the one attempt and never retried, leaving a target
+    // selected elsewhere with no analytical position shown and no error.
+    if (!centroid) return;
+    followedRef.current = selection.targetId;
+    probe.lock({ row: centroid[1], col: centroid[0] });
+  }, [selection, targets, probe]);
+
   return (
-    <section className="df-panel h-full overflow-hidden" data-df-workspace="ANALYTICS">
-      <header className="df-panel-head flex items-center justify-between gap-2">
+    <section
+      className="df-panel flex h-full min-h-0 flex-col overflow-hidden"
+      data-df-workspace="ANALYTICS"
+    >
+      <header className="df-panel-head flex shrink-0 items-center justify-between gap-2">
         <span className="df-label">SAR analytics</span>
         <span className="df-mono text-[10px] text-ink-dim">{scanId}</span>
       </header>
 
-      <div className="flex h-[calc(100%-2rem)] min-h-0">
+      <div className="flex min-h-0 flex-1">
         {/* Pipeline navigation */}
         <nav
           className="df-scroll w-[132px] shrink-0 overflow-y-auto border-r border-structural/40"
@@ -174,23 +238,33 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
                 layer={layer}
                 state={active}
                 targets={targets}
-                selectedTargetId={selectedRow}
-                onTargetSelect={setSelectedRow}
+                selectedTargetId={selectedId}
+                onTargetSelect={setFocusedRow}
                 probe={probe}
               />
             ) : (
               <TablePane
                 layer={layer}
                 state={active}
-                selectedRow={selectedRow}
+                selectedRow={selectedId}
                 onSelect={handleRowSelect}
               />
             )}
           </div>
 
+          <TargetChip target={selectedTarget} />
+
           <ProbeReadout state={probe.state} hovered={probe.hovered} />
 
-          <div className="flex min-h-0 shrink-0 gap-2 border-t border-structural/40">
+          {/* Fixed height. Left to its content this row grew until the raster
+              above it had no space at all, which is how an analysis surface ends
+              up showing a strip of controls and no imagery. Sized so CURRENT RUN
+              and at least one complete row of PROPOSED inputs are visible without
+              scrolling. */}
+          <div
+            className="flex h-[210px] shrink-0 border-t border-structural/40"
+            data-df-analytics-footer
+          >
             <CfarLab scanId={scanId} />
             <DetectorProvenance />
           </div>
@@ -245,14 +319,28 @@ function RasterPane({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState(1);
 
+  // The frame's own rect, tracked continuously rather than sampled once.
+  //
+  // A rect captured at load time goes stale the moment the window resizes or the
+  // workspace panel changes width, and a stale rect maps clicks to the wrong
+  // analytical pixel -- silently, because the arithmetic still succeeds. A
+  // ResizeObserver keeps the pointer mapping honest for the life of the pane.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      setRect(frame.getBoundingClientRect());
+    });
+    observer.observe(frame);
+    setRect(frame.getBoundingClientRect());
+    return () => observer.disconnect();
+  }, []);
+
   // The raster metadata: analytical shape, rendered shape, downsample. All three
   // are needed for the pixel mapping; assuming any of them is 1:1 is the defect.
   useEffect(() => {
     let cancelled = false;
-    void loadRaster(scanId, layer).then(() => {
-      if (cancelled) return;
-      setRect(frameRef.current?.getBoundingClientRect() ?? null);
-    });
+    void loadRaster(scanId, layer);
     return () => {
       cancelled = true;
     };
@@ -263,29 +351,52 @@ function RasterPane({
     void fetch(`/api/scans/${scanId}/raster/${layer}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((body: unknown) => {
-        if (cancelled || !body || typeof body !== 'object') return;
-        const payload = body as {
-          shape?: number[];
-          render?: { rendered_shape?: number[]; downsample_factor?: number };
-        };
-        const source = payload.shape;
-        const rendered = payload.render?.rendered_shape;
-        if (!source || !rendered) return;
-        setGeometry({
-          sourceShape: [Number(source[1] ?? source[0]), Number(source[0] ?? 0)] as [number, number],
-          renderedShape: [Number(rendered[1] ?? rendered[0]), Number(rendered[0] ?? 0)] as [number, number],
-          downsampleFactor: Number(payload.render?.downsample_factor ?? 1),
-        });
+        if (cancelled) return;
+        const next = readGeometry(body);
+        if (next) setGeometry(next);
+      })
+      .catch(() => {
+        /* A layer with no readable geometry simply has no probe target. */
       });
     return () => {
       cancelled = true;
     };
   }, [scanId, layer]);
 
+  /**
+   * FIT: scale so the whole rendered image is visible, and CENTRE it.
+   *
+   * Centring matters as much as the scale. Zoom alone leaves the image pinned to
+   * the container's top-left corner, so most of the frame is letterbox and a
+   * click in the middle of the visible area resolves to no pixel at all.
+   */
   const fit = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+    const frame = frameRef.current;
+    const box = rect ?? frame?.getBoundingClientRect() ?? null;
+    if (!geometry || !box) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    const [renderedRows, renderedCols] = geometry.renderedShape;
+    const scale = fitScale(geometry, box.width, box.height);
+    setZoom(scale);
+    setPan({
+      x: Math.max(0, (box.width - renderedCols * scale) / 2),
+      y: Math.max(0, (box.height - renderedRows * scale) / 2),
+    });
+  }, [geometry, rect]);
+
+  // Fit as soon as both the geometry and a measured frame exist, so the first
+  // thing an operator sees is the whole raster rather than one corner of it.
+  const fittedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!geometry || !rect || rect.width === 0) return;
+    const key = `${scanId}:${layer}:${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    if (fittedFor.current === key) return;
+    fittedFor.current = key;
+    fit();
+  }, [geometry, rect, scanId, layer, fit]);
 
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -609,6 +720,62 @@ function LayerNotes({ state }: { state: LayerState }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/* -------------------------------------------------------------- target chip */
+
+/**
+ * What is selected, and whether it can be placed analytically.
+ *
+ * Two requirements pull against each other here. The operator needs context
+ * about the detection they just picked; and the chip must not imply a
+ * raster-to-target link that does not exist. So every figure is one the backend
+ * supplied, and the absence of an analytical anchor is stated in words rather than
+ * left as an empty field.
+ *
+ * `sarConf` and `aisConf` are reported separately and never summed. A combined
+ * "confidence" would be a number this product cannot derive.
+ */
+function TargetChip({ target }: { target: SarTarget | null }) {
+  return (
+    <div
+      className="shrink-0 border-t border-structural/40 px-2 py-1"
+      data-df-target-chip={target?.id ?? 'none'}
+    >
+      {!target ? (
+        <p className="df-mono text-[10px] text-ink-dim">NO TARGET SELECTED</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <span className="df-mono text-[11px] text-ink-2" data-df-chip-id>
+            {target.id}
+          </span>
+          <span className="df-mono text-[10px] text-ink-dim">
+            {target.classification}
+          </span>
+          <span className="df-num text-[10px] text-ink-2">
+            SAR {target.sarConf.toFixed(2)} · AIS {target.aisConf.toFixed(2)}
+          </span>
+          {target.geoPixelCentroid ? (
+            <span className="df-num text-[10px] text-ink-2" data-df-chip-centroid>
+              CENTROID {target.geoPixelCentroid[1].toFixed(3)},{' '}
+              {target.geoPixelCentroid[0].toFixed(3)}
+            </span>
+          ) : (
+            <span
+              className="df-mono text-[10px]"
+              style={{ color: 'var(--df-amber)' }}
+              data-df-chip-no-link
+            >
+              ANALYTICAL COMPONENT LINK NOT ESTABLISHED
+            </span>
+          )}
+          {target.mmsi ? (
+            <span className="df-mono text-[10px] text-ink-dim">MMSI {target.mmsi}</span>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }
 

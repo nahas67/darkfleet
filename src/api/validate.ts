@@ -31,6 +31,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  AISASSOCIATION_FIELDS,
+  SCANTARGETSRESPONSE_FIELDS,
+  VESSELTARGET_FIELDS,
+} from './contract';
 import type {
   AisAssociation,
   AisOnlyTarget,
@@ -61,40 +66,27 @@ const CLASSES = new Set([
   'UNRESOLVED',
 ]);
 
-// Every key the backend is allowed to send for a target. A key outside this set
-// means the contract moved and the generated file is stale, which is a build-time
-// problem, not something to absorb at runtime.
-const TARGET_KEYS = new Set([
-  'id',
-  'classification',
-  'lat',
-  'lon',
-  'sarConf',
-  'aisConf',
-  'lenM',
-  'widM',
-  'lenUncM',
-  'hdg',
-  'wake',
-  'meanDb',
-  'maxDb',
-  'area',
-  'corr',
-  'assessment',
-  'tags',
-]);
+// Every permitted key set is GENERATED, in contract.ts, as `<SCHEMA>_FIELDS`.
+//
+// These three sets used to be maintained by hand beside the generated contract,
+// and they drifted. `VesselTarget` gained `geoPixelCentroid` and
+// `geoCentreOffset`; the contract was regenerated and declared both; these sets
+// were not, so every real `/targets` response was rejected at runtime with
+//
+//   API contract violated at response.targets[0].geoPixelCentroid:
+//   key is not in the generated contract
+//
+// printed by a file that had the field three hundred lines above it.
+//
+// Runtime validation exists to catch drift, so it must not itself BE a source of
+// drift. A hand-written mirror of a generated file is the same defect class as a
+// hand-written API model: two sources of truth, only one of them checked.
+// Reading the generated array removes the mirror, and a contract change now
+// reaches the validator the moment the contract is regenerated.
 
-const CORR_KEYS = new Set([
-  'matched',
-  'mmsi',
-  'vesselName',
-  'distanceOffsetMeters',
-  'timeDeltaSeconds',
-  'predictedLat',
-  'predictedLon',
-  'aisAssociationConfidence',
-  'scoreDecomposition',
-]);
+const TARGET_KEYS = new Set<string>(VESSELTARGET_FIELDS);
+
+const CORR_KEYS = new Set<string>(AISASSOCIATION_FIELDS);
 
 /**
  * Top-level keys of GET /api/scans/{id}/targets.
@@ -104,21 +96,7 @@ const CORR_KEYS = new Set([
  * level unexpected key is the cheapest signal that the server and this build
  * disagree about the shape at all.
  */
-const RESPONSE_KEYS = new Set([
-  'scan_id',
-  'stage',
-  'runtime_mode',
-  'synthetic',
-  'aoi',
-  'count',
-  'ais_only_count',
-  'counts',
-  'targets',
-  'ais_only',
-  'provenance',
-  'scene',
-  'acquisition_time',
-]);
+const RESPONSE_KEYS = new Set<string>(SCANTARGETSRESPONSE_FIELDS);
 
 function obj(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

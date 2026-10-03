@@ -24,7 +24,10 @@ import {
   type RasterGeometry,
 } from './pixelMapping';
 
-/** 1:1. */
+// Shapes are [rows, cols], in NumPy order, exactly as the backend reports them.
+// Written with the comment because that convention is the whole risk: a field
+// called width holding a row count is an axis swap that a square fixture
+// cannot catch.
 const ONE_TO_ONE: RasterGeometry = {
   sourceShape: [400, 400],
   renderedShape: [400, 400],
@@ -43,6 +46,13 @@ const NON_INTEGER: RasterGeometry = {
   sourceShape: [400, 400],
   renderedShape: [300, 300],
   downsampleFactor: 400 / 300,
+};
+
+/** Not square: 200 rows by 600 cols. Catches any row/col mix-up. */
+const WIDE: RasterGeometry = {
+  sourceShape: [200, 600],
+  renderedShape: [100, 300],
+  downsampleFactor: 2,
 };
 
 const VIEW = {

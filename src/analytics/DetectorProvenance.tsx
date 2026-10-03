@@ -57,7 +57,7 @@ export function DetectorProvenance() {
 
   return (
     <aside
-      className="df-scroll min-w-0 flex-1 overflow-y-auto"
+      className="df-scroll h-full min-w-0 flex-1 overflow-y-auto"
       data-df-detector
       aria-label="Detector provenance"
     >

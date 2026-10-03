@@ -330,6 +330,45 @@ def build() -> str:
     out.append(";")
     out.append("")
 
+    # The property NAMES of every emitted object schema, as RUNTIME arrays.
+    #
+    # Same reasoning as SCAN_STAGE_ORDER below: the generated interfaces are
+    # types, and types are erased. The runtime validator in `src/api/validate.ts`
+    # therefore needs a second list of the permitted keys -- and it used to keep
+    # that list BY HAND.
+    #
+    # It drifted. `VesselTarget` gained `geoPixelCentroid` and `geoCentreOffset`,
+    # the generated contract was regenerated, and the hand-written set was not --
+    # so every real `/targets` response was rejected at runtime with "key is not
+    # in the generated contract", while the generated contract sitting next to it
+    # plainly declared the field. A hand-maintained mirror of a generated file is
+    # the same defect class as a hand-written API model: two sources of truth,
+    # and only one of them is checked.
+    #
+    # Emitting the keys removes the mirror entirely. The property name here is the
+    # SERIALIZATION alias, because that is what appears on the wire.
+    for name in emitted:
+        spec = defs[name]
+        properties = spec.get("properties")
+        if not isinstance(properties, dict) or not properties:
+            continue
+        keys: list[str] = []
+        for prop, value in properties.items():
+            if not isinstance(value, dict):
+                continue
+            keys.append(str(value.get("serializationAlias") or prop))
+        out.append("/**")
+        out.append(f" * Property names of {{@link {name}}} as they appear on the wire.")
+        out.append(" *")
+        out.append(" * Generated. Runtime validation reads this instead of keeping its own list,")
+        out.append(" * so the permitted keys cannot drift from the contract they enforce.")
+        out.append(" */")
+        out.append(f"export const {name.upper()}_FIELDS = [")
+        for key in keys:
+            out.append(f"  '{key}',")
+        out.append("] as const;")
+        out.append("")
+
     # The ScanStage values, in enum order, as a RUNTIME array.
     #
     # A generated union type alone cannot give a consumer the pipeline ORDER, so

@@ -11,25 +11,34 @@
  *
  * WHY THIS IS NOT A ONE-LINE DIVISION
  *
- * The debug image may be DOWNSAMPLED. `rendered_shape` and `source_shape` are
- * reported separately by the backend precisely so a client does not have to
- * assume 1:1. A naive `clientX / scale` that ignores `downsample_factor` maps a
- * click onto the wrong analytical pixel -- and the error scales with the
- * downsample, so it is invisible at 1:1 and wrong at 2:1.
+ * The debug image may be DOWNSAMPLED. `render.source_shape` and
+ * `render.rendered_shape` are reported separately by the backend precisely so a
+ * client does not have to assume 1:1. A naive `clientX / scale` that ignores
+ * `downsample_factor` maps a click onto the wrong analytical pixel -- and the
+ * error scales with the downsample, so it is invisible at 1:1 and wrong at 2:1.
  *
  * The image may also be letterboxed inside its container, so the container's
  * rect is not the image's rect. Zoom and pan move the image within the container,
  * so the offset is not constant.
  *
  * Hence an explicit transform, composed once and inverted once.
+ *
+ * WHY THE FIELDS ARE NAMED RowCol AND NOT width/height
+ *
+ * The backend reports shapes in NumPy order: `source_shape` is `[rows, cols]`,
+ * because that is `array.shape`. A field called `width` next to a backend value
+ * that is actually a row count is an axis swap waiting to happen, and it fails
+ * silently on a square raster -- which the fixture is. The names here state the
+ * order, so `renderedShapeCols[0] === renderedShapeRows[1]` cannot be true by
+ * accident.
  */
 
-/** What the backend reports about a rendered raster. */
+/** What the backend reports about a rendered raster. NumPy order: [rows, cols]. */
 export interface RasterGeometry {
-  /** The analytical raster: [width, height] in pixels. */
-  readonly sourceShape: readonly [number, number];
-  /** The server-rendered PNG: [width, height] in pixels. */
-  readonly renderedShape: readonly [number, number];
+  /** The analytical raster, as [rows, cols]. */
+  readonly sourceShape: readonly [rows: number, cols: number];
+  /** The server-rendered PNG, as [rows, cols]. */
+  readonly renderedShape: readonly [rows: number, cols: number];
   /** Server-side decimation. 1 means 1:1. */
   readonly downsampleFactor: number;
 }
@@ -66,20 +75,15 @@ export interface ImagePixel {
  * type exists to prevent.
  */
 export function analyticalScale(geometry: RasterGeometry): number {
-  const [sourceWidth] = geometry.sourceShape;
-  const [renderedWidth] = geometry.renderedShape;
-  if (!sourceWidth || !renderedWidth) return 1;
-  // Prefer the backend's own factor when it is coherent with the shapes, so a
-  // rounding difference in the PNG cannot silently rescale the mapping.
-  const fromShapes = sourceWidth / renderedWidth;
-  const declared = geometry.downsampleFactor;
-  if (declared > 0 && Math.abs(declared - fromShapes) > 1e-6) {
-    // Disagreement is worth surfacing rather than picking a winner: it means the
-    // render and the source do not correspond, and every pixel below would be
-    // suspect. The shapes win because they describe the actual pixels.
-    return fromShapes;
-  }
-  return fromShapes > 0 ? fromShapes : 1;
+  const sourceCols = geometry.sourceShape[1];
+  const renderedCols = geometry.renderedShape[1];
+  if (!sourceCols || !renderedCols) return 1;
+  // Derived from the COLUMNS, in both shapes, so the two are the same axis. A
+  // row-derived ratio would be identical on a square raster and wrong on any
+  // other, which is the worst possible failure shape.
+  const fromShapes = sourceCols / renderedCols;
+  if (!(fromShapes > 0) || !Number.isFinite(fromShapes)) return 1;
+  return fromShapes;
 }
 
 /**
@@ -96,8 +100,9 @@ export function screenToAnalytical(
   view: ViewTransform,
   geometry: RasterGeometry,
 ): AnalyticalPixel | null {
-  const [renderedWidth, renderedHeight] = geometry.renderedShape;
-  if (!renderedWidth || !renderedHeight || view.scale <= 0) return null;
+  const renderedRows = geometry.renderedShape[0];
+  const renderedCols = geometry.renderedShape[1];
+  if (!renderedRows || !renderedCols || view.scale <= 0) return null;
 
   // Screen -> rendered-image pixel.
   const local: ImagePixel = {
@@ -106,7 +111,7 @@ export function screenToAnalytical(
   };
 
   // Outside the displayed image: no analytical pixel exists for this point.
-  if (local.x < 0 || local.y < 0 || local.x > renderedWidth || local.y > renderedHeight) {
+  if (local.x < 0 || local.y < 0 || local.x > renderedCols || local.y > renderedRows) {
     return null;
   }
 
@@ -153,9 +158,10 @@ export function fitScale(
   containerWidth: number,
   containerHeight: number,
 ): number {
-  const [renderedWidth, renderedHeight] = geometry.renderedShape;
-  if (!renderedWidth || !renderedHeight) return 1;
-  return Math.min(containerWidth / renderedWidth, containerHeight / renderedHeight);
+  const renderedRows = geometry.renderedShape[0];
+  const renderedCols = geometry.renderedShape[1];
+  if (!renderedRows || !renderedCols) return 1;
+  return Math.min(containerWidth / renderedCols, containerHeight / renderedRows);
 }
 
 /**
@@ -175,9 +181,42 @@ export function isInsideRaster(
   pixel: AnalyticalPixel,
   geometry: RasterGeometry,
 ): boolean {
-  const [width, height] = geometry.sourceShape;
-  // Valid range is the range of sample CENTRES, matching the backend probe.
+  const [rows, cols] = geometry.sourceShape;
+  // Valid range is the range of sample CENTRES, matching the backend probe: a
+  // centroid is the centre of a sample, and the centre of sample N-1 is N-1. A
+  // value of H-0.5 is the boundary BETWEEN samples, not a sample.
   return (
-    pixel.row >= 0 && pixel.col >= 0 && pixel.row <= height - 1 && pixel.col <= width - 1
+    pixel.row >= 0 && pixel.col >= 0 && pixel.row <= rows - 1 && pixel.col <= cols - 1
   );
+}
+
+/**
+ * Read the geometry out of the raster metadata payload.
+ *
+ * Lives here rather than in the component because the field names are the whole
+ * risk: `source_shape` is nested under `render`, is in NumPy order, and an
+ * earlier version of this read a top-level `shape` that does not exist -- so the
+ * geometry silently stayed null and the workspace had no click-to-probe at all,
+ * with no error anywhere.
+ */
+export function readGeometry(payload: unknown): RasterGeometry | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const render = (payload as { render?: unknown }).render;
+  if (typeof render !== 'object' || render === null) return null;
+  const source = (render as { source_shape?: unknown }).source_shape;
+  const rendered = (render as { rendered_shape?: unknown }).rendered_shape;
+  if (!Array.isArray(source) || !Array.isArray(rendered)) return null;
+  const rows = Number(source[0]);
+  const cols = Number(source[1]);
+  const renderedRows = Number(rendered[0]);
+  const renderedCols = Number(rendered[1]);
+  if (![rows, cols, renderedRows, renderedCols].every((n) => Number.isFinite(n) && n > 0)) {
+    return null;
+  }
+  const factor = Number((render as { downsample_factor?: unknown }).downsample_factor);
+  return {
+    sourceShape: [rows, cols],
+    renderedShape: [renderedRows, renderedCols],
+    downsampleFactor: Number.isFinite(factor) && factor > 0 ? factor : 1,
+  };
 }

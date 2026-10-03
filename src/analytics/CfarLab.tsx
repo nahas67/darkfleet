@@ -107,7 +107,7 @@ export function CfarLab({ scanId }: { scanId: string }) {
   if (!aoi) {
     return (
       <aside
-        className="df-scroll min-w-0 flex-1 overflow-y-auto border-r border-structural/40"
+        className="df-scroll h-full min-w-0 flex-1 overflow-y-auto border-r border-structural/40"
         data-df-cfar-lab
       >
         <header className="df-panel-head">
@@ -120,7 +120,7 @@ export function CfarLab({ scanId }: { scanId: string }) {
 
   return (
     <aside
-      className="df-scroll min-w-0 flex-1 overflow-y-auto border-r border-structural/40"
+      className="df-scroll h-full min-w-0 flex-1 overflow-y-auto border-r border-structural/40"
       data-df-cfar-lab
       aria-label="CFAR parameters"
     >

@@ -113,7 +113,16 @@ export function DarkFleetCommandApp() {
 
         <aside
           ref={workspaceRef}
-          className="relative z-30 flex w-80 shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm xl:w-96"
+          // ANALYTICS needs room for a layer strip, a raster, a table and two
+          // side panels. At the default 320px the raster collapsed to zero height
+          // and the panels overlapped, so this workspace gets the width its
+          // content requires. Every other workspace keeps the standard rail-width
+          // panel.
+          className={
+            activeWorkspace === 'ANALYTICS'
+              ? 'relative z-30 flex w-[min(68rem,72vw)] shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm'
+              : 'relative z-30 flex w-80 shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm xl:w-96'
+          }
           aria-label="Operation workspace"
           data-df-workspace-panel
         >
