@@ -161,7 +161,31 @@ def test_scenes_requires_a_bbox_and_never_falls_back_to_a_default_extent(
     assert response.json()["error"] == "INVALID_REQUEST"
 
 
-def test_shipped_health_does_not_advertise_a_demo_mode(shipped: TestClient) -> None:
+@pytest.fixture
+def providers_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every provider call fail, without touching the network.
+
+    ``/api/providers/health`` performs a live provider probe by design, so a test
+    that calls it against real settings reaches the public internet. That is the
+    second genuine escape found by the socket blocker in ``backend/conftest.py``.
+
+    These assertions are about the RESPONSE SHAPE -- that health never advertises
+    a demo mode, and that the dependency surface still exists -- and none of that
+    depends on a provider being up. Marking them ``live`` would have tested the
+    provider instead of the contract, and would have made ordinary green CI
+    require internet.
+    """
+
+    def explode(*args: Any, **kwargs: Any) -> Any:
+        raise httpx.ConnectError("provider unreachable (test double)")
+
+    monkeypatch.setattr(httpx, "get", explode)
+    monkeypatch.setattr(httpx, "post", explode)
+
+
+def test_shipped_health_does_not_advertise_a_demo_mode(
+    shipped: TestClient, providers_unreachable: None
+) -> None:
     response = shipped.get("/api/providers/health")
     assert response.status_code == 200
     body = response.json()
@@ -210,7 +234,9 @@ def test_liveness_touches_no_provider(shipped: TestClient, monkeypatch: pytest.M
     assert response.json()["status"] == "ok"
 
 
-def test_provider_readiness_is_still_available_separately(shipped: TestClient) -> None:
+def test_provider_readiness_is_still_available_separately(
+    shipped: TestClient, providers_unreachable: None
+) -> None:
     """The dependency-status surface is not lost, only separated from liveness."""
     response = shipped.get("/api/providers/health")
     assert response.status_code == 200

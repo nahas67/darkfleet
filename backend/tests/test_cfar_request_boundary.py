@@ -183,7 +183,7 @@ def test_defaults_are_inside_the_declared_bounds() -> None:
     ],
 )
 def test_a_partial_config_still_completes_a_scan(
-    client: TestClient, config: dict[str, Any]
+    client: TestClient, config: dict[str, Any], net: Any
 ) -> None:
     """The regression that mattered: these used to raise ``KeyError`` mid-scan.
 
@@ -206,7 +206,7 @@ def test_a_partial_config_still_completes_a_scan(
     assert state.get("stage") == "COMPLETE", state.get("error")
 
 
-def test_a_camel_case_override_reaches_the_detector(client: TestClient) -> None:
+def test_a_camel_case_override_reaches_the_detector(client: TestClient, net: Any) -> None:
     """The interface's payload must change the detector, not just be accepted."""
     import time
 

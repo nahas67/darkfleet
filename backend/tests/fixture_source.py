@@ -150,6 +150,18 @@ def install(monkeypatch: Any, *, mask_fixture: str | None = "mask/worldcover_sg_
     """Wire every injection point so `run_scan` runs end to end offline.
 
     Production code paths remain in charge: only the network is replaced.
+
+    The route's own pre-flight coverage check (``routes._search_provider``) is
+    deliberately NOT patched here. Several tests exercise the real failure paths
+    through it -- an unauthenticated provider must surface as 503, an uncovered
+    AOI must be refused rather than substituted -- and replacing it would make
+    those tests assert against a stub instead of the behaviour they exist to pin.
+
+    That leaves one genuine escape, which is now handled at the socket layer by
+    ``backend/conftest.py``: a test that posts a scan without an offline HTTP
+    double reaches planetarycomputer and is failed loudly, with the host and the
+    calling frame named. Previously that escape failed only when DNS happened to
+    be unavailable, which is why it read as flakiness.
     """
     import darkfleet.pipeline as pipeline_mod
 
