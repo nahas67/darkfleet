@@ -55,18 +55,32 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
   const [tracks, setTracks] = useState<Loadable<TracksOut>>({ state: 'idle' });
   const [patterns, setPatterns] = useState<Loadable<PatternsOut>>({ state: 'idle' });
   const [detectors, setDetectors] = useState<Loadable<DetectorsOut>>({ state: 'idle' });
+  const [planArea, setPlanArea] = useState('');
+  const [planBusy, setPlanBusy] = useState(false);
 
-  // Revisit is area-scoped: it plans a real window over a real place, so it is
+  // Revisit is area-scoped. It plans a real window over a real place, so it is
   // requested only once there is a place to request it for.
+  //
+  // The area comes from this panel's own field rather than only from the store's
+  // AOI. Coupling planning to the scan AOI meant an analyst could not plan
+  // acquisitions without first running a scan, which is a strange precondition
+  // for asking "when will this water be imaged?".
+  const requestPlan = useCallback(async () => {
+    const parsed = parseBBox(planArea);
+    if (!parsed) {
+      // An unparseable area is stated, not silently ignored.
+      setPlan({ state: 'idle' });
+      return;
+    }
+    setPlanBusy(true);
+    setPlan(await loadRevisit(parsed));
+    setPlanBusy(false);
+  }, [planArea]);
+
+  // Prefill from the AOI the operator already has, without forcing a scan.
   useEffect(() => {
-    let cancelled = false;
-    void loadRevisit(bbox).then((result) => {
-      if (!cancelled) setPlan(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [bbox]);
+    if (!planArea && bbox) setPlanArea(bbox.map((v) => v.toFixed(4)).join(', '));
+  }, [bbox, planArea]);
 
   const loadHistory = useCallback(async () => {
     setTracks({ state: 'loading' });
@@ -81,7 +95,7 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
     setDetectors(await loadDetectors());
   }, []);
 
-  // Fetch on demand rather than on mount: an analyst opening ANALYTICS to read
+  // Fetch on demand rather than on mount: an analyst opening ADVANCED to read
   // detector provenance should not pay for a 50-scan multipass rebuild.
   useEffect(() => {
     if (tab === 'MULTIPASS' && tracks.state === 'idle') void loadHistory();
@@ -91,24 +105,52 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
 
   return (
     <div className="flex h-full flex-col" data-df-advanced-workspace>
-      <nav className="df-tabs" role="tablist">
+      {/* Matches the target-intel tab strip. An earlier revision used
+          `.df-tabs`/`.df-tab`, which do not exist in the design system, so the
+          four labels rendered as one unseparated run of text
+          ("RevisitMultipassPatternsDetector"). Reusing the real pattern also
+          brings the arrow-key navigation the target panel already has. */}
+      <div
+        className="flex shrink-0 items-center gap-1 px-2 py-1.5"
+        role="tablist"
+        aria-label="Advanced analysis"
+      >
         {TABS.map(([id, label]) => (
           <button
             key={id}
             type="button"
             role="tab"
+            id={`advanced-tab-${id}`}
             aria-selected={tab === id}
-            className="df-tab"
+            aria-controls={`advanced-panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            className="df-btn"
             data-df-advanced-tab={id}
             onClick={() => setTab(id)}
+            onKeyDown={(event) => {
+              const index = TABS.findIndex(([tid]) => tid === tab);
+              if (event.key === 'ArrowRight') setTab(TABS[(index + 1) % TABS.length][0]);
+              if (event.key === 'ArrowLeft') {
+                setTab(TABS[(index - 1 + TABS.length) % TABS.length][0]);
+              }
+            }}
           >
             {label}
           </button>
         ))}
-      </nav>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {tab === 'REVISIT' ? <RevisitPanel state={plan} /> : null}
+        {tab === 'REVISIT' ? (
+          <RevisitPanel
+            state={plan}
+            area={planArea}
+            busy={planBusy}
+            onArea={setPlanArea}
+            onPlan={() => void requestPlan()}
+            invalid={planArea.trim().length > 0 && parseBBox(planArea) === null}
+          />
+        ) : null}
         {tab === 'MULTIPASS' ? <MultipassPanel state={tracks} /> : null}
         {tab === 'PATTERNS' ? <PatternsPanel state={patterns} /> : null}
         {tab === 'DETECTOR' ? <DetectorPanel state={detectors} /> : null}
@@ -117,27 +159,98 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
   );
 }
 
+/**
+ * Parse `min_lon, min_lat, max_lon, max_lat`.
+ *
+ * Returns null rather than a partially-correct value: a bbox with the wrong
+ * number of parts, a non-finite part, or min greater than max is not an area,
+ * and planning over a misread area would report coverage for the wrong water.
+ */
+function parseBBox(text: string): number[] | null {
+  const parts = text
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length !== 4) return null;
+  const nums = parts.map(Number);
+  if (nums.some((n) => !Number.isFinite(n))) return null;
+  const [minLon, minLat, maxLon, maxLat] = nums;
+  if (minLon! >= maxLon! || minLat! >= maxLat!) return null;
+  return nums;
+}
+
 /* ------------------------------------------------------------------ revisit */
 
-function RevisitPanel({ state }: { state: Loadable<RevisitPlanOut> }) {
-  if (state.state === 'idle') {
-    return <p className="df-note">Set an area of interest to plan acquisitions.</p>;
-  }
-  if (state.state === 'loading') return <p className="df-note">Reading the catalogue…</p>;
-  if (state.state === 'failed') {
-    return (
-      <Failure
-        detail={state.detail}
-        note="The catalogue could not be reached. No plan is shown, because a simulated one would be indistinguishable from a real answer."
-      />
-    );
-  }
+function RevisitPanel({
+  state,
+  area,
+  busy,
+  invalid,
+  onArea,
+  onPlan,
+}: {
+  state: Loadable<RevisitPlanOut>;
+  area: string;
+  busy: boolean;
+  invalid: boolean;
+  onArea: (value: string) => void;
+  onPlan: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <form
+        className="space-y-1"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onPlan();
+        }}
+      >
+        <label className="df-label block text-[10px]" htmlFor="df-revisit-bbox">
+          Area to plan (min_lon, min_lat, max_lon, max_lat)
+        </label>
+        <div className="flex gap-1">
+          <input
+            id="df-revisit-bbox"
+            className="df-input flex-1"
+            value={area}
+            placeholder="103.72, 1.10, 104.05, 1.40"
+            onChange={(e) => onArea(e.target.value)}
+            aria-invalid={invalid}
+          />
+          <button type="submit" className="df-btn" disabled={busy || invalid} data-df-revisit-plan>
+            {busy ? 'Planning…' : 'Plan'}
+          </button>
+        </div>
+        {invalid ? (
+          <p className="df-note" style={{ color: 'var(--df-amber)' }} data-df-revisit-invalid>
+            Four numbers, min below max. Planning over a misread area would report coverage for
+            the wrong water.
+          </p>
+        ) : null}
+      </form>
 
-  const { data } = state;
+      {state.state === 'idle' ? (
+        <p className="df-note">
+          Enter an area to plan acquisitions from the catalogue.
+        </p>
+      ) : null}
+      {state.state === 'loading' ? <p className="df-note">Reading the catalogue…</p> : null}
+      {state.state === 'failed' ? (
+        <Failure
+          detail={state.detail}
+          note="The catalogue could not be reached. No plan is shown, because a simulated one would be indistinguishable from a real answer."
+        />
+      ) : null}
+      {state.state === 'ready' ? <RevisitResult data={state.data} /> : null}
+    </div>
+  );
+}
+
+function RevisitResult({ data }: { data: RevisitPlanOut }) {
   const stats = data.statistics;
 
   return (
-    <div className="space-y-3">
+    <>
       <Section title="Measured revisit">
         <Row label="Acquisitions found" value={String(data.acquisition_count)} />
         <Row label="Platforms" value={String(stats.platform_count ?? NOT_ESTABLISHED)} />
@@ -185,7 +298,7 @@ function RevisitPanel({ state }: { state: Loadable<RevisitPlanOut> }) {
 
       <GapList gaps={data.gaps} />
       <Limitations items={data.limitations} source={`${data.provider} · ${data.collection}`} />
-    </div>
+    </>
   );
 }
 
@@ -373,23 +486,30 @@ function DetectorPanel({ state }: { state: Loadable<DetectorsOut> }) {
   const { data } = state;
   return (
     <div className="space-y-3">
-      <Section title="Active detector">
-        <Row label="Resolved" value={data.default} />
-      </Section>
-
-      {data.detectors?.map((card) => (
-        <article
-          key={card.name}
-          className="border-l-2 pl-2"
-          style={{
-            borderColor:
-              card.name === data.default ? 'var(--df-cyan)' : 'var(--df-structural-bright)',
-          }}
-        >
-          <header className="flex items-baseline justify-between gap-2">
-            <span className="df-mono text-[10px] text-ink">{card.name}</span>
-            <span className="df-num text-[10px] text-ink-2">{card.kind}</span>
-          </header>
+      {/* One card per registered detector, with the resolved one marked in the
+          header. A separate "Resolved" row above the list printed the same name
+          twice and read as a duplicate rather than as a label. */}
+      {data.detectors?.map((card) => {
+        const active = card.name === data.default;
+        return (
+          <article
+            key={card.name}
+            className="border-l-2 pl-2"
+            style={{ borderColor: active ? 'var(--df-cyan)' : 'var(--df-structural-bright)' }}
+            data-df-detector={card.name}
+            data-df-detector-active={active}
+          >
+            <header className="flex items-baseline justify-between gap-2">
+              <span className="df-mono text-[10px] text-ink">
+                {card.name}
+                {active ? (
+                  <span className="ml-1" style={{ color: 'var(--df-cyan)' }}>
+                    · active
+                  </span>
+                ) : null}
+              </span>
+              <span className="df-num text-[10px] text-ink-2">{card.kind}</span>
+            </header>
           <Row label="Training domain" value={card.training_domain || NOT_ESTABLISHED} />
           <Row label="Input product" value={card.input_product || NOT_ESTABLISHED} />
           <Row label="Validation data" value={card.validation_data || NOT_ESTABLISHED} />
@@ -407,8 +527,9 @@ function DetectorPanel({ state }: { state: Loadable<DetectorsOut> }) {
           {card.limitations ? (
             <p className="df-note mt-1 text-[10px]">{card.limitations}</p>
           ) : null}
-        </article>
-      ))}
+          </article>
+        );
+      })}
 
       <Limitations items={[data.note]} source="detector registry" />
     </div>
