@@ -24,14 +24,19 @@ import type { ProbeRequest, ProbeResponse } from './contract';
  * than the geolocation uncertainty this product reports.
  *
  * The response is the ONLY source of the coordinate. Nothing here derives one.
+ *
+ * `signal` lets a superseded probe be cancelled. Cancellation is not merely
+ * ignored: a stale response must not be able to overwrite a newer one, which is
+ * what `usePixelProbe`'s generation counter guarantees.
  */
 export async function probePixel(
   scanId: string,
   row: number,
   col: number,
+  signal?: AbortSignal,
 ): Promise<ProbeResponse> {
   const body: ProbeRequest = { row, col };
-  return api.post<ProbeResponse>(`/api/scans/${scanId}/debug/probe`, body);
+  return api.post<ProbeResponse>(`/api/scans/${scanId}/debug/probe`, body, signal);
 }
 
 /** Why a probe was refused, in the API's own words. */

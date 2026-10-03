@@ -142,6 +142,15 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, payload: unknown) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(payload) }),
+  /**
+   * `signal` is threaded through so a superseded request can be cancelled.
+   *
+   * Cancellation matters for the coordinate probe specifically: click A then
+   * click B, and if A's response lands second it would overwrite B's coordinate
+   * on screen next to B's marker -- a confident statement about the wrong water.
+   * Aborting is not sufficient on its own (see `usePixelProbe`'s generation
+   * counter), and ignoring is not sufficient on its own either.
+   */
+  post: <T>(path: string, payload: unknown, signal?: AbortSignal) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(payload), signal }),
 };

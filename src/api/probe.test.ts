@@ -111,11 +111,17 @@ describe('refusals are surfaced, not smoothed over', () => {
 });
 
 describe('the client performs no coordinate arithmetic', () => {
-  it('exposes only the request, never a derived coordinate', () => {
-    // The module's whole public surface is the request function and the refusal
-    // reader. Adding a helper that "helpfully" precomputes a coordinate would be
-    // the regression this assertion exists to catch.
+  it('exports only the request and the refusal reader', async () => {
+    // The export surface is the real invariant, not the arity: a TypeScript
+    // `?` parameter compiles to a plain parameter, so `Function.length` counts
+    // optional ones and would not have caught an added argument anyway. Adding a
+    // helper that "helpfully" precomputes a coordinate is what this catches.
+    const module = await import('./probe');
+    expect(Object.keys(module).sort()).toEqual(['probePixel', 'probeRefusal']);
+  });
+
+  it('takes a row and a column, and returns the backend payload', () => {
     expect(typeof probePixel).toBe('function');
-    expect(probePixel.length).toBe(3); // scanId, row, col
+    expect(typeof probeRefusal).toBe('function');
   });
 });
