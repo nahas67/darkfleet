@@ -11,11 +11,18 @@ document, including the checkpoint reports written earlier in this project.
 | Frontend `vitest` | 47 | **63** |
 | `ruff` | clean | clean |
 | `mypy` | clean, 53 files | clean, **55 files** |
-| OpenAPI → TS contract | current, 374 lines | current, **528 lines** |
+| OpenAPI → TS contract | current, 374 lines | current, **1377 lines** |
 | `tsc --noEmit` | clean | clean |
 | Production build | clean | clean |
 | Production modules | 29 reachable / 0 disconnected | **33 reachable / 0 disconnected** |
-| Backend routes reachable from the UI | **not measured** | **15 of 22** |
+| Backend routes: `CALLER_REACHABLE` | **not measured** | **17 of 23** |
+| Backend routes: `PRODUCT_REACHABLE` | **did not exist** | **17 of 23** |
+
+The contract more than doubled, and none of the growth is new API surface: it is
+`<SCHEMA>_FIELDS` arrays emitted for every object schema, so `validate.ts` reads
+the generated key set instead of keeping a hand-maintained copy of it. That copy
+had drifted and was rejecting every real `/targets` response while the contract it
+claimed to enforce sat three hundred lines above it declaring the field.
 
 ## 2. Route surface (22 routes, measured)
 
