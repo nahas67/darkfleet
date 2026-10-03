@@ -1,49 +1,58 @@
-# DF-X0 — RE-AUDIT: authoritative state at `88c28bd`
+# DF-X0 — RE-AUDIT: authoritative state at `f88a054`
 
 Measured, not inherited. Source, runtime and browser evidence override any
 document, including the checkpoint reports written earlier in this project.
 
 ## 1. Gate baseline (measured)
 
-| Gate | Before this checkpoint | Now |
+| Gate | Session start | Now |
 |---|---|---|
-| Backend `pytest` | 440 | **457** |
-| Frontend `vitest` | 47 | **55** |
+| Backend `pytest` | 440 | **472** |
+| Frontend `vitest` | 47 | **63** |
 | `ruff` | clean | clean |
-| `mypy` | clean, 53 files | clean, **54 files** |
-| OpenAPI → TS contract | current, 374 lines | current, **392 lines** |
+| `mypy` | clean, 53 files | clean, **55 files** |
+| OpenAPI → TS contract | current, 374 lines | current, **528 lines** |
 | `tsc --noEmit` | clean | clean |
 | Production build | clean | clean |
-| Production modules | 29 reachable / 0 disconnected | **31 reachable / 0 disconnected** |
+| Production modules | 29 reachable / 0 disconnected | **33 reachable / 0 disconnected** |
+| Backend routes reachable from the UI | **not measured** | **15 of 22** |
 
-## 2. Route surface (measured, 21 routes)
+## 2. Route surface (22 routes, measured)
+
+Reachable from the product:
 
 ```
-/scans                                    POST   start a real scan
-/scans/{id}                               GET    job state + stage history
-/scans/{id}/events                        GET    SSE stage stream
-/scans/{id}/targets                       GET    detections + AIS-only
-/scans/{id}/raster                        GET    raster layer index
-/scans/{id}/raster/{layer}                GET    rectangle + CRS + transform + report
-/scans/{id}/raster/{layer}/image          GET    server-rendered PNG
-/scans/{id}/ais                           GET    observations in the scan window
-/scans/{id}/export/{fmt}                  GET    json | geojson | kml | png | pdf
-/scenes                                   GET    Sentinel-1 catalogue (requires bbox)
-/targets/{id}                             GET    evidence slice
-/targets/{id}/ais-observations            GET    observations for the associated MMSI
-/targets/{id}/summary                     GET    evidence + validated narrative
-/vessels/{mmsi}/track                     GET    observed track
-/ais/coverage                             GET    coverage truth
-/evidence/{id}                            GET    full evidence document
-/providers/health                         GET    live probes
-/revisit                                  GET    acquisition planning
-/tracks                                   GET    multi-pass hypotheses
-/patterns                                 GET    temporal patterns
-/detectors                                GET    detector interface
-/debug/{id}/{layer}                       GET    pipeline inspection
+POST /scans                                start a real scan
+GET  /scans/{id}/events                    SSE stage stream
+GET  /scans/{id}/targets                   detections + AIS-only
+GET  /scans/{id}/raster/{layer}            rectangle + CRS + transform + report
+GET  /scans/{id}/raster/{layer}/image      server-rendered PNG
+GET  /scans/{id}/ais                       observations in the scan window
+GET  /scans/{id}/export/{fmt}              json | geojson | kml | png | pdf
+GET  /scenes                               Sentinel-1 catalogue (requires bbox)
+GET  /targets/{id}                         evidence slice
+GET  /vessels/{mmsi}/track                 observed track
+GET  /providers/health                     live probes
+GET  /revisit                              acquisition planning
+GET  /tracks                               multi-pass hypotheses
+GET  /patterns                             temporal patterns
+GET  /detectors                            detector registry
 ```
 
-## 3. The finding that mattered
+Implemented, verified, and **unreachable** — the defect class this audit exists
+to find (`backend/tools/route_reachability.py`):
+
+```
+GET  /scans/{id}/raster        layer index; the per-layer endpoint is used
+GET  /scans/{id}               scan state; the SSE stream covers it in practice
+GET  /evidence/{id}            full evidence document; /targets/{id} is used
+GET  /debug/{id}/{layer}       pipeline inspection -- §15/§16 need this
+GET  /targets/{id}/summary     validated narrative -- §37 needs this
+GET  /ais/coverage             coverage truth; reached via /scans/{id}/ais
+GET  /targets/{id}/ais-observations   reached via /vessels/{mmsi}/track
+```
+
+## 3. The two findings that mattered
 
 **`SAR_UNMATCHED` existed in the backend. "Ghost Vessel" appeared ZERO times in
 the frontend.**
@@ -57,15 +66,20 @@ src/**.tsx                               "ghost"          0 matches
 
 The product's central concept — a radar contact AIS does not confidently explain
 — had no reachable surface. `SAR_UNMATCHED` is a correlation outcome; an operator
-must already know the domain to read it. The mission statement names Ghost Vessels
-as the centrepiece, and it was not built.
+must already know the domain to read it.
 
-Second finding, in the same area: the correlation recorded **that** nothing
-cleared the threshold but kept no record of **why**. "No association was accepted"
-was unfalsifiable — a reader could not distinguish an empty search from a near
-miss.
+Second: the correlation recorded **that** nothing cleared the threshold but kept
+no record of **why**. "No association was accepted" was unfalsifiable — a reader
+could not distinguish an empty search from a near miss.
 
-## 4. Corrective work landed in this checkpoint
+Third, found later: **nine routes had no frontend caller at all**, including
+revisit planning, multi-pass hypotheses, longitudinal patterns and detector
+provenance. Four of the nine had no surface because they answered with a bare
+`dict[str, Any]` — no `response_model` means no OpenAPI schema, which means no
+generated TypeScript, which means the only way to render them would have been a
+hand-written mirror of the payload.
+
+## 4. Corrective work landed
 
 | Fix | Detail |
 |---|---|
@@ -74,18 +88,23 @@ miss.
 | Evidence blocks | OBSERVED / HYPOTHESES / UNKNOWNS as structure, rendering even when empty |
 | Ghost Vessel panel | `src/intelligence/GhostVesselPanel.tsx`, wired as a GHOST tab |
 | Semantics gates | 17 backend + 8 frontend tests over the emitted and rendered strings |
-| Contract | `RejectedCandidate` emitted; three new fields on `AisAssociation` |
+| Response models | `backend/darkfleet/api/advanced.py` — revisit / tracks / patterns / detectors now in the contract |
+| ADVANCED workspace | 4 tabs, 4-state delivery (idle / loading / ready / failed) |
+| Route reachability gate | `backend/tools/route_reachability.py` + 15 self-tests |
+| `/revisit` validation | stopped bypassing `response_model` by hand-building a `Response` |
 | §51 compliance | removed a document that named another product |
 
-A design defect was found and fixed while writing this: `assess()` accepted
-`wake_detected` as an argument while the target row already carried `wake`,
-letting a caller assert a wake the detector never flagged. The record is now
-authoritative.
+Two design defects found while writing it: `assess()` accepted `wake_detected`
+as an argument while the target row already carried `wake`, letting a caller
+assert a wake the detector never flagged; and the tab strip used `.df-tabs` /
+`.df-tab`, which do not exist in the design system, so four labels rendered as
+one unseparated run of text. Neither was visible to the type checker. The second
+was only caught by looking at a screenshot.
 
 ## 5. Layer truthfulness pass
 
 Found by auditing the layer console: **toggles that changed state and drew
-nothing** — the defect this brief calls a correctness defect.
+nothing** — a correctness defect by this brief's own definition.
 
 | Layer | Before | Now |
 |---|---|---|
@@ -96,7 +115,43 @@ nothing** — the defect this brief calls a correctness defect.
 | LAND MASK | enabled, no renderer | disabled **with the reason** |
 | CFAR THRESHOLD | enabled, no renderer | disabled **with the reason** |
 
-## 6. Regression externally introduced
+## 6. Browser-verified behaviour (real Chrome, live fixture backend)
+
+The ADVANCED workspace was driven through every tab against the running API.
+
+```
+DETECTOR   weights digest -> "none -- deterministic"
+           The null digest renders as the fact it is. Displaying it as
+           "missing" would invent a provenance gap on a detector that has no
+           learned weights by design.
+
+MULTIPASS  "No track hypotheses from 15 observation(s) across 5 stored scan(s)."
+PATTERNS   "No patterns from 15 observation(s) across 5 stored scan(s)."
+           The counts are what separate "nothing to link" from "nothing
+           examined".
+
+REVISIT    planned against the real planetary-computer catalogue; 1 acquisition
+           found (SENTINEL-1A), and therefore:
+
+             MEDIAN REVISIT    not established
+             SHORTEST GAP      not established
+             LONGEST GAP       not established
+             LIMITATIONS       "A single acquisition in the window: no revisit
+                               interval can be measured from one pass, and none
+                               is assumed."
+
+           One acquisition does not produce a revisit interval. The panel says
+           "not established" rather than 0 days, because 0 would assert the water
+           is imaged continuously.
+
+INVALID    an inverted bbox is refused with the button disabled and the reason
+           stated, not planned against.
+```
+
+The top strip reading `SAR UNAVAILABLE` / `AIS NOT_CONFIGURED` is the honest
+state of a local install with no provider credentials, not a rendering fault.
+
+## 7. Regression externally introduced
 
 `52c4c36` (not authored in this session) deleted `start.bat`, the one-click
 Windows launcher that brought up the API + web stack and opened the app. There is
@@ -104,11 +159,10 @@ currently **no equivalent** — no `.bat`, `.cmd`, `.ps1` or `.sh` launcher exis
 
 This is a real loss against §46 ("local execution must remain first-class") and
 §60.1 ("an operator can start the local system"). The README documents the manual
-two-step (`uv run … python -m darkfleet`, then `npm run dev`), which works, but a
-double-clickable launcher is the difference between a local desktop product and a
-developer setup. **Flagged, not yet restored** — see Remaining Blockers.
+two-step, which works, but a double-clickable launcher is the difference between a
+local desktop product and a developer setup. **Flagged, not yet restored.**
 
-## 7. Verified-correct work, preserved
+## 8. Verified-correct work, preserved
 
 | Property | Evidence |
 |---|---|
@@ -121,7 +175,7 @@ developer setup. **Flagged, not yet restored** — see Remaining Blockers.
 | Backend authority | FastAPI decides detections, classification, correlation, Ghost Vessel status |
 | No demo mode | `RuntimeMode` is a one-member enum by design |
 
-## 8. Remaining, honestly
+## 9. Remaining, honestly
 
 Not built. Each would be its own checkpoint.
 
@@ -135,35 +189,36 @@ Not built. Each would be its own checkpoint.
 | Maritime context layers | absent (EEZ, coastline, ports, bathymetry) |
 | Map source ladder | OSM only, no fallback |
 | Photorealistic 3D | absent |
-| Advanced backend surfaced in UI | wake, polarization, multipass, revisit exist in the backend but have no operator surface |
+| Wake / polarisation surfaces | in the backend, no operator surface |
+| AI analyst narrative (`/targets/{id}/summary`) | backend validated path exists, no surface |
+| SAR / CFAR lab (`/debug/{id}/{layer}`) | backend exists, no surface |
 | MCP server | absent |
-| AI analyst | absent (correctly — the backend has a validated narrative path to build on) |
 | Command palette | absent |
+| Camera system | partial (framing + view modes; no FOLLOW_VESSEL / ORBIT_TARGET) |
 | Performance budgets | not measured |
-| Security audit (§48) | not performed in this session |
-| 1280×720 / 1024×768 render | not verified (only 1920 and 1440) |
+| Security audit (§48) | not performed |
+| 1280×720 / 1024×768 render | not verified (1920 and 1440 only) |
 | Local launcher | removed externally, not restored |
 
-## 9. Frozen execution order
+## 10. Frozen execution order
 
-The plan in `docs/MASTER_EXECUTION_PLAN.md` is superseded by this measured state.
-Next, in dependency order:
+`docs/MASTER_EXECUTION_PLAN.md` is superseded by this measured state. Next, in
+dependency order:
 
-1. **DF-X1** spatial platform refactor — split the globe into viewer / camera /
+1. **DF-X6** SAR workspace + CFAR lab over `/debug/{id}/{layer}` — backend exists
+2. **DF-X7b** wake / polarisation surfaces, and the validated narrative over
+   `/targets/{id}/summary`
+3. **DF-X1** spatial platform refactor — split the globe into viewer / camera /
    map-source / layer / selection / contact / temporal controllers
-2. **DF-X2** command shell rebuild around the globe, migrating every capability
-3. **DF-X3** map source ladder + camera system
-4. **DF-X4** professional AIS rendering — heading-aware glyphs, screen-space
+4. **DF-X3** map source ladder + camera system (FOLLOW_VESSEL, ORBIT_TARGET)
+5. **DF-X4** professional AIS rendering — heading-aware glyphs, screen-space
    orientation, label arbitration
-5. **DF-X5** Ghost Vessel workspace deepened — evidence, wake, polarization,
-   rejected-candidate walkthrough
-6. **DF-X6** SAR workspace + CFAR lab
-7. **DF-X7** advanced intelligence surfaced — wake, polarization, multipass, revisit
-8. **DF-X8** maritime context
-9. **DF-X9** annotations + measurement
-10. **DF-X10** missions → **DF-X11** watchlists + alerts → **DF-X12** saved views
-11. **DF-X13** reporting → **DF-X14** MCP → **DF-X15** AI analyst
-12. **DF-X16** performance → **DF-X17** security + local packaging
+6. **DF-X8** maritime context · **DF-X9** annotations + measurement
+7. **DF-X10** missions → **DF-X11** watchlists + alerts → **DF-X12** saved views
+8. **DF-X13** reporting → **DF-X14** MCP → **DF-X15** AI analyst
+9. **DF-X16** performance → **DF-X17** security + local packaging
 
-GFST (Ghost Vessel) has been executed early and out of order, deliberately: it is
-the product's centrepiece and it was entirely absent.
+GFST (Ghost Vessel) was executed early and out of order, deliberately: it is the
+product's centrepiece and it was entirely absent. DF-X7a likewise preceded the
+platform refactor because four verified capabilities were unreachable, and an
+unreachable capability is a worse defect than an unrefactored module.
