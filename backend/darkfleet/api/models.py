@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Annotated, Any, Final, Literal
 
 import numpy as np
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, AliasChoices, BaseModel, ConfigDict, Field
 
 from darkfleet.jobs.models import ScanStage
 
@@ -131,6 +131,102 @@ def jsonable(value: Any) -> Any:
 # --------------------------------------------------------------- requests
 
 
+class CfarConfig(BaseModel):
+    """CA-CFAR / speckle overrides for ``POST /api/scans``.
+
+    This was ``dict[str, Any]``, which is how two separate failures survived a
+    green test suite:
+
+    1. **Wrong casing was silently ignored.** The interface emits camelCase
+       (``trainingCells``); the pipeline subscripts snake_case
+       (``training_cells``). Nothing rejected the mismatch, so the overrides were
+       dropped and the detector ran on defaults while the interface reported a
+       pending recompute.
+    2. **Any partial payload destroyed the run.** The pipeline replaced its
+       defaults rather than merging, so omitting a key raised ``KeyError``
+       mid-scan.
+
+    Declaring the fields fixes both. CamelCase is accepted as an explicit
+    validation alias, so the existing interface keeps working *and* now genuinely
+    reaches the detector; ``extra="forbid"`` turns a typo or a stale key name
+    into a loud 422 instead of a silent no-op; and the bounds below are the ones
+    the interface advertises, so "the controls match the backend" becomes a
+    claim a test can check instead of a claim nobody checks.
+
+    Every field is optional. Unset keys keep the pipeline default, which
+    :func:`darkfleet.pipeline.merge_cfar_config` now actually implements.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    training_cells: int | None = Field(
+        default=None,
+        ge=8,
+        le=32,
+        validation_alias=AliasChoices("training_cells", "trainingCells"),
+        description="N_train: reference ring width in cells.",
+    )
+    guard_cells: int | None = Field(
+        default=None,
+        ge=2,
+        le=8,
+        validation_alias=AliasChoices("guard_cells", "guardCells"),
+        description="N_guard: inner guard ring width in cells.",
+    )
+    threshold_factor: float | None = Field(
+        default=None,
+        ge=2.0,
+        le=5.5,
+        validation_alias=AliasChoices("threshold_factor", "thresholdFactor"),
+        description="Multiplier on the background estimate (P_fa control).",
+    )
+    min_pixels: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        validation_alias=AliasChoices("min_pixels", "minPixels"),
+        description="Smallest connected component kept as a candidate target, in pixels.",
+    )
+    max_pixels: int | None = Field(
+        default=None,
+        ge=100,
+        le=5000,
+        validation_alias=AliasChoices("max_pixels", "maxPixels"),
+        description="Largest component kept; anything larger is treated as a structure.",
+    )
+    speckle_filter: Literal["none", "median", "lee"] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("speckle_filter", "speckleFilter"),
+        description="Pre-detection speckle filter.",
+    )
+    kernel_size: int | None = Field(
+        default=None,
+        ge=3,
+        le=7,
+        validation_alias=AliasChoices("kernel_size", "kernelSize"),
+        description="Speckle kernel side.",
+    )
+    coastline_buffer_meters: int | None = Field(
+        default=None,
+        ge=50,
+        le=500,
+        validation_alias=AliasChoices("coastline_buffer_meters", "coastlineBufferMeters"),
+        description="Coastline exclusion distance in metres.",
+    )
+
+    def overrides(self) -> dict[str, Any]:
+        """Only the keys the caller actually set, in pipeline (snake) form.
+
+        Returning ``None`` for unset fields is the point: the pipeline merges
+        these over its defaults, so an omitted key stays omitted rather than
+        becoming an explicit ``None`` that would fail a numeric subscript.
+        """
+        return {
+            name: value
+            for name, value in self.model_dump(by_alias=False, exclude_none=True).items()
+        }
+
+
 class ScanCreateRequest(BaseModel):
     """Body of ``POST /api/scans``.
 
@@ -147,7 +243,7 @@ class ScanCreateRequest(BaseModel):
     )
     provider: str = Field(default="planetary-computer")
     product: Literal["rtc", "grd"] = "rtc"
-    cfar_config: dict[str, Any] | None = Field(
+    cfar_config: CfarConfig | None = Field(
         default=None,
         description="Overrides for the CA-CFAR/speckle configuration; unset keys keep pipeline defaults.",
     )

@@ -925,7 +925,7 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
         provider=provider,
         product=body.product,
         datetime_range=body.datetime_range,
-        cfar_config=body.cfar_config,
+        cfar_config=body.cfar_config.overrides() if body.cfar_config else None,
         data_dir=state.data_dir,
         store=state.store,
     )

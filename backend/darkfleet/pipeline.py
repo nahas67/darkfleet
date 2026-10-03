@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -65,6 +65,31 @@ DEFAULT_CFAR: dict[str, Any] = {
 }
 
 
+def merge_cfar_config(overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Layer caller overrides over :data:`DEFAULT_CFAR`.
+
+    This used to be ``dict(cfar_config or DEFAULT_CFAR)``, which *replaces* the
+    defaults instead of merging them. Any partial payload therefore removed every
+    key it did not mention, and the pipeline -- which subscripts these values
+    directly rather than with ``.get`` -- then died on the first missing one::
+
+        no cfar_config          -> COMPLETE  train=16 guard=4 alpha=3.5
+        {"training_cells": 8}   -> FAILED    KeyError: 'coastline_buffer_meters'
+        camelCase UI payload    -> FAILED    KeyError: 'coastline_buffer_meters'
+        full snake_case         -> COMPLETE  train=32 guard=8 alpha=5.5
+
+    That contradicted ``ScanCreateRequest.cfar_config``, which documents "unset
+    keys keep pipeline defaults", and it made every CFAR control in the interface
+    capable of destroying a run rather than configuring one.
+
+    Merging is what that sentence always meant. Unknown keys are still carried
+    through rather than dropped, so a typo is visible in the persisted config and
+    its hash instead of being silently discarded; the request model is where an
+    unknown key is now rejected outright.
+    """
+    return {**DEFAULT_CFAR, **dict(overrides or {})}
+
+
 def config_hash(config: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
@@ -105,7 +130,7 @@ def run_scan(
     parallel implementation of it. It defaults to the real reader, so a shipped
     deployment cannot accidentally supply synthetic data through it.
     """
-    cfar_config = dict(cfar_config or DEFAULT_CFAR)
+    cfar_config = merge_cfar_config(cfar_config)
 
     def emit(stage: str, detail: str) -> None:
         if on_stage is not None:
