@@ -57,6 +57,8 @@ target-version = "py312"
 # genuine redefinition elsewhere still fails.
 "tests/test_debug_table_rows.py" = ["F811"]
 "tests/test_cfar_request_boundary.py" = ["F811"]
+"tests/test_coordinate_probe.py" = ["F811"]
+"tests/test_scene_selection.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -72,6 +72,12 @@ from darkfleet.api.models import (
     ExportFormatNotImplemented,
     HealthResponse,
     LayerStats,
+    ProbeGeoreferencing,
+    ProbePixel,
+    ProbeProvenance,
+    ProbeRequest,
+    ProbeResponse,
+    ProbeSource,
     ProviderHealthEntry,
     ScanAccepted,
     ScanCreateRequest,
@@ -88,6 +94,11 @@ from darkfleet.config.settings import Settings
 from darkfleet.detectors import DetectorRegistry
 from darkfleet.evidence import target_evidence
 from darkfleet.exports.render import render_pdf, render_png
+from darkfleet.geolocation import (
+    affine_from_sequence,
+    pixel_to_wgs84,
+    transform_wgs84,
+)
 from darkfleet.jobs.models import ScanStage, is_terminal
 from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent
 from darkfleet.narrative import summarise
@@ -877,6 +888,161 @@ def raster_image(
             "X-DarkFleet-Source-Shape": ",".join(str(v) for v in report["source_shape"]),
             "X-DarkFleet-Rendered-Shape": ",".join(str(v) for v in report["rendered_shape"]),
         },
+    )
+
+
+# ============================================================ coordinate probe
+#
+# DF-X6B. One authority for pixel -> WGS84, and it is the backend.
+#
+# The browser asks "what coordinate is this analytical pixel?" and the answer comes
+# from `geolocation.pixel_to_wgs84` -- the function GEO-CORR established -- using
+# the WINDOW transform of the raster that was actually read. Nothing here
+# re-implements affine arithmetic or CRS conversion, and the requested AOI never
+# enters the conversion.
+
+
+@router.post("/scans/{scan_id}/debug/probe", response_model=ProbeResponse)
+def probe_pixel(
+    scan_id: str,
+    body: ProbeRequest,
+    state: State,
+) -> ProbeResponse:
+    """Place one analytical pixel on the Earth.
+
+    There is exactly one geolocation authority in this codebase and this route
+    calls it. It does not accept a bbox, does not interpolate against the
+    requested area, and does not apply the full-scene transform to window-local
+    coordinates -- each of those was a real defect GEO-001 measured.
+
+    Bounds are refused, never clamped: a pixel outside the raster is a question
+    with no correct answer, and snapping it to the nearest valid pixel would put
+    a mark somewhere the operator did not click.
+    """
+    record = _safe_store_get(state.store, scan_id)
+    if record is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            error="SCAN_NOT_FOUND",
+            status_value="UNKNOWN_SCAN",
+            message=f"No completed scan {scan_id!r}; pixels need a completed raster.",
+            scan_id=scan_id,
+        )
+
+    raw_scene = record.get("scene")
+    scene: dict[str, Any] = raw_scene if isinstance(raw_scene, dict) else {}
+    crs = str(scene.get("crs") or "")
+    transform_values = [float(v) for v in (scene.get("transform") or [])][:6]
+
+    # The raster extent is the WINDOW that was actually read, recorded as
+    # [col_off, row_off, width, height]. There is no separate raster block, and
+    # inventing one would be a second copy of the geometry that could drift from
+    # the transform the detections were computed with.
+    window = scene.get("raster_window")
+    window_values = [float(v) for v in window] if isinstance(window, (list, tuple)) else []
+    width = int(window_values[2]) if len(window_values) >= 4 else 0
+    height = int(window_values[3]) if len(window_values) >= 4 else 0
+
+    if not width or not height:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="DEBUG_ARTIFACT_NOT_READY",
+            status_value="LAYERS_NOT_AVAILABLE",
+            message=(
+                f"Scan {scan_id} records no raster dimensions, so pixel extents cannot be "
+                "checked. Re-run the scan."
+            ),
+            scan_id=scan_id,
+        )
+
+    if len(transform_values) != 6 or not crs:
+        # An unreferenced asset cannot be placed, and approximating from the AOI
+        # would place it in the wrong sea. Refused, not estimated.
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="GEOREFERENCE_UNAVAILABLE",
+            status_value="UNAVAILABLE",
+            message=(
+                f"Scan {scan_id} carries no usable affine georeferencing, so a pixel cannot be "
+                "placed. An unreferenced raster is refused rather than approximated from the "
+                "requested area."
+            ),
+            scan_id=scan_id,
+            detail={"crs": crs or None, "transform": transform_values or None},
+        )
+
+    # Pixel CENTRE semantics: the valid interval is the range of sample centres,
+    # so the last valid index is width-1 / height-1. A centroid of pixels inside
+    # the raster always lands in that range, which is why fractional positions
+    # such as row=399.5 are accepted while row=400 is not.
+    row, col = body.row, body.col
+    if not (0.0 <= row <= height - 1) or not (0.0 <= col <= width - 1):
+        raise api_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            error="PIXEL_OUT_OF_BOUNDS",
+            status_value="INVALID_REQUEST",
+            message=(
+                f"Pixel (row={row}, col={col}) is outside the analytical raster, whose sample "
+                f"centres span rows 0..{height - 1} and columns 0..{width - 1}. The position is "
+                "refused rather than clamped."
+            ),
+            scan_id=scan_id,
+            detail={
+                "row": row,
+                "col": col,
+                "valid_row_range": [0.0, float(height - 1)],
+                "valid_col_range": [0.0, float(width - 1)],
+                "raster_width": width,
+                "raster_height": height,
+            },
+        )
+
+    transform = affine_from_sequence(transform_values)
+    to_wgs84 = transform_wgs84(crs)
+    lat, lon = pixel_to_wgs84(col, row, transform=transform, to_wgs84=to_wgs84)
+
+    window_bounds = window_values[:4]
+    provenance_block = record.get("provenance")
+    provenance_block = provenance_block if isinstance(provenance_block, dict) else {}
+
+    return ProbeResponse(
+        scan_id=scan_id,
+        pixel=ProbePixel(row=row, col=col),
+        source=ProbeSource(
+            crs=crs,
+            x=float(transform.a * (col + 0.5) + transform.b * (row + 0.5) + transform.c),
+            y=float(transform.d * (col + 0.5) + transform.e * (row + 0.5) + transform.f),
+        ),
+        wgs84_lat=lat,
+        wgs84_lon=lon,
+        georeferencing=ProbeGeoreferencing(
+            type="AFFINE_GEOREFERENCED",
+            raster_width=width,
+            raster_height=height,
+            window_bounds=window_bounds,
+            transform=transform_values,
+            resolution_m=(
+                float(scene["resolution_m"]) if scene.get("resolution_m") is not None else None
+            ),
+            always_xy=True,
+        ),
+        provenance=ProbeProvenance(
+            scan_id=scan_id,
+            scene_id=str(scene.get("item_id")) if scene.get("item_id") else None,
+            provider=str(scene.get("provider")) if scene.get("provider") else None,
+            platform=str(scene.get("platform")) if scene.get("platform") else None,
+            acquisition_time=(
+                str(scene["acquisition_time"]) if scene.get("acquisition_time") else None
+            ),
+            product=str(scene.get("product")) if scene.get("product") else None,
+            polarization=(
+                str(scene.get("polarization")) if scene.get("polarization") else None
+            ),
+            software_version=str(provenance_block.get("software_version") or "") or None,
+            processing_version=str(provenance_block.get("processing_version") or "") or None,
+            # Context only. Never an input to the conversion above.
+            requested_aoi=[float(v) for v in (record.get("aoi") or [])],
+        ),
     )
 
 

@@ -500,6 +500,115 @@ class DebugLayerResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+# ------------------------------------------------------- coordinate probe (DF-X6B)
+
+
+class ProbeRequest(BaseModel):
+    """A position in the ANALYTICAL raster's own pixel space.
+
+    Deliberately ``row``/``col`` floats, not integers. Connected-component
+    centroids are not whole pixels, and an integer field would either truncate the
+    sub-pixel position or invite a cast at the call site. GEO-CORR exists to
+    preserve that sub-pixel signal; the request type must not throw it away
+    before the arithmetic runs.
+
+    ``extra="forbid"`` because a probe with an unrecognised field is a caller
+    misunderstanding the coordinate space, and answering it anyway would place a
+    point somewhere the caller did not ask about.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: float = Field(description="Row index in the window raster; 0 is the first row.")
+    col: float = Field(description="Column index in the window raster; 0 is the first column.")
+
+
+class ProbePixel(BaseModel):
+    """The requested position, echoed with the convention that was applied."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: float
+    col: float
+    #: The interpretation applied. Pixel centres, not corners: `row=0` is the
+    #: CENTRE of the first sample, matching `rasterio.transform.xy(offset="center")`
+    #: and `geolocation.pixel_to_wgs84(centre_offset=0.5)`.
+    convention: Literal["PIXEL_CENTER"] = "PIXEL_CENTER"
+    centre_offset: float = Field(
+        default=0.5, description="Sample-index to sample-centre offset that was applied."
+    )
+
+
+class ProbeSource(BaseModel):
+    """The projected coordinate the pixel centre maps to, before reprojection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    crs: str
+    x: float
+    y: float
+
+
+class ProbeGeoreferencing(BaseModel):
+    """Enough of the georeferencing to reproduce the answer independently."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["AFFINE_GEOREFERENCED", "GCP_GEOREFERENCED", "UNREFERENCED"]
+    raster_width: int
+    raster_height: int
+    window_bounds: list[float] = Field(
+        default_factory=list,
+        description="[col_min, row_min, col_max, row_max] read from the source raster.",
+    )
+    #: The affine actually used, as [a, b, c, d, e, f]. This is the WINDOW
+    #: transform of the raster that was read, not the full-scene transform:
+    #: GEO-001 measured a material error from applying the wrong one.
+    transform: list[float] = Field(default_factory=list)
+    resolution_m: float | None = None
+    #: Whether the CRS transform is axis-order-safe (`always_xy=True`).
+    always_xy: bool = True
+
+
+class ProbeProvenance(BaseModel):
+    """Which scan and which acquisition the coordinate came from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scan_id: str
+    scene_id: str | None = None
+    provider: str | None = None
+    platform: str | None = None
+    acquisition_time: str | None = None
+    product: str | None = None
+    polarization: str | None = None
+    software_version: str | None = None
+    processing_version: str | None = None
+    #: The requested area of interest. Context only. It is NOT an input to the
+    #: conversion, and `test_changing_the_aoi_does_not_move_a_probed_pixel`
+    #: exists to keep that true.
+    requested_aoi: list[float] = Field(default_factory=list)
+
+
+class ProbeResponse(BaseModel):
+    """A pixel's coordinate, with its full derivation retained.
+
+    No altitude is reported. SAR does not measure height, and a field named
+    `altitude` on a radar product would be read as a measurement of something
+    this sensor never observed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scan_id: str
+    pixel: ProbePixel
+    source: ProbeSource
+    wgs84_lat: float
+    wgs84_lon: float
+    georeferencing: ProbeGeoreferencing
+    provenance: ProbeProvenance
+
+
 # ------------------------------------------------------------------ errors
 
 

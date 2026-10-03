@@ -37,6 +37,17 @@ export interface ScoreDecomposition {
   readonly timeDeltaSeconds: number;
 }
 
+export interface ProbeResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly pixel: ProbePixel;
+  readonly source: ProbeSource;
+  readonly wgs84_lat: number;
+  readonly wgs84_lon: number;
+  readonly georeferencing: ProbeGeoreferencing;
+  readonly provenance: ProbeProvenance;
+}
+
 export interface RevisitPlanOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly acquisition_count?: number;
@@ -347,6 +358,14 @@ export interface VesselTrackResponse {
   readonly note: string;
 }
 
+export interface ProbeRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  /** Row index in the window raster; 0 is the first row. */
+  readonly row: number;
+  /** Column index in the window raster; 0 is the first column. */
+  readonly col: number;
+}
+
 export interface ScanCreateRequest {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   /** [min_lon, min_lat, max_lon, max_lat] in decimal degrees */
@@ -359,6 +378,48 @@ export interface ScanCreateRequest {
   readonly product?: "rtc" | "grd";
   /** Overrides for the CA-CFAR/speckle configuration; unset keys keep pipeline defaults. */
   readonly cfar_config?: CfarConfig | null;
+}
+
+export interface ProbeGeoreferencing {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly type: "AFFINE_GEOREFERENCED" | "GCP_GEOREFERENCED" | "UNREFERENCED";
+  readonly raster_width: number;
+  readonly raster_height: number;
+  /** [col_min, row_min, col_max, row_max] read from the source raster. */
+  readonly window_bounds?: number[];
+  readonly transform?: number[];
+  readonly resolution_m?: number | null;
+  readonly always_xy?: boolean;
+}
+
+export interface ProbePixel {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly row: number;
+  readonly col: number;
+  readonly convention?: "PIXEL_CENTER";
+  /** Sample-index to sample-centre offset that was applied. */
+  readonly centre_offset?: number;
+}
+
+export interface ProbeProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly scene_id?: string | null;
+  readonly provider?: string | null;
+  readonly platform?: string | null;
+  readonly acquisition_time?: string | null;
+  readonly product?: string | null;
+  readonly polarization?: string | null;
+  readonly software_version?: string | null;
+  readonly processing_version?: string | null;
+  readonly requested_aoi?: number[];
+}
+
+export interface ProbeSource {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly crs: string;
+  readonly x: number;
+  readonly y: number;
 }
 
 export interface AcquisitionOut {
@@ -503,12 +564,14 @@ export interface TrackPointOut {
  * not maintained by hand, so a new route's body is emitted automatically.
  */
 export type ContractRequestSchemaName =
+  | 'ProbeRequest'
   | 'ScanCreateRequest'
 ;
 
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
   | 'ScoreDecomposition'
+  | 'ProbeResponse'
   | 'RevisitPlanOut'
   | 'TracksOut'
   | 'PatternsOut'
@@ -534,7 +597,12 @@ export type ContractSchemaName =
   | 'ScanAisResponse'
   | 'TargetAisResponse'
   | 'VesselTrackResponse'
+  | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'ProbeGeoreferencing'
+  | 'ProbePixel'
+  | 'ProbeProvenance'
+  | 'ProbeSource'
   | 'AcquisitionOut'
   | 'RevisitGapOut'
   | 'RevisitStatisticsOut'

@@ -51,6 +51,11 @@ OUT = ROOT / "src" / "api" / "contract.ts"
 #: appended after the interfaces so a literal union can reference them.
 SCHEMAS: tuple[str, ...] = (
     "ScoreDecomposition",
+    # Coordinate probe (DF-X6B). The REQUEST side needs no entry here -- request
+    # bodies are discovered from the paths. The response does, because responses
+    # are an explicit allowlist by design: only schemas the frontend consumes are
+    # emitted, and this one is consumed.
+    "ProbeResponse",
     # Advanced analysis: revisit planning, multi-pass hypotheses, longitudinal
     # patterns, detector provenance. These four routes answered with a bare
     # dict[str, Any], which is why they had no typed frontend surface -- with no
