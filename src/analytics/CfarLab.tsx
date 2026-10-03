@@ -51,6 +51,13 @@ import { useStore } from '../state/store';
 export function CfarLab({ scanId }: { scanId: string }) {
   const aoi = useStore().aoi;
   const sceneItemId = useStore().scene?.item_id ?? null;
+  // Re-read the run config when the pipeline reaches a terminal state, not just
+  // when the id changes. A recompute creates the new scan id immediately, while
+  // its artifacts are still being written: fetching on the id alone reads a scan
+  // that does not exist yet, gets nothing, and leaves CURRENT RUN showing the
+  // PREVIOUS run's configuration beside the new run's id -- which reads as "the
+  // recompute did nothing".
+  const scanStage = useStore().scanStage;
 
   // The run that actually happened. Read from the record, never defaulted: a
   // browser-side default rendered as "current" is a claim nothing established.
@@ -63,10 +70,10 @@ export function CfarLab({ scanId }: { scanId: string }) {
   // Seed the proposed values from whatever this scan used, so the diff starts
   // empty and a change means a change rather than a difference of defaults.
   useEffect(() => {
+    if (scanStage !== 'COMPLETE') return;
     let cancelled = false;
     void loadRunConfig(scanId).then((run) => {
-      if (cancelled) return;
-      if (!run) return;
+      if (cancelled || !run) return;
       setCurrent(run.config);
       setCurrentHash(run.configHash);
       setProposed(run.config);
@@ -74,7 +81,7 @@ export function CfarLab({ scanId }: { scanId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [scanId]);
+  }, [scanId, scanStage]);
 
   const diff = useMemo(
     () => (current ? recomputeDiff(current, proposed) : null),
