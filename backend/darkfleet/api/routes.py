@@ -862,6 +862,20 @@ def raster_metadata(scan_id: str, layer: str, state: State) -> Response:
             "processing_version": __processing_version__,
             "software_version": __version__,
             "classification_schema": __classification_schema__,
+            # CFAR-STATE: the configuration THIS run was computed with.
+            #
+            # #28 requires the interface to separate "the run you are looking at"
+            # from "the configuration you are proposing". The proposed side is
+            # editable in the browser; the current side can only come from the
+            # record, because a default value rendered in the browser is a claim
+            # about what was computed that nothing established.
+            #
+            # Served under `provenance` rather than as a top-level `config`
+            # because it is provenance for these pixels: changing it changes what
+            # the pixels ARE, so it belongs with the version that produced them.
+            # `config_hash` is included so two runs can be compared without
+            # guessing whether an equal set of numbers means an equal run.
+            "processing_config": record.get("config") or None,
         },
     }
     return Response(

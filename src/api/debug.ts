@@ -52,7 +52,13 @@ export async function loadDebugLayer(
   if (options.grid !== undefined) params.set('grid', String(options.grid));
 
   const query = params.toString();
-  const path = `/api/scans/${scanId}/debug/${layer}${query ? `?${query}` : ''}`;
+  // The layer route is mounted at the API ROOT: `/debug/{scan_id}/{layer}`.
+  //
+  // The probe is the odd one out -- `POST /scans/{scan_id}/debug/probe` is
+  // nested under the scan -- so the two paths genuinely differ, and writing
+  // `/scans/${scanId}/debug/${layer}` returns 404 while looking correct. Verified
+  // against the running backend rather than assumed from the nesting of the probe.
+  const path = `/api/debug/${scanId}/${layer}${query ? `?${query}` : ''}`;
 
   try {
     const data = await api.get<DebugLayerResponse>(path);

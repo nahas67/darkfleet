@@ -61,6 +61,16 @@ export type SarTarget = {
   matchRadiusMeters: number | null;
   /** Geolocation uncertainty in metres, when the product supports a figure. */
   geolocationUncertaintyM: number | null;
+  /**
+   * GEO-CORR's sub-pixel centroid in the window raster, `[col, row]`.
+   *
+   * The analytical anchor: what makes this target mappable onto the raster it was
+   * detected in. Null when the scan predates the field or the centroid was never
+   * measured -- never (0, 0), which would place the target at the raster corner.
+   */
+  geoPixelCentroid: [number, number] | null;
+  /** The pixel-centre offset that produced the coordinate. 0.5 = pixel centre. */
+  geoCentreOffset: number | null;
   sceneItemId?: string | null;
 };
 

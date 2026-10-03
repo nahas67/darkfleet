@@ -215,6 +215,11 @@ describe('bidirectional selection', () => {
       distanceOffsetMeters: null,
       matchRadiusMeters: null,
       geolocationUncertaintyM: null,
+      // The analytical anchor. Null here means "this target cannot be placed on
+      // a raster", which is the honest default for a hand-built fixture -- not
+      // (0, 0), which would place it at the raster's corner and look measured.
+      geoPixelCentroid: null,
+      geoCentreOffset: null,
     };
     store.set({ targets: [target] });
 

@@ -10,6 +10,7 @@
 import type {
   AisAssociation,
   AisCoverageOut,
+  CfarConfig as CfarConfigContract,
   HealthResponse,
   ScanCreateRequest,
   ScanTargetsResponse,
@@ -21,6 +22,11 @@ import type {
 import { ApiError, ContractViolation, api } from './errors';
 import { validateScanTargetsResponse } from './validate';
 import { openStageStream, type StageStreamHandle } from './sse';
+import {
+  DEFAULT_CFAR_CONFIG,
+  isSpeckleMode,
+  type CfarConfig,
+} from '../analysis/cfar';
 import type { AisContact, BBox, Coverage, SarTarget, VesselTrack } from '../state/store';
 import { store } from '../state/store';
 
@@ -59,8 +65,31 @@ export function toSarTarget(target: VesselTarget): SarTarget {
     distanceOffsetMeters: corr?.distanceOffsetMeters ?? null,
     matchRadiusMeters: corr?.scoreDecomposition?.matchRadiusMeters ?? null,
     geolocationUncertaintyM: typeof unc === 'number' && Number.isFinite(unc) ? unc : null,
+    // GEO-CORR's sub-pixel centroid, carried so the analytics surface can place
+    // this target on the raster without deriving a position of its own. Validated
+    // here rather than cast: a malformed pair must read as "no anchor", because a
+    // partially-valid centroid would put the marker in the wrong place silently.
+    geoPixelCentroid: toCentroid(target.geoPixelCentroid),
+    geoCentreOffset:
+      typeof target.geoCentreOffset === 'number' && Number.isFinite(target.geoCentreOffset)
+        ? target.geoCentreOffset
+        : null,
     sceneItemId: typeof sceneItemId === 'string' ? sceneItemId : null,
   };
+}
+
+/**
+ * A centroid is usable only if both parts are finite numbers.
+ *
+ * Anything else reads as no anchor at all, which is the honest state: the target
+ * cannot be placed on the raster, and the interface says so rather than guessing.
+ */
+function toCentroid(raw: readonly number[] | null | undefined): [number, number] | null {
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const [col, row] = raw;
+  if (typeof col !== 'number' || typeof row !== 'number') return null;
+  if (!Number.isFinite(col) || !Number.isFinite(row)) return null;
+  return [col, row];
 }
 
 function toCoverage(raw: AisCoverageOut | undefined | null): Coverage {
@@ -94,7 +123,11 @@ export function releaseStageStream(): void {
  * the operator did not choose is the kind of plausible-looking behaviour this
  * product refuses.
  */
-export async function startScan(aoi: BBox, sceneId?: string): Promise<string> {
+export async function startScan(
+  aoi: BBox,
+  sceneId?: string,
+  cfarConfig?: CfarConfigContract,
+): Promise<string> {
   releaseStageStream();
   store.set({
     scanError: null,
@@ -116,9 +149,14 @@ export async function startScan(aoi: BBox, sceneId?: string): Promise<string> {
   // hand-written and untyped. Typing it against the generated contract makes the
   // next such mismatch a compile error, and `sceneId` below is the field the
   // schema actually declares.
+  //
+  // `cfar_config` is included only when supplied, and is `undefined`-omitted
+  // rather than sent as null: an explicit null would mean "no configuration",
+  // which is a different claim from "use the pipeline defaults".
   const body: ScanCreateRequest = {
     bbox: [aoi[0], aoi[1], aoi[2], aoi[3]],
     ...(sceneId ? { sceneId } : {}),
+    ...(cfarConfig ? { cfar_config: cfarConfig } : {}),
   };
 
   const accepted = await api.post<{ scan_id: string }>('/api/scans', body);
@@ -126,6 +164,61 @@ export async function startScan(aoi: BBox, sceneId?: string): Promise<string> {
   store.set({ scanId: accepted.scan_id, aoi });
   followScan(accepted.scan_id);
   return accepted.scan_id;
+}
+
+/**
+ * The configuration a completed scan was actually computed with.
+ *
+ * Read from `provenance.processing_config` on the raster metadata, which is the
+ * backend's own record of the run. Never defaulted.
+ *
+ * The reason this exists rather than a constant: the analytics surface has to
+ * separate "the run you are looking at" from "the configuration you are
+ * proposing", and only the record can establish the first. A browser-side
+ * default rendered as CURRENT would claim the run used values nobody recorded.
+ *
+ * Returns null when the record predates the field or the run has no config. That
+ * is distinct from a config of zeros, and the surface shows it as not recorded.
+ */
+export async function loadRunConfig(
+  scanId: string,
+): Promise<{ config: CfarConfig; configHash: string | null } | null> {
+  let body: unknown;
+  try {
+    body = await api.get(`/api/scans/${scanId}/raster/raw`);
+  } catch {
+    // A scan with no rendered raster has no run config to report. That is a
+    // normal state, not an error worth surfacing as one.
+    return null;
+  }
+  if (typeof body !== 'object' || body === null) return null;
+  const provenance = (body as { provenance?: unknown }).provenance;
+  if (typeof provenance !== 'object' || provenance === null) return null;
+  const raw = (provenance as { processing_config?: unknown }).processing_config;
+  if (typeof raw !== 'object' || raw === null) return null;
+
+  const record = raw as Record<string, unknown>;
+  const config: CfarConfig = {
+    trainingCells: numOr(record.training_cells, DEFAULT_CFAR_CONFIG.trainingCells),
+    guardCells: numOr(record.guard_cells, DEFAULT_CFAR_CONFIG.guardCells),
+    thresholdFactor: numOr(record.threshold_factor, DEFAULT_CFAR_CONFIG.thresholdFactor),
+    minPixels: numOr(record.min_pixels, DEFAULT_CFAR_CONFIG.minPixels),
+    maxPixels: numOr(record.max_pixels, DEFAULT_CFAR_CONFIG.maxPixels),
+    speckleFilter: isSpeckleMode(record.speckle_filter)
+      ? record.speckle_filter
+      : DEFAULT_CFAR_CONFIG.speckleFilter,
+    kernelSize: numOr(record.kernel_size, DEFAULT_CFAR_CONFIG.kernelSize),
+    coastlineBufferMeters: numOr(
+      record.coastline_buffer_meters,
+      DEFAULT_CFAR_CONFIG.coastlineBufferMeters,
+    ),
+  };
+  const hash = typeof record.config_hash === 'string' ? record.config_hash : null;
+  return { config, configHash: hash };
+}
+
+function numOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
 export function followScan(scanId: string): void {
