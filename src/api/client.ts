@@ -11,6 +11,7 @@ import type {
   AisAssociation,
   AisCoverageOut,
   HealthResponse,
+  ScanCreateRequest,
   ScanTargetsResponse,
   SceneListResponse,
   TargetClassification,
@@ -107,10 +108,20 @@ export async function startScan(aoi: BBox, sceneId?: string): Promise<string> {
     track: null,
   });
 
-  const accepted = await api.post<{ scan_id: string }>('/api/scans', {
+  // Built as a generated `ScanCreateRequest`, not an inline literal.
+  //
+  // The inline literal sent `scene_id`, which the backend rejects: the request
+  // model is `extra="forbid"` and never declared that field, so choosing a scene
+  // and running a scan returned 422. Nothing caught it because the body was
+  // hand-written and untyped. Typing it against the generated contract makes the
+  // next such mismatch a compile error, and `sceneId` below is the field the
+  // schema actually declares.
+  const body: ScanCreateRequest = {
     bbox: [aoi[0], aoi[1], aoi[2], aoi[3]],
-    ...(sceneId ? { scene_id: sceneId } : {}),
-  });
+    ...(sceneId ? { sceneId } : {}),
+  };
+
+  const accepted = await api.post<{ scan_id: string }>('/api/scans', body);
 
   store.set({ scanId: accepted.scan_id, aoi });
   followScan(accepted.scan_id);

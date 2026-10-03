@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import numpy as np
 
@@ -52,6 +52,11 @@ StageCallback = Callable[[str, str], None]
 WindowSource = Callable[[str, tuple[float, float, float, float]], dict[str, Any]]
 
 _KNOWN_PROVIDERS = frozenset({"planetary-computer", "earthsearch"})
+
+#: How many candidates to consider when the operator pinned a specific scene.
+#: A pinned scene is routinely not the first result of the unpinned query, so the
+#: window is widened rather than taking whatever came back.
+_PINNED_SCENE_SEARCH_LIMIT: Final[int] = 25
 
 DEFAULT_CFAR: dict[str, Any] = {
     "training_cells": 16,
@@ -109,6 +114,7 @@ def run_scan(
     data_dir: str | Path,
     cfar_config: dict[str, Any] | None = None,
     datetime_range: str | None = None,
+    scene_id: str | None = None,
     provider: str = "planetary-computer",
     product: str = "rtc",
     on_stage: StageCallback | None = None,
@@ -156,7 +162,7 @@ def run_scan(
     emit("SEARCHING_SCENE", f"searching {provider} {product}")
     signed_href = ""
 
-    asset: SarAsset = _resolve_asset(provider, product, aoi, datetime_range)
+    asset: SarAsset = _resolve_asset(provider, product, aoi, datetime_range, scene_id)
     if provider == "planetary-computer":
         sign_planetary_computer_asset(asset)
     signed_href = str(asset.extra.get("signed_href", asset.asset_href))
@@ -348,18 +354,62 @@ def _as_utc(value: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def _resolve_asset(provider: str, product: str, bbox: tuple[float, float, float, float], dr: str | None) -> SarAsset:
+def _resolve_asset(
+    provider: str,
+    product: str,
+    bbox: tuple[float, float, float, float],
+    dr: str | None,
+    scene_id: str | None = None,
+) -> SarAsset:
+    """Pick the asset to read.
+
+    With ``scene_id`` the match is EXACT or the scan fails. Falling back to
+    "the first scene that happens to intersect the AOI" would process a different
+    acquisition while the interface, the evidence record and the operator's
+    selection all named the requested one -- a substituted scene presented as the
+    chosen scene, which is the worst kind of wrong for an evidence product.
+
+    The candidate window is widened when pinning, because a pinned scene is
+    routinely not the first result of the unpinned query.
+    """
     # A blank range means "no time filter"; the STAC helper omits the key.
     window = dr.strip() if dr and dr.strip() else ""
+    limit = _PINNED_SCENE_SEARCH_LIMIT if scene_id else 2
+
     if provider == "planetary-computer":
-        assets = search_planetary_computer(bbox, window, product=product, limit=2)
-        vv = [a for a in assets if a.polarization == "VV"]
-        return (vv or assets)[0]
-    if provider == "earthsearch":
-        assets = search_earthsearch_grd(bbox, window, limit=2)
-        vv = [a for a in assets if a.polarization == "VV"]
-        return (vv or assets)[0]
-    raise RealDataUnavailableError(f"unknown provider {provider}", details={"provider": provider})
+        assets = search_planetary_computer(bbox, window, product=product, limit=limit)
+    elif provider == "earthsearch":
+        assets = search_earthsearch_grd(bbox, window, limit=limit)
+    else:
+        raise RealDataUnavailableError(
+            f"unknown provider {provider}", details={"provider": provider}
+        )
+
+    if scene_id:
+        wanted = scene_id.strip()
+        for asset in assets:
+            if asset.item_id == wanted:
+                return asset
+        # A polarisation-specific asset carries a suffixed id in some catalogues,
+        # so a prefix match is allowed -- but only to a candidate that was really
+        # returned for this AOI, never to something synthesised.
+        prefixed = [a for a in assets if a.item_id.startswith(wanted)]
+        if len(prefixed) == 1:
+            return prefixed[0]
+        raise RealDataUnavailableError(
+            f"Scene {scene_id!r} does not intersect this area in the requested window.",
+            details={
+                "requested_scene_id": scene_id,
+                "provider": provider,
+                "candidates_considered": [a.item_id for a in assets],
+            },
+            suggestions=[
+                "Re-run the scene search for this area and pick a listed acquisition.",
+            ],
+        )
+
+    vv = [a for a in assets if a.polarization == "VV"]
+    return (vv or assets)[0]
 
 
 def _real_land_mask(

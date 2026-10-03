@@ -252,8 +252,40 @@ def build() -> str:
                 stack.extend(node)
         return found
 
+    def request_schemas(document: dict[str, Any]) -> set[str]:
+        """Every request body schema reachable from a path.
+
+        Discovered from the document rather than listed by hand. That is the whole
+        point: response types were generated while request bodies were not, which
+        is precisely how the interface came to emit ``trainingCells`` while the
+        pipeline read ``training_cells`` and nothing rejected the mismatch until a
+        live scan failed. A hand-maintained request list would recreate the same
+        hole one schema at a time, so the next mission/watchlist/annotation request
+        is covered the moment its route exists.
+        """
+        found: set[str] = set()
+        for operations in document.get("paths", {}).values():
+            if not isinstance(operations, dict):
+                continue
+            for operation in operations.values():
+                if not isinstance(operation, dict):
+                    continue
+                body = operation.get("requestBody")
+                if not isinstance(body, dict):
+                    continue
+                for media in body.get("content", {}).values():
+                    if not isinstance(media, dict):
+                        continue
+                    schema = media.get("schema")
+                    if isinstance(schema, dict):
+                        found |= refs_in(schema)
+        return found
+
+    # Request bodies join the response allowlist in a single traversal, so a
+    # schema referenced by both is emitted once, in the allowlist's position.
+    request_names = sorted(request_schemas(openapi))
     emit: list[str] = []
-    queue = list(SCHEMAS)
+    queue = [*SCHEMAS, *request_names]
     seen: set[str] = set()
     while queue:
         name = queue.pop(0)
@@ -274,6 +306,17 @@ def build() -> str:
         out.append(render_interface(name, defs[name], defs))
         out.append("")
         emitted.append(name)
+
+    if request_names:
+        out.append("/**")
+        out.append(" * Schemas reachable as a request body. Discovered from the OpenAPI paths,")
+        out.append(" * not maintained by hand, so a new route's body is emitted automatically.")
+        out.append(" */")
+        out.append("export type ContractRequestSchemaName =")
+        for name in sorted(n for n in request_names if n in emitted):
+            out.append(f"  | '{name}'")
+        out.append(";")
+        out.append("")
 
     out.append("/** Schemas emitted into this file. */")
     out.append("export type ContractSchemaName =")

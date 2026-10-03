@@ -23,6 +23,21 @@
 /** Speckle pre-filter. `lee` is reachable here — it was dead UI in the legacy workbench. */
 export type SpeckleMode = 'none' | 'median' | 'lee';
 
+import type { CfarConfig as CfarConfigContract } from '../api/contract';
+
+/**
+ * The wire shape of one CFAR override, straight from the generated contract.
+ *
+ * This alias is the reason a backend rename is a compile error rather than a live
+ * scan failure. `CfarConfig` below is the interface's internal model; the
+ * contract is what `POST /api/scans` actually accepts. They were allowed to drift
+ * once already -- the interface emitted `trainingCells` while the pipeline read
+ * `training_cells`, nothing rejected the mismatch, and every CFAR control in the
+ * workspace destroyed the run it touched. `toCfarRequestParams` is typed against
+ * the contract so that gap cannot reopen.
+ */
+export type { CfarConfigContract };
+
 /** Every speckle mode, in menu order. All three are selectable. */
 export const SPECKLE_MODES: readonly SpeckleMode[] = ['none', 'median', 'lee'] as const;
 
@@ -385,19 +400,28 @@ export function recomputeDiff(baseline: CfarConfig, pending: CfarConfig): Recomp
 // ------------------------------------------------------------------ wire form
 
 /**
- * The `cfar_config` payload for `POST /api/scans`. It carries parameters only:
- * the backend re-derives every statistic and every detection.
+ * The `cfar_config` payload for `POST /api/scans`, typed as the generated
+ * contract. It carries parameters only: the backend re-derives every statistic
+ * and every detection.
+ *
+ * Written as a literal rather than a loop over `CFAR_PARAM_KEYS` on purpose. A
+ * loop would type-check against `Record<string, number | string>` whatever the
+ * backend called its fields, which is exactly the hole that let casing drift. A
+ * literal is checked against `CfarConfigContract`, so renaming a field on either
+ * side becomes a compile error here.
  */
-export function toCfarRequestParams(config: CfarConfig): Record<string, number | string> {
-  const normalized = normalizeCfarConfig(config);
-  const out: Record<string, number | string> = {};
-  for (const key of CFAR_PARAM_KEYS) {
-    const value = normalized[key];
-    // A string parameter (the speckle mode) is forwarded verbatim; `Number()`
-    // on it would silently produce NaN.
-    out[key] = typeof value === 'string' ? value : value;
-  }
-  return out;
+export function toCfarRequestParams(config: CfarConfig): CfarConfigContract {
+  const n = normalizeCfarConfig(config);
+  return {
+    trainingCells: n.trainingCells,
+    guardCells: n.guardCells,
+    thresholdFactor: n.thresholdFactor,
+    minPixels: n.minPixels,
+    maxPixels: n.maxPixels,
+    speckleFilter: n.speckleFilter,
+    kernelSize: n.kernelSize,
+    coastlineBufferMeters: n.coastlineBufferMeters,
+  };
 }
 
 /** `3.5x`, `16 cells`, `lee`. Locale independent. */

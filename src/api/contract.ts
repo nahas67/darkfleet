@@ -347,6 +347,20 @@ export interface VesselTrackResponse {
   readonly note: string;
 }
 
+export interface ScanCreateRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  /** [min_lon, min_lat, max_lon, max_lat] in decimal degrees */
+  readonly bbox: number[];
+  /** STAC datetime interval, e.g. '2026-01-01T00:00:00Z/2026-01-31T00:00:00Z'. */
+  readonly datetime_range?: string | null;
+  /** Pin one catalogue acquisition by item id. The match is exact: an id that does not intersect this area fails the scan rather than silently processing whatever scene happened to come back. */
+  readonly sceneId?: string | null;
+  readonly provider?: string;
+  readonly product?: "rtc" | "grd";
+  /** Overrides for the CA-CFAR/speckle configuration; unset keys keep pipeline defaults. */
+  readonly cfar_config?: CfarConfig | null;
+}
+
 export interface AcquisitionOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly item_id: string;
@@ -443,6 +457,26 @@ export type ScanStage = "QUEUED" | "SEARCHING_SCENE" | "READING_SAR" | "PREPROCE
 /** Whether the archive can answer a question, and how completely. */
 export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
 
+export interface CfarConfig {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  /** N_train: reference ring width in cells. */
+  readonly trainingCells?: number | null;
+  /** N_guard: inner guard ring width in cells. */
+  readonly guardCells?: number | null;
+  /** Multiplier on the background estimate (P_fa control). */
+  readonly thresholdFactor?: number | null;
+  /** Smallest connected component kept as a candidate target, in pixels. */
+  readonly minPixels?: number | null;
+  /** Largest component kept; anything larger is treated as a structure. */
+  readonly maxPixels?: number | null;
+  /** Pre-detection speckle filter. */
+  readonly speckleFilter?: "none" | "median" | "lee" | null;
+  /** Speckle kernel side. */
+  readonly kernelSize?: number | null;
+  /** Coastline exclusion distance in metres. */
+  readonly coastlineBufferMeters?: number | null;
+}
+
 export interface TrackGapOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly seconds: number;
@@ -463,6 +497,14 @@ export interface TrackPointOut {
   readonly apparent_length_m: number;
   readonly length_unc_m: number;
 }
+
+/**
+ * Schemas reachable as a request body. Discovered from the OpenAPI paths,
+ * not maintained by hand, so a new route's body is emitted automatically.
+ */
+export type ContractRequestSchemaName =
+  | 'ScanCreateRequest'
+;
 
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
@@ -492,6 +534,7 @@ export type ContractSchemaName =
   | 'ScanAisResponse'
   | 'TargetAisResponse'
   | 'VesselTrackResponse'
+  | 'ScanCreateRequest'
   | 'AcquisitionOut'
   | 'RevisitGapOut'
   | 'RevisitStatisticsOut'
@@ -503,6 +546,7 @@ export type ContractSchemaName =
   | 'ProviderStatus'
   | 'ScanStage'
   | 'AisCoverageState'
+  | 'CfarConfig'
   | 'TrackGapOut'
   | 'TrackPointOut'
 ;

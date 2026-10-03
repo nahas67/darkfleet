@@ -163,54 +163,62 @@ class CfarConfig(BaseModel):
         default=None,
         ge=8,
         le=32,
-        validation_alias=AliasChoices("training_cells", "trainingCells"),
+        validation_alias=AliasChoices("trainingCells", "training_cells"),
+        serialization_alias="trainingCells",
         description="N_train: reference ring width in cells.",
     )
     guard_cells: int | None = Field(
         default=None,
         ge=2,
         le=8,
-        validation_alias=AliasChoices("guard_cells", "guardCells"),
+        validation_alias=AliasChoices("guardCells", "guard_cells"),
+        serialization_alias="guardCells",
         description="N_guard: inner guard ring width in cells.",
     )
     threshold_factor: float | None = Field(
         default=None,
         ge=2.0,
         le=5.5,
-        validation_alias=AliasChoices("threshold_factor", "thresholdFactor"),
+        validation_alias=AliasChoices("thresholdFactor", "threshold_factor"),
+        serialization_alias="thresholdFactor",
         description="Multiplier on the background estimate (P_fa control).",
     )
     min_pixels: int | None = Field(
         default=None,
         ge=1,
         le=50,
-        validation_alias=AliasChoices("min_pixels", "minPixels"),
+        validation_alias=AliasChoices("minPixels", "min_pixels"),
+        serialization_alias="minPixels",
         description="Smallest connected component kept as a candidate target, in pixels.",
     )
     max_pixels: int | None = Field(
         default=None,
         ge=100,
         le=5000,
-        validation_alias=AliasChoices("max_pixels", "maxPixels"),
+        validation_alias=AliasChoices("maxPixels", "max_pixels"),
+        serialization_alias="maxPixels",
         description="Largest component kept; anything larger is treated as a structure.",
     )
     speckle_filter: Literal["none", "median", "lee"] | None = Field(
         default=None,
-        validation_alias=AliasChoices("speckle_filter", "speckleFilter"),
+        validation_alias=AliasChoices("speckleFilter", "speckle_filter"),
+        serialization_alias="speckleFilter",
         description="Pre-detection speckle filter.",
     )
     kernel_size: int | None = Field(
         default=None,
         ge=3,
         le=7,
-        validation_alias=AliasChoices("kernel_size", "kernelSize"),
+        validation_alias=AliasChoices("kernelSize", "kernel_size"),
+        serialization_alias="kernelSize",
         description="Speckle kernel side.",
     )
     coastline_buffer_meters: int | None = Field(
         default=None,
         ge=50,
         le=500,
-        validation_alias=AliasChoices("coastline_buffer_meters", "coastlineBufferMeters"),
+        validation_alias=AliasChoices("coastlineBufferMeters", "coastline_buffer_meters"),
+        serialization_alias="coastlineBufferMeters",
         description="Coastline exclusion distance in metres.",
     )
 
@@ -240,6 +248,16 @@ class ScanCreateRequest(BaseModel):
     datetime_range: str | None = Field(
         default=None,
         description="STAC datetime interval, e.g. '2026-01-01T00:00:00Z/2026-01-31T00:00:00Z'.",
+    )
+    scene_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("sceneId", "scene_id"),
+        serialization_alias="sceneId",
+        description=(
+            "Pin one catalogue acquisition by item id. The match is exact: an id "
+            "that does not intersect this area fails the scan rather than "
+            "silently processing whatever scene happened to come back."
+        ),
     )
     provider: str = Field(default="planetary-computer")
     product: Literal["rtc", "grd"] = "rtc"

@@ -426,6 +426,7 @@ class ScanSpec:
         "runtime_mode",
         "scan_id",
         "scene",
+        "scene_id",
         "store",
     )
 
@@ -438,6 +439,7 @@ class ScanSpec:
         provider: str,
         product: str,
         datetime_range: str | None,
+        scene_id: str | None,
         cfar_config: dict[str, Any] | None,
         data_dir: Path,
         store: RunStore,
@@ -448,6 +450,7 @@ class ScanSpec:
         self.provider = provider
         self.product = product
         self.datetime_range = datetime_range
+        self.scene_id = scene_id
         self.cfar_config = cfar_config
         self.data_dir = data_dir
         self.store = store
@@ -490,6 +493,7 @@ def _scan_work(spec: ScanSpec) -> Iterator[tuple[ScanStage, str]]:
                     data_dir=spec.data_dir,
                     cfar_config=spec.cfar_config,
                     datetime_range=spec.datetime_range,
+                    scene_id=spec.scene_id,
                     provider=spec.provider,
                     product=spec.product,
                     on_stage=lambda stage, detail: events.put((ScanStage(stage), detail)),
@@ -925,6 +929,7 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
         provider=provider,
         product=body.product,
         datetime_range=body.datetime_range,
+        scene_id=body.scene_id,
         cfar_config=body.cfar_config.overrides() if body.cfar_config else None,
         data_dir=state.data_dir,
         store=state.store,

@@ -15,6 +15,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from darkfleet.providers import RealDataUnavailableError
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 #: The AOI that fully covers ``cog/fixture_32648.tif``.
@@ -58,16 +60,27 @@ def asset_override(name: str = "cog/fixture_32648.tif") -> Any:
     Every field the evidence record exposes is a real Sentinel-1 value: a real
     item id, platform, acquisition time and CRS. This is not a synthetic scene,
     because no such concept remains in this project.
+
+    ``scene_id`` is honoured the way the real resolver honours it: an exact match
+    or a failure. Returning the fixture scene for a pinned id that names something
+    else would model a substituted acquisition, which is precisely the behaviour
+    the pin exists to prevent.
     """
     href = str(fixture_path(name))
+    item_id = "S1A_FIXTURE_20240101T000000"
 
-    def resolve(provider: str, product: str, bbox: Any, dr: Any) -> Any:
+    def resolve(provider: str, product: str, bbox: Any, dr: Any, scene_id: Any = None) -> Any:
         from darkfleet.providers.stac import SarAsset
 
+        if scene_id is not None and str(scene_id) != item_id:
+            raise RealDataUnavailableError(
+                f"Scene {scene_id!r} does not intersect this area in the requested window.",
+                details={"requested_scene_id": str(scene_id), "candidates_considered": [item_id]},
+            )
         return SarAsset(
             provider=provider,
             collection="sentinel-1-rtc",
-            item_id="S1A_FIXTURE_20240101T000000",
+            item_id=item_id,
             acquisition_time="2024-01-01T00:00:00.000000Z",
             platform="sentinel-1a",
             product="RTC",
