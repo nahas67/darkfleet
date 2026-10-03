@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 
 import { loadTrack } from '../api/client';
 import { engine } from '../globe/engine';
+import { GhostVesselPanel } from './GhostVesselPanel';
 import { store, useStore } from '../state/store';
 import { classificationColor } from '../design/tokens';
 import {
@@ -34,9 +35,10 @@ import {
   fmtUtc,
 } from '../design/format';
 
-type Tab = 'OVERVIEW' | 'AIS' | 'ANALYSIS' | 'EVIDENCE';
+type Tab = 'OVERVIEW' | 'GHOST' | 'AIS' | 'ANALYSIS' | 'EVIDENCE';
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
   ['OVERVIEW', 'Overview'],
+  ['GHOST', 'Ghost Vessel'],
   ['AIS', 'AIS'],
   ['ANALYSIS', 'Analysis'],
   ['EVIDENCE', 'Evidence'],
@@ -134,6 +136,7 @@ export function TargetIntel() {
         aria-labelledby={`intel-tab-${tab}`}
       >
         {tab === 'OVERVIEW' ? <Overview target={target} /> : null}
+        {tab === 'GHOST' ? <GhostVesselPanel target={target} /> : null}
         {tab === 'AIS' ? <AisTab target={target} /> : null}
         {tab === 'ANALYSIS' ? <AnalysisTab target={target} /> : null}
         {tab === 'EVIDENCE' ? <EvidenceTab target={target} /> : null}

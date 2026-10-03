@@ -96,6 +96,36 @@ class ScoreDecomposition(BaseModel):
     time_delta_seconds: float = Field(alias="timeDeltaSeconds")
 
 
+class RejectedCandidate(BaseModel):
+    """The best AIS candidate that was considered and not accepted (GFST).
+
+    Carries its score and how far short it fell, so the rejection can be
+    arithmetic rather than assertion.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    mmsi: str
+    vessel_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("vesselName", "vessel_name"),
+        serialization_alias="vesselName",
+    )
+    score: Confidence = Field(ge=0.0, le=1.0)
+    distance_meters: float = Field(
+        ge=0.0, validation_alias=AliasChoices("distanceMeters", "distance_meters"),
+        serialization_alias="distanceMeters",
+    )
+    time_delta_seconds: float = Field(
+        validation_alias=AliasChoices("timeDeltaSeconds", "time_delta_seconds"),
+        serialization_alias="timeDeltaSeconds",
+    )
+    shortfall: float = Field(
+        ge=0.0,
+        description="How far below the acceptance threshold this candidate scored.",
+    )
+
+
 class AisAssociation(BaseModel):
     """An association between one detection and one AIS observation."""
 
@@ -138,6 +168,36 @@ class AisAssociation(BaseModel):
             "aisAssociationConfidence", "ais_association_confidence"
         ),
         serialization_alias="aisAssociationConfidence",
+    )
+
+    # ---- making the association decision inspectable (GFST) ----
+    # Without these, "no association was accepted" is unfalsifiable: a reader
+    # cannot distinguish an empty search from a near miss, and those are entirely
+    # different findings. `closest_rejected` is what makes the decision
+    # defensible to an analyst who has to explain it.
+    candidates_considered: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("candidatesConsidered", "candidates_considered"),
+        serialization_alias="candidatesConsidered",
+        description="AIS candidates evaluated for this detection, accepted or not.",
+    )
+    acceptance_threshold: Confidence = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("acceptanceThreshold", "acceptance_threshold"),
+        serialization_alias="acceptanceThreshold",
+        description="Composite score a candidate needed to be accepted.",
+    )
+    closest_rejected: RejectedCandidate | None = Field(
+        default=None,
+        validation_alias=AliasChoices("closestRejected", "closest_rejected"),
+        serialization_alias="closestRejected",
+        description=(
+            "Best candidate that was NOT accepted. Null means the search found "
+            "nothing at all, which is a different finding from a near miss."
+        ),
     )
     score_decomposition: ScoreDecomposition | None = Field(
         default=None,

@@ -186,6 +186,21 @@ def correlate(
         if LOW_BAND <= c["score"] < MIN_SCORE:
             weak_best[c["idx"]] = max(weak_best.get(c["idx"], 0.0), c["score"])
 
+    # The best candidate considered and REJECTED, per target -- regardless of how
+    # far below threshold it fell.
+    #
+    # Without this, "no association was accepted" is unfalsifiable: an analyst
+    # cannot tell an empty search from a near miss, and those are completely
+    # different findings. The closest rejected candidate is what makes the
+    # decision inspectable, which is the whole point of a Ghost Vessel workflow.
+    closest_rejected: dict[int, Candidate] = {}
+    for c in cands:
+        if c["idx"] in matched or c["idx"] in unresolved:
+            continue
+        incumbent = closest_rejected.get(c["idx"])
+        if incumbent is None or c["score"] > incumbent["score"]:
+            closest_rejected[c["idx"]] = c
+
     targets: list[dict[str, Any]] = []
     for idx, comp in enumerate(components):
         lat, lon = component_position(comp)
@@ -252,6 +267,12 @@ def correlate(
             if comp["wake"]:
                 tags.append("UNDERWAY")
 
+        # Computed for EVERY target, not just the unmatched branch: the winning
+        # candidate and the runner-up are both needed to explain a match, and an
+        # analyst asking "why not?" needs the same fields on the other branch.
+        rejected = closest_rejected.get(idx)
+        candidates_considered = len([c for c in cands if c["idx"] == idx])
+
         corr: dict[str, Any] = {
             "matched": bool(best_ais and score >= MIN_SCORE),
             "mmsi": str(best_ais["mmsi"]) if best_ais else None,
@@ -262,6 +283,26 @@ def correlate(
             "predictedLon": m["pred"]["lon"] if m else None,
             "scoreDecomposition": None,
         }
+        # Association decision, made inspectable.
+        #
+        # `candidatesConsidered` and `closestRejected` let a reader answer "why was
+        # this not matched?" with arithmetic instead of assertion. Both are null
+        # when the search genuinely found nothing, which is a DIFFERENT finding
+        # from "found something and rejected it" and is preserved as such.
+        corr["candidatesConsidered"] = candidates_considered
+        corr["acceptanceThreshold"] = MIN_SCORE
+        corr["closestRejected"] = (
+            {
+                "mmsi": str(rejected["ais"]["mmsi"]),
+                "vesselName": rejected["ais"].get("shipName"),
+                "score": round(rejected["score"], 3),
+                "distanceMeters": round(rejected["dist"]),
+                "timeDeltaSeconds": rejected["dt"],
+                "shortfall": round(MIN_SCORE - rejected["score"], 3),
+            }
+            if rejected is not None
+            else None
+        )
         if m:
             corr["scoreDecomposition"] = {
                 "spatialScore": round(m["spatial"], 3),

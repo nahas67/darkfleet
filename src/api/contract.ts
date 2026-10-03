@@ -47,6 +47,12 @@ export interface AisAssociation {
   readonly predictedLat?: number | null;
   readonly predictedLon?: number | null;
   readonly aisAssociationConfidence?: number;
+  /** AIS candidates evaluated for this detection, accepted or not. */
+  readonly candidatesConsidered?: number;
+  /** Composite score a candidate needed to be accepted. */
+  readonly acceptanceThreshold?: number;
+  /** Best candidate that was NOT accepted. Null means the search found nothing at all, which is a different finding from a near miss. */
+  readonly closestRejected?: RejectedCandidate | null;
   readonly scoreDecomposition?: ScoreDecomposition | null;
 }
 
@@ -298,6 +304,17 @@ export interface VesselTrackResponse {
   readonly note: string;
 }
 
+export interface RejectedCandidate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mmsi: string;
+  readonly vesselName?: string | null;
+  readonly score: number;
+  readonly distanceMeters: number;
+  readonly timeDeltaSeconds: number;
+  /** How far below the acceptance threshold this candidate scored. */
+  readonly shortfall: number;
+}
+
 export interface ScanScene {
   readonly provider?: string;
   readonly collection?: string;
@@ -343,6 +360,7 @@ export type ContractSchemaName =
   | 'ScanAisResponse'
   | 'TargetAisResponse'
   | 'VesselTrackResponse'
+  | 'RejectedCandidate'
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'

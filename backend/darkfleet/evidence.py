@@ -7,6 +7,7 @@ from typing import Any
 
 from . import __classification_schema__, __processing_version__, __version__
 from .geoid import describe_datum
+from .ghost_vessel import assess, display_label
 from .marine import describe_position
 from .marine import provenance as marine_provenance
 
@@ -73,15 +74,36 @@ def build_provenance(
 
 
 def target_evidence(
-    target: dict[str, Any], provenance: dict[str, Any], chip: dict[str, Any] | None
+    target: dict[str, Any],
+    provenance: dict[str, Any],
+    chip: dict[str, Any] | None,
+    *,
+    ais_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Per-target evidence slice: observation, association, confidence, uncertainty."""
+    """Per-target evidence slice: observation, association, confidence, uncertainty.
+
+    Structurally separates OBSERVED / HYPOTHESES / UNKNOWNS. They are never merged
+    into one paragraph, because a reader who skims prose cannot tell which clause
+    was measured and which was suggested. An empty block still renders, so
+    "nothing found" is never mistaken for "not examined".
+    """
     corr = target.get("corr", {})
     decomposition = corr.get("scoreDecomposition")
     lat, lon = target["lat"], target["lon"]
+    designation = display_label(target["cls"])[0]
+    region = _region_text(describe_position(lat, lon))
+    ghost = assess(
+        target,
+        ais_coverage=ais_coverage,
+        wake_detected=target.get("wake"),
+        region=region,
+    )
     return {
         "target_id": target["id"],
         "classification": target["cls"],
+        # Product designation sits ABOVE the analytical class, never replaces it.
+        "designation": designation,
+        "ghost_vessel": ghost,
         "observed": {
             "position": {
                 "lat": lat,
@@ -125,6 +147,38 @@ def target_evidence(
         },
         "summary": target.get("assessment"),
         "tags": target.get("tags", []),
+        # The two remaining evidence blocks. `ghost` carries the Ghost Vessel
+        # variant of both; for every other class they state plainly that the
+        # blocks are not applicable, rather than being omitted (omission reads as
+        # "not examined").
+        "hypotheses": ghost.get("hypotheses")
+        or [{"text": "No hypotheses are raised for this classification; the association "
+                     "either cleared the threshold or the target is not an association "
+                     "question."}],
+        "unknowns": ghost.get("unknowns") or _GENERIC_UNKNOWNS,
         "sar_chip": chip,
         "provenance": provenance,
     }
+
+
+def _region_text(ctx: dict[str, Any]) -> str | None:
+    """A readable region phrase, or ``None`` when no name is established.
+
+    Never a fallback name for open water. "Open ocean" is a real answer; inventing
+    a nearby landfall would be a fabricated location.
+    """
+    kind = ctx.get("kind")
+    primary = ctx.get("primary")
+    if primary:
+        return str(primary)
+    if kind == "open_ocean":
+        return "Open ocean (no marine region name established)"
+    return None
+
+
+#: Applies to any target that is not a Ghost Vessel candidate. Stated, not omitted.
+_GENERIC_UNKNOWNS: list[dict[str, str]] = [
+    {"text": "Intent"},
+    {"text": "Destination"},
+    {"text": "Behaviour between observations"},
+]
