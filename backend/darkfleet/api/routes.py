@@ -1634,7 +1634,17 @@ def debug_layer(
     notes: list[str] = []
     if layer in _LAYER_COLUMNS:
         columns = list(_LAYER_COLUMNS[layer])
-        rows = min(int(array.shape[0]), limit)
+        total = int(array.shape[0])
+        returned = min(total, limit)
+        # The array is right here and was previously discarded: `limit` and
+        # `truncated` were computed and then the rows were thrown away, so a
+        # caller could confirm the layer existed and never see a value in it.
+        # Emitting the window makes `limit`, `row_limit` and `truncated` mean what
+        # they say.
+        data = [
+            {name: jsonable(value) for name, value in zip(columns, row, strict=True)}
+            for row in array[:returned].tolist()
+        ]
         return DebugLayerResponse(
             scan_id=scan_id,
             layer=layer,
@@ -1643,9 +1653,10 @@ def debug_layer(
             shape=[int(value) for value in array.shape],
             dtype=str(array.dtype),
             columns=columns,
-            rows=int(array.shape[0]),
-            row_limit=rows,
-            truncated=rows < int(array.shape[0]),
+            rows=total,
+            row_limit=returned,
+            truncated=returned < total,
+            data=data,
             notes=[
                 f"one row per target; full values live in GET /api/scans/{scan_id}/targets"
             ],
@@ -1960,13 +1971,18 @@ def _correlation_debug_layer(
 ) -> DebugLayerResponse:
     """Serve a correlation layer from the record's own score decomposition.
 
-    Rows are emitted only for targets that actually carry the field. A target
-    with no AIS association yields a row with nulls and an explicit note, never
-    a zero position and never a fabricated match radius.
+    A row is emitted only for a target that actually carries the field. A target
+    with no AIS association contributes no row, and the count of those is stated
+    in a note rather than being padded into a row of nulls -- a null position
+    would be one more thing a reader could mistake for a measurement, and a
+    fabricated match radius would be worse.
+
+    Note that this function used to *count* eligible rows and return none of
+    them, so ``kind="table"`` and ``limit`` were promises the payload did not
+    keep. The rows are now built here.
     """
     columns = list(_CORRELATION_COLUMNS[layer])
     targets = [t for t in (record.get("targets") or []) if isinstance(t, dict)]
-    rows = 0
     notes: list[str] = [
         (
             "built from the persisted correlation result, not from a rendering; "
@@ -1974,6 +1990,7 @@ def _correlation_debug_layer(
         )
     ]
     unassociated = 0
+    data: list[dict[str, Any]] = []
     for target in targets:
         corr = target.get("corr")
         corr = corr if isinstance(corr, dict) else {}
@@ -1982,30 +1999,29 @@ def _correlation_debug_layer(
         has_mmsi = bool(corr.get("mmsi"))
         if not has_mmsi:
             unassociated += 1
-        if (
-            (layer in ("ais_observations", "correlation_lines") and has_mmsi)
-            or (
-                layer == "ais_predicted"
-                and corr.get("predictedLat") is not None
-            )
-            or (
-                layer == "match_radius"
-                and decomposition.get("matchRadiusMeters") is not None
-            )
-            or (layer == "score_decomposition" and bool(decomposition))
-        ):
-            rows += 1
+        row = _correlation_row(layer, target, corr, decomposition, has_mmsi)
+        if row is not None:
+            data.append(row)
 
+    total = len(data)
     if unassociated:
         notes.append(
             f"{unassociated} of {len(targets)} target(s) had no AIS association and "
             "are absent from this layer; that is a data-availability fact, not a "
             "finding about the vessel."
         )
-    if not rows:
+    if not total:
         notes.append(
             f"no target in this scan carries {layer!r} data; the layer is empty, "
             "which is different from unavailable"
+        )
+
+    returned = min(total, limit)
+    window = data[:returned]
+    if returned < total:
+        notes.append(
+            f"showing {returned} of {total} row(s); the full set is in "
+            f"GET /api/scans/{scan_id}/targets"
         )
 
     return DebugLayerResponse(
@@ -2013,14 +2029,89 @@ def _correlation_debug_layer(
         layer=layer,
         kind="table",
         source="correlation",
-        shape=[rows],
+        shape=[total],
         dtype="object",
         columns=columns,
-        rows=rows,
-        row_limit=min(rows, limit),
-        truncated=rows > min(rows, limit),
+        rows=total,
+        row_limit=returned,
+        truncated=returned < total,
+        data=window,
         notes=notes,
     )
+
+
+def _correlation_row(
+    layer: str,
+    target: Mapping[str, Any],
+    corr: Mapping[str, Any],
+    decomposition: Mapping[str, Any],
+    has_mmsi: bool,
+) -> dict[str, Any] | None:
+    """One row of a correlation layer, or ``None`` when the target has no data.
+
+    Every value is read from the persisted correlation result. A missing field
+    stays ``None``: the row exists because the association was made, and an
+    absent sub-score is an absent measurement, not a zero contribution.
+    """
+    target_id = target.get("id")
+    mmsi = corr.get("mmsi")
+
+    if layer == "ais_observations":
+        if not has_mmsi:
+            return None
+        # The observed fix behind the association. Taken from the record's own
+        # AIS delivery rather than re-derived, so this table can never disagree
+        # with what the correlation actually consumed.
+        observation = (target.get("ais") or {}).get("observation") if isinstance(
+            target.get("ais"), dict
+        ) else None
+        observation = observation if isinstance(observation, dict) else {}
+        return {
+            "target_id": target_id,
+            "mmsi": mmsi,
+            "observed_lat": observation.get("lat"),
+            "observed_lon": observation.get("lon"),
+            "observed_at": observation.get("timestamp"),
+        }
+
+    if layer == "ais_predicted":
+        if corr.get("predictedLat") is None:
+            return None
+        return {
+            "target_id": target_id,
+            "mmsi": mmsi,
+            "predicted_lat": corr.get("predictedLat"),
+            "predicted_lon": corr.get("predictedLon"),
+        }
+
+    if layer == "match_radius":
+        if decomposition.get("matchRadiusMeters") is None:
+            return None
+        return {"target_id": target_id, "match_radius_m": decomposition["matchRadiusMeters"]}
+
+    if layer == "correlation_lines":
+        if not has_mmsi:
+            return None
+        return {
+            "target_id": target_id,
+            "mmsi": mmsi,
+            "distance_offset_m": corr.get("distanceOffsetMeters"),
+            "time_delta_s": corr.get("timeDeltaSeconds"),
+        }
+
+    if layer == "score_decomposition":
+        if not decomposition:
+            return None
+        return {
+            "target_id": target_id,
+            "distance_score": decomposition.get("spatialScore"),
+            "time_score": decomposition.get("temporalScore"),
+            "heading_score": decomposition.get("headingScore"),
+            "size_score": decomposition.get("sizeScore"),
+            "total_score": decomposition.get("compositeScore"),
+        }
+
+    return None
 
 
 def _observations(state: State, *, max_scans: int) -> list[dict[str, Any]]:

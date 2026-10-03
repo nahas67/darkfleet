@@ -46,6 +46,17 @@ packages = ["darkfleet"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+# Reusing another module's pytest fixtures means importing the fixture function
+# and then naming it as a test parameter. That IS the use -- pytest resolves a
+# test's fixtures by parameter name, so the import and the parameter are the same
+# identifier by design. Ruff models neither pytest nor fixtures and reports the
+# parameter as a redefinition of an "unused" import.
+#
+# Scoped to the one file that reuses fixtures rather than enabled repo-wide, so
+# a genuine redefinition elsewhere still fails.
+"tests/test_debug_table_rows.py" = ["F811"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

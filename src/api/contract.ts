@@ -250,9 +250,13 @@ export interface DebugLayerResponse {
   readonly dtype?: string | null;
   readonly stats?: LayerStats | null;
   readonly columns?: string[] | null;
+  /** Total rows in the layer. */
   readonly rows?: number | null;
+  /** Rows returned in `data`. */
   readonly row_limit?: number | null;
   readonly truncated?: boolean;
+  /** Row objects keyed by `columns`. Null for an array layer, which returns `grid` instead. Never empty-and-null for a table with rows. */
+  readonly data?: Record<string, unknown>[] | null;
   /** Side length of the returned grid. */
   readonly grid_size?: number | null;
   readonly grid?: number[][] | null;

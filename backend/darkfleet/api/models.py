@@ -340,7 +340,26 @@ class LayerStats(BaseModel):
 
 
 class DebugLayerResponse(BaseModel):
-    """``GET /api/debug/{scan_id}/{layer}``: a summary, not a blob."""
+    """``GET /api/debug/{scan_id}/{layer}``: a summary, not a blob.
+
+    Two payload shapes, one per ``kind``:
+
+    ``array``
+        Statistics over the whole grid plus an optional block-mean ``grid`` for
+        display. The full raster is never serialised.
+
+    ``table``
+        ``columns`` names the fields, ``data`` carries the rows. ``rows`` is the
+        TOTAL row count, ``row_limit`` is how many were returned, and
+        ``truncated`` says whether the window dropped any.
+
+        The ``data`` field is the important one. This model used to describe a
+        table by naming its columns and counting its rows while returning no rows
+        at all, which made ``kind="table"``, ``limit``, ``row_limit`` and
+        ``truncated`` four promises the payload did not keep -- a caller could
+        confirm a layer existed and learn nothing about its contents. ``limit``
+        now genuinely bounds the window and the counts describe it honestly.
+    """
 
     scan_id: str
     layer: str
@@ -352,9 +371,16 @@ class DebugLayerResponse(BaseModel):
     dtype: str | None = None
     stats: LayerStats | None = None
     columns: list[str] | None = None
-    rows: int | None = None
-    row_limit: int | None = None
+    rows: int | None = Field(default=None, description="Total rows in the layer.")
+    row_limit: int | None = Field(default=None, description="Rows returned in `data`.")
     truncated: bool = False
+    data: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Row objects keyed by `columns`. Null for an array layer, which "
+            "returns `grid` instead. Never empty-and-null for a table with rows."
+        ),
+    )
     grid_size: int | None = Field(default=None, description="Side length of the returned grid.")
     grid: list[list[float]] | None = None
     notes: list[str] = Field(default_factory=list)
