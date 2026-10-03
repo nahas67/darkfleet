@@ -54,6 +54,15 @@ from darkfleet.ais.delivery import (
     identity_from,
     to_out,
 )
+from darkfleet.api.advanced import (
+    DetectorCardOut,
+    DetectorsOut,
+    PatternOut,
+    PatternsOut,
+    RevisitPlanOut,
+    TrackHypothesisOut,
+    TracksOut,
+)
 from darkfleet.api.models import (
     DEFERRED_EXPORT_FORMATS,
     SUPPORTED_EXPORT_FORMATS,
@@ -2049,14 +2058,14 @@ def _observations(state: State, *, max_scans: int) -> list[dict[str, Any]]:
     return rows
 
 
-@router.get("/revisit")
+@router.get("/revisit", response_model=RevisitPlanOut)
 def revisit_plan(
     state: State,
     bbox: str = Query(description="Comma separated min_lon,min_lat,max_lon,max_lat."),
     provider: str = Query(default="planetary-computer"),
     history_days: int = Query(default=120, ge=1, le=730),
     horizon_days: int = Query(default=30, ge=0, le=180),
-) -> Response:
+) -> RevisitPlanOut:
     """SAR acquisition plan for an area (GEO-002).
 
     Answers "when can this water actually be imaged, and where are the gaps?"
@@ -2085,21 +2094,25 @@ def revisit_plan(
         window_start=datetime.fromisoformat(start),
         window_end=datetime.fromisoformat(end),
     )
-    payload = plan.to_dict()
-    payload["provider"] = provider
-    payload["collection"] = collection
-    payload["requested_bbox"] = list(box)
-    return Response(
-        content=json.dumps(payload, indent=2, sort_keys=True, default=str),
-        media_type="application/json",
+    # Returned as a model rather than a hand-built Response so response_model
+    # actually validates the payload. Wrapping in Response() skips validation
+    # entirely, which is exactly how a payload drifts from its own contract
+    # unnoticed.
+    return RevisitPlanOut(
+        **{
+            **plan.to_dict(),
+            "provider": provider,
+            "collection": collection,
+            "requested_bbox": list(box),
+        }
     )
 
 
-@router.get("/tracks")
+@router.get("/tracks", response_model=TracksOut)
 def list_tracks(
     state: State,
     max_scans: int = Query(default=50, ge=1, le=500),
-) -> dict[str, Any]:
+) -> TracksOut:
     """Multi-pass track HYPOTHESES across the persisted history (ADV-001..003).
 
     Never claims a confirmed identity, and never links a detection that had no
@@ -2107,23 +2120,23 @@ def list_tracks(
     """
     observations = [r for r in _observations(state, max_scans=max_scans) if r["lat"] is not None]
     tracks = build_tracks(observations)
-    return {
-        "scans_considered": len({o["scan_id"] for o in observations}),
-        "observations_considered": len(observations),
-        "track_count": len(tracks),
-        "tracks": [t.to_dict() for t in tracks],
-        "note": (
+    return TracksOut(
+        scans_considered=len({o["scan_id"] for o in observations}),
+        observations_considered=len(observations),
+        track_count=len(tracks),
+        tracks=[TrackHypothesisOut(**t.to_dict()) for t in tracks],
+        note=(
             "Tracks are hypotheses built from reported AIS identity, not from "
             "geometry alone. DarkFleet does not confirm vessel identity."
         ),
-    }
+    )
 
 
-@router.get("/patterns")
+@router.get("/patterns", response_model=PatternsOut)
 def list_patterns(
     state: State,
     max_scans: int = Query(default=50, ge=1, le=500),
-) -> dict[str, Any]:
+) -> PatternsOut:
     """Longitudinal behaviour PATTERNS (ADV-009/010).
 
     Each pattern carries its observation, a hypothesis, a bounded confidence and
@@ -2132,46 +2145,46 @@ def list_patterns(
     """
     observations = [r for r in _observations(state, max_scans=max_scans) if r["lat"] is not None]
     patterns = temporal_analyse(observations)
-    return {
-        "scans_considered": len({o["scan_id"] for o in observations}),
-        "observations_considered": len(observations),
-        "pattern_count": len(patterns),
-        "patterns": [p.to_dict() for p in patterns],
-        "note": (
+    return PatternsOut(
+        scans_considered=len({o["scan_id"] for o in observations}),
+        observations_considered=len(observations),
+        pattern_count=len(patterns),
+        patterns=[PatternOut(**p.to_dict()) for p in patterns],
+        note=(
             "Patterns describe data coverage and correlation outcomes. A missing "
             "AIS association is a coverage fact and is not evidence of conduct."
         ),
-    }
+    )
 
 
-@router.get("/detectors")
-def list_detectors() -> dict[str, Any]:
+@router.get("/detectors", response_model=DetectorsOut)
+def list_detectors() -> DetectorsOut:
     """The detector registry (ADV-007/008).
 
     An ML or ensemble detector without weights and validation is refused at
     registration, so it can never appear here as an available detector.
     """
     registry = DetectorRegistry()
-    return {
-        "default": registry.resolve().card.name,
-        "detectors": [
-            {
-                "name": card.name,
-                "kind": card.kind,
-                "training_domain": card.training_domain,
-                "input_product": card.input_product,
-                "validation_data": card.validation_data,
-                "limitations": card.limitations,
-                "weights_digest": card.weights_digest,
-            }
+    return DetectorsOut(
+        default=registry.resolve().card.name,
+        detectors=[
+            DetectorCardOut(
+                name=card.name,
+                kind=card.kind,
+                training_domain=card.training_domain,
+                input_product=card.input_product,
+                validation_data=card.validation_data,
+                limitations=card.limitations,
+                weights_digest=card.weights_digest,
+            )
             for card in registry.available()
         ],
-        "note": (
+        note=(
             "CA-CFAR is the shipped baseline. No trained weights ship with "
             "DarkFleet; an adapter must declare its training domain and "
             "validation before it can be registered."
         ),
-    }
+    )
 
 
 @router.get("/targets/{target_id}/summary")

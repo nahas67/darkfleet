@@ -36,6 +36,7 @@ import { SceneBrowser } from '../scenes/SceneBrowser';
 import { SystemPanel } from '../command/SystemPanel';
 import { ReportsWorkspace } from '../reports/ReportsWorkspace';
 import { AnalyticsWorkspace } from '../analytics/AnalyticsWorkspace';
+import { AdvancedWorkspace } from '../intelligence/AdvancedWorkspace';
 import { UnifiedSearch } from '../search/UnifiedSearch';
 
 export function DarkFleetCommandApp() {
@@ -137,6 +138,7 @@ export function DarkFleetCommandApp() {
           {activeWorkspace === 'TASKING' ? <ScanWorkflow /> : null}
           {activeWorkspace === 'LAYERS' ? <LayerConsole /> : null}
           {activeWorkspace === 'ANALYTICS' ? <AnalyticsWorkspace /> : null}
+          {activeWorkspace === 'ADVANCED' ? <AdvancedWorkspace bbox={state.aoi} /> : null}
           {activeWorkspace === 'REPORTS' ? <ReportsWorkspace /> : null}
           {activeWorkspace === 'SYSTEM' ? <SystemPanel /> : null}
         </aside>

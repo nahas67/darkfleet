@@ -16,6 +16,7 @@ export type WorkspaceId =
   | 'TASKING'
   | 'LAYERS'
   | 'ANALYTICS'
+  | 'ADVANCED'
   | 'REPORTS'
   | 'SYSTEM';
 
@@ -32,6 +33,11 @@ export const RAIL: readonly Entry[] = [
   { id: 'TASKING', label: 'Tasking', glyph: '⇄' },
   { id: 'LAYERS', label: 'Layers', glyph: '▤' },
   { id: 'ANALYTICS', label: 'Analytics', glyph: '∿' },
+  // Revisit planning, multi-pass hypotheses, longitudinal patterns and detector
+  // provenance. Shipped only because the backend had all four implemented and
+  // unreachable; a rail entry without behaviour is a defect, and this one has a
+  // real response for every state including failure.
+  { id: 'ADVANCED', label: 'Advanced', glyph: '⌖' },
   { id: 'REPORTS', label: 'Reports', glyph: '⎙' },
   { id: 'SYSTEM', label: 'System', glyph: '⚙' },
 ];

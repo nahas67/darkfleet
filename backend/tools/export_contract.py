@@ -51,6 +51,15 @@ OUT = ROOT / "src" / "api" / "contract.ts"
 #: appended after the interfaces so a literal union can reference them.
 SCHEMAS: tuple[str, ...] = (
     "ScoreDecomposition",
+    # Advanced analysis: revisit planning, multi-pass hypotheses, longitudinal
+    # patterns, detector provenance. These four routes answered with a bare
+    # dict[str, Any], which is why they had no typed frontend surface -- with no
+    # response_model there was no schema to translate. Listed as roots here so
+    # they are part of the contract the frontend is generated from.
+    "RevisitPlanOut",
+    "TracksOut",
+    "PatternsOut",
+    "DetectorsOut",
     "AisAssociation",
     "VesselTarget",
     "AisOnlyTarget",

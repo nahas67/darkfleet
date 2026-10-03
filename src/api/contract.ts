@@ -37,6 +37,45 @@ export interface ScoreDecomposition {
   readonly timeDeltaSeconds: number;
 }
 
+export interface RevisitPlanOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly acquisition_count?: number;
+  readonly acquisitions?: AcquisitionOut[];
+  readonly gaps?: RevisitGapOut[];
+  readonly statistics: RevisitStatisticsOut;
+  readonly window?: Record<string, string | null>;
+  readonly next_after?: AcquisitionOut | null;
+  readonly limitations?: string[];
+  readonly provider: string;
+  readonly collection: string;
+  readonly requested_bbox?: number[];
+}
+
+export interface TracksOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scans_considered?: number;
+  readonly observations_considered?: number;
+  readonly track_count?: number;
+  readonly tracks?: TrackHypothesisOut[];
+  readonly note?: string;
+}
+
+export interface PatternsOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scans_considered?: number;
+  readonly observations_considered?: number;
+  readonly pattern_count?: number;
+  readonly patterns?: PatternOut[];
+  readonly note?: string;
+}
+
+export interface DetectorsOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly default: string;
+  readonly detectors?: DetectorCardOut[];
+  readonly note?: string;
+}
+
 export interface AisAssociation {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly matched: boolean;
@@ -304,6 +343,70 @@ export interface VesselTrackResponse {
   readonly note: string;
 }
 
+export interface AcquisitionOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly item_id: string;
+  readonly acquisition_time: string;
+  readonly platform: string;
+  readonly collection: string;
+  readonly polarizations?: string[];
+}
+
+export interface RevisitGapOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly start: string;
+  readonly end: string;
+  readonly days: number;
+  readonly window_edge?: boolean;
+  readonly exceeds_nominal?: boolean;
+}
+
+export interface RevisitStatisticsOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly platform_count?: number;
+  readonly acquisitions_per_platform?: Record<string, number>;
+  readonly interior_gap_count?: number;
+  readonly median_revisit_days?: number | null;
+  readonly min_revisit_days?: number | null;
+  readonly max_revisit_days?: number | null;
+  readonly flagged_gap_count?: number;
+  readonly nominal_repeat_days: number;
+}
+
+export interface TrackHypothesisOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly track_id: string;
+  readonly points?: TrackPointOut[];
+  readonly gaps?: TrackGapOut[];
+  readonly supporting_evidence?: string[];
+  readonly contradicting_evidence?: string[];
+  readonly identity_strength?: number;
+  readonly confidence_statement?: string;
+}
+
+export interface PatternOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly pattern_id: string;
+  readonly kind: string;
+  readonly observed: string;
+  readonly hypothesis: string;
+  readonly confidence?: number;
+  readonly unknowns?: string[];
+  readonly evidence?: string[];
+}
+
+export interface DetectorCardOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly name: string;
+  readonly kind: string;
+  readonly training_domain?: string;
+  readonly input_product?: string;
+  readonly validation_data?: string;
+  readonly limitations?: string;
+  /** Digest of learned weights; None for deterministic detectors. */
+  readonly weights_digest?: string | null;
+}
+
 export interface RejectedCandidate {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly mmsi: string;
@@ -336,9 +439,34 @@ export type ScanStage = "QUEUED" | "SEARCHING_SCENE" | "READING_SAR" | "PREPROCE
 /** Whether the archive can answer a question, and how completely. */
 export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
 
+export interface TrackGapOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly seconds: number;
+  readonly implied_speed_knots?: number | null;
+  readonly plausible?: boolean;
+  readonly note?: string;
+}
+
+export interface TrackPointOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly item_id: string;
+  readonly acquisition_time: string;
+  readonly lat: number;
+  readonly lon: number;
+  readonly sar_conf: number;
+  readonly classification: string;
+  readonly apparent_length_m: number;
+  readonly length_unc_m: number;
+}
+
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
   | 'ScoreDecomposition'
+  | 'RevisitPlanOut'
+  | 'TracksOut'
+  | 'PatternsOut'
+  | 'DetectorsOut'
   | 'AisAssociation'
   | 'VesselTarget'
   | 'AisOnlyTarget'
@@ -360,11 +488,19 @@ export type ContractSchemaName =
   | 'ScanAisResponse'
   | 'TargetAisResponse'
   | 'VesselTrackResponse'
+  | 'AcquisitionOut'
+  | 'RevisitGapOut'
+  | 'RevisitStatisticsOut'
+  | 'TrackHypothesisOut'
+  | 'PatternOut'
+  | 'DetectorCardOut'
   | 'RejectedCandidate'
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'
   | 'AisCoverageState'
+  | 'TrackGapOut'
+  | 'TrackPointOut'
 ;
 
 /**
