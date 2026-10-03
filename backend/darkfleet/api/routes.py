@@ -175,10 +175,39 @@ _LAYER_SOURCE: Final[dict[str, str]] = {
     "detection_mask": "cfar_mask",
 }
 
-#: Table columns for the derived (non-array) layers.
-_LAYER_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
-    "components": ("area_px", "mean_db", "max_db", "sar_conf", "ais_conf"),
-    "centroids": ("lat", "lon"),
+#: Per-target table layers, served from the scan record rather than from a
+#: cached float array.
+#:
+#: `components` and `centroids` used to be numeric arrays shaped (n_targets, k),
+#: which forced two compromises: the target id could not be a column because a
+#: float64 array cannot hold a string, so the link between a component and its
+#: final target was POSITIONAL and implicit; and the sub-pixel centroid GEO-CORR
+#: measured had nowhere to go. Both are now explicit columns.
+#:
+#: The positional link was the real hazard. A frontend given row 3 could only
+#: guess which target it belonged to, and the natural guess -- nearest point --
+#: is exactly the kind of manufactured relation this product refuses to invent.
+_TARGET_TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
+    "components": (
+        "target_id",
+        "classification",
+        "area_px",
+        "mean_db",
+        "max_db",
+        "sar_conf",
+        "ais_conf",
+        "pixel_row",
+        "pixel_col",
+    ),
+    "centroids": (
+        "target_id",
+        "classification",
+        "pixel_row",
+        "pixel_col",
+        "lat",
+        "lon",
+        "geo_centre_offset",
+    ),
 }
 
 #: Correlation layers. These are not rasters: they are per-target rows built
@@ -599,7 +628,7 @@ def _layer_arrays(spec: ScanSpec, result: Mapping[str, Any]) -> dict[str, np.nda
         )
     else:
         arrays["centroids"] = np.zeros((0, 2), dtype=np.float64)
-        arrays["components"] = np.zeros((0, len(_LAYER_COLUMNS["components"])), dtype=np.float64)
+        arrays["components"] = np.zeros((0, 5), dtype=np.float64)
     return arrays
 
 
@@ -632,7 +661,7 @@ def _persist_scan(spec: ScanSpec, result: Mapping[str, Any]) -> None:
     record["debug"] = {
         "cache": inputs,
         "layers": written,
-        "columns": {name: list(columns) for name, columns in _LAYER_COLUMNS.items()},
+        "columns": {name: list(columns) for name, columns in _TARGET_TABLE_COLUMNS.items()},
         "runtime_mode": spec.runtime_mode,
         "synthetic": bool(result.get("synthetic")),
     }
@@ -1781,6 +1810,8 @@ def debug_layer(
             message=f"No completed scan {scan_id!r}; debug layers are written at COMPLETE.",
             scan_id=scan_id,
         )
+    if layer in _TARGET_TABLE_COLUMNS:
+        return _target_table_layer(record, scan_id=scan_id, layer=layer, limit=limit)
     if layer in _CORRELATION_COLUMNS:
         return _correlation_debug_layer(record, scan_id=scan_id, layer=layer, limit=limit)
     key = _debug_cache_key(record)
@@ -1803,35 +1834,6 @@ def debug_layer(
             detail={"available": list((record.get("debug") or {}).get("layers", []))},
         )
     notes: list[str] = []
-    if layer in _LAYER_COLUMNS:
-        columns = list(_LAYER_COLUMNS[layer])
-        total = int(array.shape[0])
-        returned = min(total, limit)
-        # The array is right here and was previously discarded: `limit` and
-        # `truncated` were computed and then the rows were thrown away, so a
-        # caller could confirm the layer existed and never see a value in it.
-        # Emitting the window makes `limit`, `row_limit` and `truncated` mean what
-        # they say.
-        data = [
-            {name: jsonable(value) for name, value in zip(columns, row, strict=True)}
-            for row in array[:returned].tolist()
-        ]
-        return DebugLayerResponse(
-            scan_id=scan_id,
-            layer=layer,
-            kind="table",
-            source="targets",
-            shape=[int(value) for value in array.shape],
-            dtype=str(array.dtype),
-            columns=columns,
-            rows=total,
-            row_limit=returned,
-            truncated=returned < total,
-            data=data,
-            notes=[
-                f"one row per target; full values live in GET /api/scans/{scan_id}/targets"
-            ],
-        )
     if layer == "normalized":
         notes.append(
             "normalized reports the calibrated dB grid (raw_db); the pipeline emits no "
@@ -2135,6 +2137,96 @@ def _as_datetime(value: object) -> datetime | None:
 # CP15. These surfaces read the persisted scan history and add NOTHING to the
 # detection result. A track is a hypothesis; a pattern is a hypothesis; both are
 # reported with their contradicting evidence intact.
+
+
+def _target_table_layer(
+    record: Mapping[str, Any], *, scan_id: str, layer: str, limit: int
+) -> DebugLayerResponse:
+    """Serve `components` / `centroids` from the scan record, one row per target.
+
+    Read from the record rather than from the cached float array, because the link
+    to a target has to be an ID. A float64 `(n, k)` array cannot hold a string,
+    so the correspondence was positional -- and a positional link cannot survive a
+    filter, a sort, or a different ordering on either side. A frontend handed row
+    3 could only guess which target it belonged to, and the natural guess
+    (nearest point) is exactly the manufactured relation this product refuses to
+    invent.
+
+    The pixel centroid is GEO-CORR's own sub-pixel measurement, carried through
+    verbatim: not re-derived here, not rounded. The frontend maps these numbers
+    into display space; the coordinate itself still comes from the probe route.
+    """
+    columns = list(_TARGET_TABLE_COLUMNS[layer])
+    targets = [t for t in (record.get("targets") or []) if isinstance(t, dict)]
+
+    data: list[dict[str, Any]] = []
+    for target in targets:
+        centroid = target.get("geo_pixel_centroid")
+        centroid = centroid if isinstance(centroid, (list, tuple)) and len(centroid) >= 2 else None
+        pixel_col = float(centroid[0]) if centroid else None
+        pixel_row = float(centroid[1]) if centroid else None
+        if layer == "components":
+            data.append(
+                {
+                    "target_id": target.get("id"),
+                    "classification": target.get("cls"),
+                    "area_px": target.get("area"),
+                    "mean_db": target.get("meanDb"),
+                    "max_db": target.get("maxDb"),
+                    "sar_conf": target.get("sarConf"),
+                    "ais_conf": target.get("aisConf"),
+                    "pixel_row": pixel_row,
+                    "pixel_col": pixel_col,
+                }
+            )
+        else:
+            data.append(
+                {
+                    "target_id": target.get("id"),
+                    "classification": target.get("cls"),
+                    "pixel_row": pixel_row,
+                    "pixel_col": pixel_col,
+                    "lat": target.get("lat"),
+                    "lon": target.get("lon"),
+                    "geo_centre_offset": target.get("geo_centre_offset"),
+                }
+            )
+
+    total = len(data)
+    returned = min(total, limit)
+    notes = [
+        (
+            "one row per detected component, keyed by the final target id; the link is "
+            "the id, never row order"
+        ),
+        (
+            "pixel_row/pixel_col are GEO-CORR sub-pixel centroids in the window raster; "
+            "they are never rounded and never re-derived here"
+        ),
+        f"full values in GET /api/scans/{scan_id}/targets",
+    ]
+    if returned < total:
+        notes.append(f"showing {returned} of {total} row(s)")
+    if not total:
+        notes.append(
+            f"no target in this scan carries {layer!r} data; the layer is empty, "
+            "which is different from unavailable"
+        )
+
+    return DebugLayerResponse(
+        scan_id=scan_id,
+        layer=layer,
+        kind="table",
+        source="targets",
+        shape=[total],
+        dtype="object",
+        columns=columns,
+        rows=total,
+        row_limit=returned,
+        truncated=returned < total,
+        data=data[:returned],
+        notes=notes,
+    )
 
 
 def _correlation_debug_layer(

@@ -248,6 +248,32 @@ class VesselTarget(BaseModel):
     lat: Latitude
     lon: Longitude
 
+    #: GEO-CORR's sub-pixel centroid in the window raster: [col, row].
+    #:
+    #: The analytical anchor for a detection: what makes the target mappable onto
+    #: the raster it came from, and what lets the coordinate above be re-derived
+    #: rather than merely trusted. Measured by ``geolocate_components`` and then
+    #: dropped by correlation's explicit field list, so the raster-to-target link
+    #: existed only positionally.
+    #:
+    #: Nullable, not defaulted: a target whose centroid was never measured must say
+    #: so rather than reporting (0, 0), which would place it at the raster corner.
+    geo_pixel_centroid: list[float] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("geo_pixel_centroid", "geoPixelCentroid"),
+        serialization_alias="geoPixelCentroid",
+        description="Sub-pixel [col, row] centroid in the window raster; null when unmeasured.",
+    )
+    #: The sample-index to sample-centre offset that produced the coordinate.
+    #: 0.5 means pixel CENTRE -- the convention rasterio calls ``offset='center'``.
+    #: Carried so a reader can reproduce the conversion rather than assume it.
+    geo_centre_offset: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("geo_centre_offset", "geoCentreOffset"),
+        serialization_alias="geoCentreOffset",
+        description="Pixel-centre offset applied by the geolocation authority.",
+    )
+
     #: SAR detection confidence, 0..1. Never None: the detector always produced a
     #: score, and a detection without one would not be a detection.
     sar_conf: Confidence = Field(alias="sarConf")

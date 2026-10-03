@@ -320,6 +320,21 @@ def correlate(
                 "cls": cls,
                 "lat": lat,
                 "lon": lon,
+                # GEO-CORR measured these and correlation was dropping them.
+                #
+                # `geolocate_components` computes the exact sub-pixel centroid
+                # and the centre convention used, and keeps them on the component.
+                # This target dict is built from an explicit field list, and those
+                # keys were not on it -- so the sub-pixel position was discarded one
+                # layer after being measured.
+                #
+                # The coordinate itself was never wrong: lat/lon were already
+                # correct. What was lost is the REPRODUCIBILITY evidence -- the
+                # ability to map this detection back to a pixel, to re-derive its
+                # coordinate, or to prove a raster pixel and this target are the
+                # same object. The analytics surface needs exactly that.
+                "geo_pixel_centroid": comp.get("geo_pixel_centroid"),
+                "geo_centre_offset": comp.get("geo_centre_offset"),
                 "sarConf": sar_conf,
                 "aisConf": round(score, 2),
                 "lenM": apparent_len,

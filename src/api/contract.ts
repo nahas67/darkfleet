@@ -112,6 +112,10 @@ export interface VesselTarget {
   readonly classification: "SAR_MATCHED_AIS" | "SAR_UNMATCHED" | "AIS_ONLY" | "STATIONARY_OR_INFRASTRUCTURE" | "SEA_CLUTTER" | "LOW_CONFIDENCE" | "UNRESOLVED";
   readonly lat: number;
   readonly lon: number;
+  /** Sub-pixel [col, row] centroid in the window raster; null when unmeasured. */
+  readonly geoPixelCentroid?: number[] | null;
+  /** Pixel-centre offset applied by the geolocation authority. */
+  readonly geoCentreOffset?: number | null;
   readonly sarConf: number;
   readonly aisConf: number;
   readonly lenM: number;
