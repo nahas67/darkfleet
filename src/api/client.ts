@@ -17,7 +17,8 @@ import type {
   VesselTrackResponse,
   VesselTarget,
 } from '../api/contract';
-import { ApiError, api } from './errors';
+import { ApiError, ContractViolation, api } from './errors';
+import { validateScanTargetsResponse } from './validate';
 import { openStageStream, type StageStreamHandle } from './sse';
 import type { AisContact, BBox, Coverage, SarTarget, VesselTrack } from '../state/store';
 import { store } from '../state/store';
@@ -142,7 +143,12 @@ export function followScan(scanId: string): void {
 
 export async function loadScanResults(scanId: string): Promise<void> {
   try {
-    const payload = await api.get<ScanTargetsResponse>(`/api/scans/${scanId}/targets`);
+    // Runtime contract validation is not optional. The generated TypeScript types
+    // are erased at runtime, so without this a drifted field arrives as
+    // `undefined` and renders as a plausible-looking blank. A violation throws
+    // and is surfaced; it is never treated as "no data yet".
+    const raw = await api.get<unknown>(`/api/scans/${scanId}/targets`);
+    const payload: ScanTargetsResponse = validateScanTargetsResponse(raw);
     if (!assertReal(payload)) {
       store.set({
         targets: [],
