@@ -243,15 +243,28 @@ export async function loadRaster(
 ): Promise<{
   rectangle: { west: number; south: number; east: number; north: number };
   imageUrl: string;
+  width: number;
+  height: number;
 } | null> {
   store.set({ rasterLoading: true, rasterError: null });
   try {
     const meta = await api.get<{
       rectangle: { west: number; south: number; east: number; north: number };
       image_url: string;
+      render: { rendered_shape: [number, number] };
     }>(`/api/scans/${scanId}/raster/${layer}`);
-    store.set({ rasterLoaded: true, rasterLoading: false, rasterError: null });
-    return { rectangle: meta.rectangle, imageUrl: meta.image_url };
+    // Deliberately NOT setting rasterLoaded here. This function only fetched
+    // METADATA; the image has not been requested and the layer has not been
+    // added. Setting it produced a System panel reading "raster: loaded" over a
+    // globe with no imagery on it.
+    store.set({ rasterLoading: false, rasterError: null });
+    const [height, width] = meta.render?.rendered_shape ?? [0, 0];
+    return {
+      rectangle: meta.rectangle,
+      imageUrl: meta.image_url,
+      width: Number(width) || 1,
+      height: Number(height) || 1,
+    };
   } catch (error) {
     // An absent raster is a real state with a real reason, not a blank globe.
     store.set({

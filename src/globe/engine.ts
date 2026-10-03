@@ -31,7 +31,7 @@ import {
   Rectangle,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
-  UrlTemplateImageryProvider,
+  SingleTileImageryProvider,
   type Viewer,
 } from 'cesium';
 
@@ -62,7 +62,7 @@ export class TacticalEngine {
   #viewer: Viewer | null = null;
   #container: HTMLElement | null = null;
   #callbacks: EngineCallbacks = {};
-  #rasterProvider: UrlTemplateImageryProvider | null = null;
+  #rasterProvider: SingleTileImageryProvider | null = null;
   #rasterRectangle: { west: number; south: number; east: number; north: number } | null = null;
   #targetEntities = new Map<string, { entity: unknown; handle: TargetHandle }>();
   #trackEntities: Array<unknown> = [];
@@ -140,11 +140,26 @@ export class TacticalEngine {
    * which went stale the moment the camera moved without a mouse.
    */
   #installCameraTelemetry(viewer: Viewer): void {
+    // Plausibility bound. Cesium reports a finite height in every frame, but a
+    // transient during teardown or a stalled flight produced a value ~10^11 m,
+    // which was rendered verbatim. The scene's own zoom clamp is 500..30,000,000
+    // m, so anything outside that is not a camera position.
+    const MIN_ALT = 1;
+    const MAX_ALT = 40_000_000;
     const publish = () => {
       const carto = Cartographic.fromCartesian(viewer.camera.positionWC);
-      this.#onCameraAltitude?.(Number.isFinite(carto.height) ? carto.height : null);
+      const height = carto.height;
+      if (!Number.isFinite(height) || height < MIN_ALT || height > MAX_ALT) {
+        this.#onCameraAltitude?.(null);
+        return;
+      }
+      this.#onCameraAltitude?.(height);
     };
+    // `moveEnd` is the settle signal; `changed` alone leaves the resting
+    // altitude unpublished because the final frames move less than
+    // percentageChanged (0.5% of camera height).
     viewer.camera.changed.addEventListener(publish);
+    viewer.camera.moveEnd.addEventListener(publish);
     publish();
   }
 
@@ -427,12 +442,19 @@ export class TacticalEngine {
    * the requested AOI. If those disagree the image would be placed somewhere it
    * was not acquired -- which is the GEO-CORR defect in the visual domain.
    */
+  /**
+   * Attach a server-rendered SAR raster to the measured rectangle it came from.
+   *
+   * Returns whether the layer was actually added, so the caller can report the
+   * truth rather than assuming success.
+   */
   setRaster(
     url: string,
     rectangle: { west: number; south: number; east: number; north: number },
-  ): void {
+    size: { width: number; height: number },
+  ): boolean {
     const viewer = this.#viewer;
-    if (!viewer) return;
+    if (!viewer) return false;
     this.#clearRaster();
 
     // The rectangle is mandatory. Without it the provider tiles over the whole
@@ -444,9 +466,19 @@ export class TacticalEngine {
       rectangle.north,
     );
     try {
-      const provider = new UrlTemplateImageryProvider({
+      // SingleTile, not UrlTemplate: this is ONE image over ONE rectangle. A
+      // template provider re-requests the same URL once per tile -- five
+      // identical GETs of the same PNG were observed.
+      //
+      // tileWidth/tileHeight are MANDATORY in Cesium 1.145; omitting them throws
+      // DeveloperError. They are the rendered pixel size the backend measured,
+      // and they are also how the image is fitted into the rectangle, so they are
+      // taken from the render report rather than guessed.
+      const provider = new SingleTileImageryProvider({
         url,
         rectangle: extent,
+        tileWidth: Math.max(1, Math.round(size.width)),
+        tileHeight: Math.max(1, Math.round(size.height)),
         credit: 'DarkFleet SAR - server-rendered from the measured window transform',
       });
       this.#rasterProvider = provider;
@@ -454,11 +486,15 @@ export class TacticalEngine {
       const layer: ImageryLayer = viewer.imageryLayers.addImageryProvider(provider);
       layer.alpha = 0.95;
       layer.show = true;
-    } catch {
-      // Cesium refused the provider. The raster will not show and the product
-      // says so from state -- no placeholder image is substituted.
+      return true;
+    } catch (error) {
+      // Logged, not swallowed. A previous revision caught and discarded, so a
+      // missing required option produced a silently blank globe and no console
+      // entry pointing at the cause.
+      console.error('DarkFleet: SAR raster layer was not added', error);
       this.#rasterProvider = null;
       this.#rasterRectangle = null;
+      return false;
     }
   }
 

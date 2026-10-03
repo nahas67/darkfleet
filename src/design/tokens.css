@@ -78,6 +78,22 @@ body {
 
 /* ------------------------------------------------------------------ primitives */
 
+/*
+ * Component classes live in `components`, Tailwind utilities in `utilities`, and
+ * the latter layer comes later in the cascade.
+ *
+ * This is load-bearing. Without it, `.df-label { font-size: 11px }` and
+ * Tailwind's `text-[10px]` have identical specificity, and the one declared
+ * earlier in the sheet wins -- so 19 `.df-label text-[10px]` and 31
+ * `.df-num text-[10px]` usages silently rendered at 11px. Every explicit size in
+ * the markup was being ignored. The rail only escaped this because it was given
+ * its own class by hand, which is a sign the layer was the missing piece.
+ *
+ * New component classes go in this layer. Do not restate font-size in a utility
+ * outside it and expect the utility to take effect.
+ */
+@layer components {
+
 .df-label {
   font-family: var(--df-label);
   font-size: 11px;
@@ -279,6 +295,8 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
 }
 
 /* ------------------------------------------------------------------ utilities */

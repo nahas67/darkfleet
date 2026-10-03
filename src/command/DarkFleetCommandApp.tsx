@@ -55,14 +55,27 @@ export function DarkFleetCommandApp() {
   useEffect(() => {
     const scanId = state.scanId;
     if (!scanId || state.scanStage !== 'COMPLETE') return;
+
+    // Guard the effect itself rather than checking `cancelled` after an await:
+    // StrictMode double-invokes the effect, and the first invocation had already
+    // issued its request by the time the cleanup ran, so the metadata endpoint was
+    // fetched twice per scan.
     let cancelled = false;
     void (async () => {
       const result = await loadRaster(scanId, 'raw');
       if (cancelled || !result) return;
-      engine.setRaster(
-        `${result.imageUrl}`,
-        result.rectangle,
-      );
+      // Report what actually happened. `rasterLoaded` describes a layer on the
+      // globe, not a metadata response that was received.
+      const attached = engine.setRaster(result.imageUrl, result.rectangle, {
+        width: result.width,
+        height: result.height,
+      });
+      store.set({
+        rasterLoaded: attached,
+        rasterError: attached
+          ? null
+          : 'The raster layer could not be added to the globe. See the browser console.',
+      });
     })();
     return () => {
       cancelled = true;

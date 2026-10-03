@@ -41,7 +41,8 @@ const GROUP_ORDER: readonly LayerGroup[] = ['SENSORS', 'CONTACTS', 'REFERENCE', 
  */
 export function deriveLayers(state: ReturnType<typeof useStore>): LayerState[] {
   const hasScan = state.scanId !== null && state.targets.length > 0;
-  const hasRaster = state.rasterLoaded;
+  // Both must hold: the artifact exists AND it is actually on the globe.
+  const hasRaster = state.rasterLoaded && state.scanId !== null;
   const hasAis = state.aisOnly.length > 0 || state.track !== null;
 
   return DEFINITIONS.map((definition) => {

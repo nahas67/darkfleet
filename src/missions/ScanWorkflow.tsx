@@ -197,7 +197,11 @@ export function ScanWorkflow() {
                 >
                   <span className="text-ink-dim">{fmtInstant(event.timestamp).slice(11)}</span>
                   <span className="w-28 shrink-0 text-ink-2">{event.stage}</span>
-                  <span className="truncate text-ink-dim">{event.detail}</span>
+                  {/* title, because a truncated detail line otherwise
+                      silently loses the stage's real message */}
+                  <span className="truncate text-ink-dim" title={event.detail}>
+                    {event.detail}
+                  </span>
                 </li>
               ))}
             </ol>
