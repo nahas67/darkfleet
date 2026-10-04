@@ -38,11 +38,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .provenance import DatasetCoverage, LicenseKind
+from .provenance import DatasetCoverage, DatasetProvenance, LicenseKind
 
 
 class InstallStatus(str, Enum):
@@ -154,14 +153,14 @@ class InstalledDataset(StrictModel):
         """
         return self.status in (InstallStatus.READY, InstallStatus.CHECKSUM_UNRECORDED)
 
-    def provenance(self) -> Any:
+    def provenance(self) -> DatasetProvenance:
         """The :class:`DatasetProvenance` a contextual value must carry.
 
         Built from the SAME manifest the query read, so a displayed version cannot
-        disagree with the version on disk (§77).
+        disagree with the version on disk (§77). Declared with a real return type rather
+        than ``Any``: an untyped accessor here silently widened three call sites in
+        ``context.py`` and let mypy miss a genuine provenance bug.
         """
-        from .provenance import DatasetProvenance
-
         m = self.manifest
         return DatasetProvenance(
             provider=m.provider,

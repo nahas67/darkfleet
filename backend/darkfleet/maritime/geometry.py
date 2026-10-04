@@ -42,6 +42,12 @@ _M_PER_DEG_LAT = 111_320.0
 class DistanceMethod(str, Enum):
     GEODESIC_METER = "GEODESIC_METER"
     PLANAR_DEGREE = "PLANAR_DEGREE"
+    #: Distance to the nearest SAMPLE along a densified line, computed geodesically from
+    #: that sample. Reported so a coastal distance is never mistaken for an exact
+    #: point-to-segment measurement: it OVER-estimates by at most half the sample
+    #: spacing, which is the safe direction -- the product never claims a vessel is
+    #: closer to a coast than it is.
+    DENSIFIED_POINT_METER = "DENSIFIED_POINT_METER"
 
 
 class DistanceResult(str, Enum):
@@ -165,6 +171,169 @@ def bounding_box_of(points: Sequence[tuple[float, float]], pad_deg: float = 0.0)
 def within_span(lon: float, lat: float, lat_span: tuple[float, float], lon_span: LonSpan) -> bool:
     """(lon, lat) containment against a latitude range and a wrap-aware span."""
     return lat_span[0] <= lat <= lat_span[1] and lon_span.contains(lon)
+
+
+def densify(coords: Sequence[tuple[float, float]], step_m: float = 5_000.0) -> list[tuple[float, float]]:
+    """
+    Insert points along a polyline so no gap exceeds ``step_m``.
+
+    Needed for distance-to-coast. Measuring to the nearest VERTEX of a 1:10m coastline
+    would report a distance to the coast that can be many kilometres wrong -- the true
+    nearest point is usually mid-segment, not at a vertex.
+
+    WHY THE INTERPOLATION IS PLANAR AND IT DOES NOT MATTER
+    ------------------------------------------------------
+    Step placement uses a locally-scaled linear interpolation rather than a forward
+    geodesic. That is acceptable precisely because of what it is used for: choosing
+    WHERE to sample. The value finally reported is computed geodesically from the
+    chosen samples by :func:`nearest_point`. So the planar step affects only the
+    distribution of samples, never the reported distance, and the error is bounded by
+    half the sample spacing.
+
+    Longitude is scaled by cos(latitude), so a step is a roughly correct number of
+    metres at every latitude instead of shrinking towards the poles.
+    """
+    if len(coords) < 2 or step_m <= 0:
+        return list(coords)
+    out: list[tuple[float, float]] = []
+    for index in range(len(coords) - 1):
+        lon1, lat1 = coords[index]
+        lon2, lat2 = coords[index + 1]
+        out.append((_wrap(lon1), lat1))
+        dlon = unwrap_lon(lon2, lon1) - lon1
+        dlat = lat2 - lat1
+        span_m = geodesic_m(lon1, lat1, lon2, lat2)
+        if span_m <= step_m:
+            continue
+        mid_lat = math.radians((lat1 + lat2) / 2.0)
+        111_320.0 * max(math.cos(mid_lat), 1e-6)
+        span_deg = math.hypot(dlon * math.cos(mid_lat), dlat)
+        if span_deg <= 0:
+            continue
+        parts = max(1, math.ceil(span_m / step_m))
+        for k in range(1, parts):
+            frac = k / parts
+            out.append((_wrap(lon1 + dlon * frac), lat1 + dlat * frac))
+    out.append((_wrap(coords[-1][0]), coords[-1][1]))
+    return out
+
+
+def sample_polyline(
+    origin: LonLat,
+    lines: Iterable[Sequence[tuple[float, float]]],
+    *,
+    step_m: float = 5_000.0,
+    max_radius_m: float = 500_000.0,
+    subject: str = "COASTLINE",
+) -> Distance:
+    """Nearest point on any of several polylines, by densified geodesic sample.
+
+    Uses the shared :func:`nearest_point` rather than a parallel implementation, so a
+    coastal distance and a port distance go through the same prefilter and the same
+    hand-off to pyproj. A second nearest-neighbour implementation would eventually
+    disagree with the first.
+    """
+    origin.validate()
+    samples: list[tuple[str, float, float, Any]] = []
+    for index, line in enumerate(lines):
+        for lon, lat in densify(list(line), step_m=step_m):
+            samples.append((f"{subject}:{index}", lon, lat, None))
+    if not samples:
+        return Distance(None, DistanceMethod.DENSIFIED_POINT_METER,
+                        DistanceResult.NO_DATASET, subject, None, max_radius_m)
+    nearest: Distance = nearest_point(
+        origin, samples, subject=subject, max_radius_m=max_radius_m
+    )
+    # RE-LABEL THE METHOD. `nearest_point` reports GEODESIC_METER, which is true of the
+    # arithmetic but a FALSE PRECISION CLAIM here: the winner was chosen from SAMPLE
+    # points on the line, not from the line itself. A test caught this reporting
+    # GEODESIC_METER for a coastal distance, which would let a reader believe the value
+    # is an exact point-to-segment measurement. It over-estimates by at most half the
+    # sample spacing -- the safe direction, since the product never claims a vessel is
+    # closer to a coast than it is.
+    return Distance(
+        meters=nearest.meters,
+        method=DistanceMethod.DENSIFIED_POINT_METER,
+        result=nearest.result,
+        subject=nearest.subject,
+        feature_id=nearest.feature_id,
+        searched_radius_m=nearest.searched_radius_m,
+    )
+
+
+def point_in_polygon(
+    lon: float, lat: float, rings: Sequence[Sequence[tuple[float, float]]]
+) -> bool | None:
+    """Ray-casting containment. ``None`` for degenerate input, not ``False``.
+
+    ``None`` rather than ``False`` because "this polygon is malformed" and "this point
+    is outside it" are different facts: the first is a data fault worth reporting, the
+    second is an ordinary answer. Collapsing them turns a broken dataset into a silent
+    "not in any zone".
+
+    A DELIBERATE EXCEPTION TO THE ONE-AUTHORITY RULE
+    ----------------------------------------------
+    shapely is the production containment path, because it is faster and battle-tested.
+    This pure-python version exists so the two can be CROSS-CHECKED against each other in
+    tests, which is the only way to know the fast path is right on a real polygon. It
+    must never become a second answer path.
+
+    Longitude is unwrapped against the ring's own first vertex, so a polygon straddling
+    the antimeridian is tested in continuous space rather than being split by the
+    +-180 seam.
+    """
+    if not rings:
+        return None
+    outer = rings[0]
+    if len(outer) < 3:
+        return None
+
+    reference = outer[0][0]
+    px = unwrap_lon(lon, reference)
+
+    inside = False
+    j = len(outer) - 1
+    for i in range(len(outer)):
+        xi = unwrap_lon(outer[i][0], reference)
+        yi = outer[i][1]
+        xj = unwrap_lon(outer[j][0], reference)
+        yj = outer[j][1]
+        if (yi > lat) != (yj > lat):
+            denominator = yj - yi
+            if denominator == 0.0:
+                # Horizontal edge: contributes no crossing. Skipping rather than
+                # dividing keeps the parity count correct.
+                j = i
+                continue
+            x_cross = xi + (lat - yi) * (xj - xi) / denominator
+            if px < x_cross:
+                inside = not inside
+        j = i
+
+    if inside:
+        for hole in rings[1:]:
+            if len(hole) < 3:
+                continue
+            hx = unwrap_lon(hole[0][0], reference)
+            hole_inside = False
+            k = len(hole) - 1
+            for m in range(len(hole)):
+                xmi = unwrap_lon(hole[m][0], reference)
+                ymi = hole[m][1]
+                xki = unwrap_lon(hole[k][0], reference)
+                yki = hole[k][1]
+                if (ymi > lat) != (yki > lat):
+                    denominator = yki - ymi
+                    if denominator == 0.0:
+                        k = m
+                        continue
+                    x_cross = xmi + (lat - ymi) * (xki - xmi) / denominator
+                    if hx < x_cross:
+                        hole_inside = not hole_inside
+                k = m
+            if hole_inside:
+                return False
+    return inside
 
 
 def nearest_point(
