@@ -364,3 +364,27 @@ body {
   overflow-x: auto;
   scrollbar-width: thin;
 }
+
+/*
+ * Long tokens break INSIDE a cell rather than only at existing break opportunities.
+ *
+ * Measured at 1024x768 with the dossier open: nothing clipped and nothing overflowing,
+ * because `w-full` lets the table shrink and wrap. But the classification enum has no
+ * break opportunities, so `STATIONARY_OR_INFRASTRUCTURE` was splitting mid-identifier
+ * as `STATIONARY_OR_INFRASTR / UCTURE`. That is legible rather than broken, and it was
+ * the one residual the dense-table measurement actually surfaced.
+ *
+ * `anywhere` rather than `break-word` because `break-word` still prefers existing break
+ * points, and the underscore in these enums is not one. The trade-off is that a URL or
+ * an identifier can now break anywhere; in a numeric evidence table that is preferable
+ * to a word splitting in half.
+ *
+ * `.df-num` is included because the same enum also appears in the dossier's
+ * label/value ROWS, which are not table cells and so are outside `.df-scroll-x` --
+ * `STATIONARY_OR_INFRASTR / UCTURE` was wrapping mid-identifier there instead.
+ */
+.df-scroll-x td,
+.df-scroll-x th,
+.df-num {
+  overflow-wrap: anywhere;
+}
