@@ -511,6 +511,7 @@ export interface WakeEvidence {
   readonly wake_direction_deg?: number | null;
   readonly apparent_length_m?: number | null;
   readonly arm_angle_deg?: number | null;
+  readonly arm_angle_line_deg?: number | null;
   readonly method: string;
   readonly notes: string;
 }
@@ -1314,6 +1315,7 @@ export const WAKEEVIDENCE_FIELDS = [
   'wake_direction_deg',
   'apparent_length_m',
   'arm_angle_deg',
+  'arm_angle_line_deg',
   'method',
   'notes',
 ] as const;

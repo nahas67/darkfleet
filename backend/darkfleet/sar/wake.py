@@ -51,7 +51,14 @@ class WakeAnalysis:
     heading_deg: float | None
     wake_direction_deg: float | None
     apparent_length_m: float | None
+    #: Directed difference between the observed wake axis and the hull axis,
+    #: folded to 0..180. NOT an undirected line angle and NOT a physical arm
+    #: separation -- see `axial_delta_deg` and the note in api/targets.py.
     arm_angle_deg: float | None
+    #: The SAME measurement as an undirected line angle, 0..90. This is the value
+    #: to compare against a Kelvin cusp angle. A genuine Kelvin wake reports
+    #: roughly 160 here and roughly 19.5 in this field.
+    arm_angle_line_deg: float | None
     method: str
     notes: str
 
@@ -152,12 +159,28 @@ def _best_pair(chip: np.ndarray) -> tuple[float, float] | None:
     return best
 
 
-def _signed_axis_delta(heading_deg: float, axis_deg: float) -> float:
-    """Signed smallest difference between two axis bearings, folded to 0..180.
+def axial_delta_deg(a_deg: float, b_deg: float) -> float:
+    """Undirected angle between two LINE orientations, 0..90 degrees.
 
-    Hull axes are bidirectional, so this deliberately folds to a half-turn: the
-    value answers "how far is the observed wake axis from the measured hull
-    axis", not "which way is the ship pointing".
+    A straight line has no arrow, so the separation between two line orientations
+    is only defined modulo a half-turn:
+
+        delta = abs(a - b) % 180
+        delta = min(delta, 180 - delta)
+
+    This is the metric to use before comparing anything against the classical
+    Kelvin cusp angle, because `arm_angle_deg` is NOT in this form.
+    """
+    delta = abs(float(a_deg) - float(b_deg)) % 180.0
+    return delta if delta <= 90.0 else 180.0 - delta
+
+
+def _signed_axis_delta(heading_deg: float, axis_deg: float) -> float:
+    """Smallest difference between two bearings, folded to 0..180.
+
+    Hull axes are bidirectional, so this folds to a half-turn. It is a DIRECTED
+    difference folded afterwards, which is not the same as an undirected line
+    angle -- see `axial_delta_deg` and the note on `WakeAnalysis.arm_angle_deg`.
     """
     delta = abs((heading_deg - axis_deg) % 360.0)
     return round(delta if delta <= 180.0 else 360.0 - delta, 1)
@@ -216,7 +239,8 @@ def analyse_wake(
     if np.isfinite(chip).sum() < 64:
         return WakeAnalysis(
             detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, method=method,
+            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
+            method=method,
             notes="chip too small or non-finite for wake analysis",
         )
 
@@ -232,7 +256,8 @@ def analyse_wake(
     if n_valid < 8:
         return WakeAnalysis(
             detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, method=method,
+            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
+            method=method,
             notes="no measurable rays in chip",
         )
 
@@ -263,7 +288,8 @@ def analyse_wake(
     if best_dir is None:
         return WakeAnalysis(
             detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, method=method,
+            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
+            method=method,
             notes="no measurable rays in chip",
         )
 
@@ -278,7 +304,9 @@ def analyse_wake(
         return WakeAnalysis(
             detected=False, confidence=round(min(1.0, max(0.0, margin) / MIN_MARGIN_DB) * 0.2, 2),
             heading_deg=None, wake_direction_deg=None, apparent_length_m=None,
-            arm_angle_deg=round(measured_deg, 1), method=method,
+            arm_angle_deg=round(measured_deg, 1),
+            arm_angle_line_deg=round(axial_delta_deg(measured_deg, 0.0), 1),
+            method=method,
             notes=f"arm contrast below margin ({margin:.2f} dB)",
         )
 
@@ -291,6 +319,7 @@ def analyse_wake(
         wake_direction_deg=round(wake_direction, 1),
         apparent_length_m=length_m,
         arm_angle_deg=round(measured_deg, 1),
+        arm_angle_line_deg=round(axial_delta_deg(measured_deg, 0.0), 1),
         method=method,
         notes=(
             f"symmetric arm pair at {measured_deg:+.0f} deg to hull axis, "

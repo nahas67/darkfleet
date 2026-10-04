@@ -257,8 +257,25 @@ class WakeEvidence(BaseModel):
     wake_direction_deg: float | None = None
     #: Apparent wake length in METRES. Null unless detected.
     apparent_length_m: float | None = None
-    #: Measured angle between the arm pair and the hull axis, in degrees.
+    #: Measured angle between the observed wake axis and the hull axis, folded to
+    #: 0..180. READ THE CONVENTION BEFORE COMPARING IT.
+    #:
+    #: This is a directed difference folded to a half-turn, NOT an undirected
+    #: line angle, and NOT a physical arm separation. Because a wake trails
+    #: astern while the hull axis points forward, a genuine Kelvin wake with arms
+    #: at the classical ~19.5 deg to the track reports roughly ``180 - 19.5 =
+    #: 160.5`` here. Values in the 149-158 deg band are therefore consistent with
+    #: real Kelvin geometry rather than contradicting it.
+    #:
+    #: To compare against the Kelvin cusp angle, fold it:
+    #: ``arm_angle_line_deg`` is that value, and ``sar.wake.axial_delta_deg`` is
+    #: the function that computes it. Comparing this field directly to 19.5 is a
+    #: units error.
     arm_angle_deg: float | None = None
+    #: The same measurement as an UNDIRECTED line angle, 0..90 degrees. This is the
+    #: field to compare against a Kelvin cusp angle. Null unless the arm pair was
+    #: actually measured.
+    arm_angle_line_deg: float | None = None
     #: The analysis method, so a reader knows what was actually run.
     method: str
     #: Why this result, in the detector's own words. Never empty.
