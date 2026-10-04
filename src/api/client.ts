@@ -256,6 +256,7 @@ export async function loadScanResults(scanId: string): Promise<void> {
     if (!assertReal(payload)) {
       store.set({
         targets: [],
+        targetDetail: [],
         aisOnly: [],
         scanError:
           'This scan did not report REAL data with synthetic=false. No targets are drawn.',
@@ -288,11 +289,30 @@ export async function loadScanResults(scanId: string): Promise<void> {
       aisOnly,
       scene: payload.scene ?? null,
       scanError: null,
+      /*
+       * The scan this record came from, which is the function's own argument and is
+       * therefore unambiguous.
+       *
+       * Only `startScan` used to set it, so loading an EXISTING scan left `scanId`
+       * null -- or, worse, stale from whatever scan was loaded before. Both are
+       * real faults rather than cosmetic ones, because selection writers pass
+       * `scanId` to pin a target's identity, and target ids are per-scan:
+       *
+       *   null   -> every selection is unpinned, so the backend resolves the id
+       *             across the whole archive and answers `ambiguous: true`.
+       *   stale  -> the dossier pins DF-002 to the PREVIOUS scan, and shows one
+       *             vessel's header above another vessel's evidence. That is the
+       *             exact failure scan-scoped target identity exists to prevent.
+       */
+      scanId,
       // Re-assert the current selection: a target that no longer exists must not
-      // stay selected.
+      // stay selected. A surviving target is re-pinned to THIS scan, because the id
+      // it carries may have been scoped to a different one.
       selection:
-        selected.kind === 'target' && !targets.some((t) => t.id === selected.targetId)
-          ? { kind: 'none' }
+        selected.kind === 'target'
+          ? targets.some((t) => t.id === selected.targetId)
+            ? { kind: 'target', targetId: selected.targetId, scanId }
+            : { kind: 'none' }
           : selected,
     });
   } catch (error) {

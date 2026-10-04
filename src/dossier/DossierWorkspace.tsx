@@ -175,7 +175,16 @@ export function DossierWorkspace() {
         role="tablist"
         aria-label="Target dossier sections"
         onKeyDown={onTabKey}
-        className="df-scroll-x flex shrink-0 gap-0 border-b border-structural bg-base/60"
+        /*
+         * `flex-wrap` rather than a horizontal scroller.
+         *
+         * Eleven tabs do not fit on one line at 1024x768, and a scroller is the
+         * wrong answer for a primary navigation: it hides tabs behind a gesture,
+         * gives no affordance that more exist, and at that width it clipped HISTORY
+         * entirely while overlaying a scrollbar across the panel. Wrapping costs a
+         * second line of height and keeps every tab visible and reachable.
+         */
+        className="flex shrink-0 flex-wrap gap-x-0 gap-y-px border-b border-structural bg-base/60"
       >
         {TABS.map((entry) => (
           <button
@@ -198,7 +207,17 @@ export function DossierWorkspace() {
         ))}
       </div>
 
-      <div className="df-scroll min-h-0 flex-1 overflow-y-auto px-2 py-2" role="tabpanel">
+      {/*
+        `overflow-x-hidden` as well as `overflow-y-auto`: the observation tables are
+        wider than a narrow panel, and without this the whole panel becomes
+        horizontally scrollable, which desynchronises it from the globe beside it.
+        Wide tables carry their own `df-scroll-x` wrapper so they scroll
+        individually.
+      */}
+      <div
+        className="df-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2"
+        role="tabpanel"
+      >
         {/*
           Each branch gets `ref` and `target`. No tab re-derives identity, so a tab
           cannot disagree with the header about which vessel it is describing.

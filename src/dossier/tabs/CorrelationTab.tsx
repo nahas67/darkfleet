@@ -7,28 +7,37 @@
  * re-ranked, no threshold is re-applied. If the arithmetic looks wrong the answer
  * is to fix the backend under the defect-stop rule, not to adjust a display.
  *
- * FOUR CASES, KEPT APART
+ * WHAT THE CORRELATION RECORD CAN AND CANNOT ANSWER
  *
- * These are different findings with different implications, and collapsing them is
- * how an investigation goes wrong:
+ * `candidatesConsidered` is a count of candidates the correlation evaluated. It is
+ * NOT a statement about coverage, and reading it as one is a mistake this tab
+ * originally made: with zero candidates it announced "COVERAGE AVAILABLE -- NO
+ * CANDIDATES ENTERED THE MATCH WINDOW" on a deployment that had no AIS archive at
+ * all. A zero candidate count is equally consistent with nobody listening.
  *
- *   A  NO COVERAGE              nobody was listening. Absence of AIS is not evidence.
- *   B  COVERAGE, NO CANDIDATES  someone was listening; nothing came near the window.
- *   C  CANDIDATES REJECTED      vessels reported and the correlation declined them.
- *   D  ACCEPTED                 an association was made.
+ * The correlation record carries no coverage state, so this tab cannot distinguish
+ * case A from case B and does not pretend to. It reports what the record supports --
+ * no candidates entered the window -- and names the coverage question as one the
+ * AIS tab answers, with its scope stated. Claiming coverage from a count is exactly
+ * the kind of inference that makes an absence look like an observation.
  *
- * B and C in particular must not merge. "Nothing was there" and "something was
- * there and we said no" point in opposite directions, and an operator who cannot
- * tell them apart cannot reason about the target at all.
+ * THE FOUR CASES, AND WHO ESTABLISHES EACH
+ *
+ *   A  NO COVERAGE              the AIS tab, from the archive and window
+ *   B  NO CANDIDATES IN WINDOW  this tab, from the candidate count alone
+ *   C  CANDIDATES REJECTED      this tab: candidates evaluated, none accepted
+ *   D  ACCEPTED                 this tab: one candidate exceeded the threshold
+ *
+ * B and C must not merge. "Nothing entered the window" and "something entered and we
+ * said no" point in opposite directions.
  *
  * ON THE RANKED CANDIDATE TABLE
  *
- * The correlation record exposes `candidatesConsidered` as a COUNT and
- * `closestRejected` as a SINGLE candidate. It does not expose the evaluated
- * candidate list, so there is nothing to rank and this tab does not pretend
- * otherwise. A table of invented candidates would be the most dangerous element
- * possible on this screen: it would look like the correlation considered five
- * vessels and show three of them.
+ * The record exposes `candidatesConsidered` as a COUNT and `closestRejected` as a
+ * SINGLE candidate. It does not expose the evaluated candidate list, so there is
+ * nothing to rank and this tab does not pretend otherwise. A table of invented
+ * candidates would be the most dangerous element possible on this screen: it would
+ * look like the correlation weighed five vessels and show three of them.
  */
 
 import type { AisAssociation, VesselTarget } from '../../api/contract';
@@ -47,22 +56,17 @@ import {
   SubTitle,
 } from '../primitives';
 
-type CorrelationCase = 'A_NO_COVERAGE' | 'B_NO_CANDIDATES' | 'C_REJECTED' | 'D_ACCEPTED' | 'E_NOT_APPLICABLE';
+type CorrelationCase = 'B_NO_CANDIDATES' | 'C_REJECTED' | 'D_ACCEPTED' | 'E_NOT_APPLICABLE';
 
 const CASE_COPY: Record<CorrelationCase, { title: string; meaning: string; tone: PillTone }> = {
-  A_NO_COVERAGE: {
-    title: 'NO AIS COVERAGE',
-    meaning:
-      'No receiver covered this position at acquisition time. DarkFleet cannot say whether a ' +
-      'vessel was present, because for this place and time the AIS record is silent. Silence ' +
-      'here is not evidence of absence.',
-    tone: 'warn',
-  },
   B_NO_CANDIDATES: {
-    title: 'COVERAGE AVAILABLE — NO CANDIDATES ENTERED THE MATCH WINDOW',
+    title: 'NO CANDIDATES ENTERED THE MATCH WINDOW',
     meaning:
-      'A receiver did cover this area and time, and no AIS report fell inside the dynamic match ' +
-      'radius. Either no vessel was there, or no vessel reported. Those remain different.',
+      'The correlation evaluated no AIS candidate for this return. Whether that is because nobody ' +
+      'was listening, because nobody reported, or because no report fell inside the dynamic match ' +
+      'radius is NOT established by this record -- a zero candidate count is consistent with all ' +
+      'three. The AIS tab answers the coverage question for this window; its scope is the archive, ' +
+      'not the whole deployment.',
     tone: 'info',
   },
   C_REJECTED: {
@@ -108,7 +112,10 @@ export function CorrelationTab({
         ? 'B_NO_CANDIDATES'
         : corr?.closestRejected
           ? 'C_REJECTED'
-          : 'A_NO_COVERAGE';
+          // Candidates were evaluated but no rejected candidate was persisted. That
+          // is a gap in the record, and the honest label is the gap rather than a
+          // guess at which of the other cases it must have been.
+          : 'B_NO_CANDIDATES';
 
   const copy = CASE_COPY[kase];
   const decomposition = corr?.scoreDecomposition ?? null;
@@ -207,9 +214,9 @@ export function CorrelationTab({
         <Empty
           heading="NO SCORE DECOMPOSITION"
           detail={
-            matched || considered === null
-              ? 'The correlation produced no decomposition for this target.'
-              : 'No candidate was scored, so there is nothing to decompose. That is consistent with case B.'
+            matched
+              ? 'An association was made but the record carries no decomposition. That is a gap in the stored record, not a value of zero.'
+              : 'No candidate was scored, so there is nothing to decompose. That is consistent with no candidates having entered the window.'
           }
         />
       )}
