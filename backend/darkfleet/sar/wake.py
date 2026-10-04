@@ -82,7 +82,20 @@ def _ray_mean(chip: np.ndarray, angle_deg: float, r0: float, r1: float) -> float
     ok = (ys >= 0) & (ys < size) & (xs >= 0) & (xs < size)
     if not ok.any():
         return None
-    vals = chip[ys[ok].round().astype(int), xs[ok].round().astype(int)]
+    # Clamp AFTER rounding, not before.
+    #
+    # The `ok` mask admits any coordinate below `size`, so it admits 24.9999 in a
+    # 25-px chip -- and `round(24.9999)` is 25, one past the last index. That
+    # raised IndexError and aborted the whole scan whenever a component sat where
+    # a ray reached the chip edge.
+    #
+    # It never fired in the existing tests because they all use `half_chip=24`, a
+    # 49-px chip whose rays (reach R_END_PX = 22) stay well inside. It fires on
+    # the first smaller chip, and on any component whose chip is clipped by the
+    # raster edge.
+    iy = np.clip(ys[ok].round().astype(int), 0, size - 1)
+    ix = np.clip(xs[ok].round().astype(int), 0, size - 1)
+    vals = chip[iy, ix]
     vals = vals[np.isfinite(vals)]
     return float(vals.mean()) if vals.size else None
 
@@ -185,7 +198,19 @@ def analyse_wake(
     `orientation_deg` is the measured hull axis. A wake trails the stern, so the
     reported heading is derived from where the arms actually lie rather than
     assumed from the hull alone.
+
+    `half_chip` must be at least `R_END_PX`. The ray search measures out to
+    `R_END_PX` from the chip centre, so a smaller chip cannot contain the
+    measurement and every ray would fall off the edge. That precondition used to
+    be implicit -- the only caller passed 24 against a reach of 22, which is why
+    it was never noticed -- and is now stated and enforced, because the pipeline
+    passes a component chip whose size belongs to a different concern.
     """
+    if half_chip < int(R_END_PX):
+        raise ValueError(
+            f"half_chip={half_chip} cannot contain a ray reach of R_END_PX={R_END_PX:.0f}; "
+            "the arm measurement would fall outside the chip"
+        )
     method = "polar-ray-arm-pair"
     chip = _chip(np.asarray(db, dtype=np.float64), cy, cx, half_chip)
     if np.isfinite(chip).sum() < 64:
