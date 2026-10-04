@@ -188,7 +188,6 @@ ZONE_DISCLAIMER = (
 
 
 @dataclass(frozen=True)
-@dataclass(frozen=True)
 class ZoneClassification:
     """A point's zone, with the feature that decided it and its caveats.
 
