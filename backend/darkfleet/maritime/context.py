@@ -1,4 +1,4 @@
-"""Reference-dataset readers. One authority each, provenance always attached.
+﻿"""Reference-dataset readers. One authority each, provenance always attached.
 
 WHAT THIS MODULE IS
 
@@ -6,7 +6,7 @@ Four thin readers over locally installed prepared payloads -- coastline, maritim
 zones, ports, bathymetry -- plus the composition service that answers "where is this
 target, in maritime terms". Every reader returns a value AND the
 :class:`DatasetProvenance` that produced it, because a number without its source is an
-assertion (§17).
+assertion (Â§17).
 
 WHAT THIS MODULE IS NOT
 
@@ -14,12 +14,12 @@ It is not a second spatial authority. Point-in-zone, nearest-point and distance 
 delegate to :mod:`maritime.geometry`, which delegates distance to the correlation
 authority's geodesic. If a reader computed its own distance it would eventually
 disagree with correlation's, and an operator comparing the two readouts would have no
-way to tell which is right (§24).
+way to tell which is right (Â§24).
 
 ABSENCE IS A FIRST-CLASS ANSWER
 
 Every function takes the data directory and returns a typed result even when nothing is
-installed. A missing GEBCO must not raise, and must not become 0 m (§39, §46). Each
+installed. A missing GEBCO must not raise, and must not become 0 m (Â§39, Â§46). Each
 result therefore carries a status: whether the dataset is installed, whether it covers
 this point, and what the value is. Those are three separate questions and the type
 keeps them apart.
@@ -58,7 +58,7 @@ class ContextStatus(str, Enum):
 
     A channel can fail for a reason that has nothing to do with installation, and an
     operator needs to know which: a dataset that is installed but has no data for the
-    Pacific is a different problem from one that was never downloaded (§46).
+    Pacific is a different problem from one that was never downloaded (Â§46).
     """
 
     #: A value was computed.
@@ -143,7 +143,7 @@ def coast_distance(
 ) -> CoastDistance:
     """Distance to the nearest coastline.
 
-    Backend-only by design (§14, §23). The frontend displays this; it must not compute
+    Backend-only by design (Â§14, Â§23). The frontend displays this; it must not compute
     its own, because a hover readout and a dossier figure that disagree by a rounding
     difference are indistinguishable to an operator.
     """
@@ -201,22 +201,44 @@ def coast_distance(
 
 
 class ZoneFeature(BaseModel):
-    """One prepared zone polygon, with the source's own attributes."""
+    """One prepared zone feature, with the source's own attributes.
+
+    A feature may be MULTI-PART: Marine Regions delivers MultiPolygon geometries, and a
+    single EEZ can consist of a mainland block plus detached island blocks thousands of
+    kilometres away. Each part is stored and tested separately, so a point inside any
+    part is inside the feature. Flattening to one ring would have silently dropped every
+    detached block -- which for a distant-island state means most of its maritime area.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    #: Zone type as the SOURCE expresses it. Normalised to a MaritimeZone where that is
-    #: unambiguous, but never invented where it is not.
+    #: Zone type, normalised from the source's ``pol_type`` only where that mapping is
+    #: unambiguous. Never invented.
     zone: MaritimeZone
-    #: Sovereign / territory names EXACTLY as supplied. Never normalised, completed or
-    #: reduced to one -- a dataset naming three claimants reports three (§19, §26).
+    #: Sovereign names EXACTLY as supplied. Never normalised, completed or reduced to
+    #: one -- a dataset naming three claimants reports three (Â§19, Â§26).
     sovereign_names: tuple[str, ...] = ()
-    #: The source's own note about overlap or dispute.
+    #: Territory names, kept SEPARATELY from sovereigns. Collapsing them would discard
+    #: which name is a state and which is a territory.
+    territory_names: tuple[str, ...] = ()
+    #: The source's own ``pol_type``, e.g. ``200NM`` or ``12NM``. Preserved because it is
+    #: what distinguishes an EEZ from a territorial sea; inferring it from geometry would
+    #: be a guess.
+    pol_type: str | None = None
+    geoname: str | None = None
+    area_km2: float | None = None
+    #: Marine Regions' own cross-reference between an EEZ and its boundary
+    #: feature, so a zone answer can be traced into the publisher's id space.
+    mrgid_eez: int | None = None
+    #: The publisher's own pointer to how the geometry was derived. Present on
+    #: the high-seas feature as marineregions.org/eezmethodology.php.
+    source: str | None = None
+    #: The source's own note about overlap, joint regime or multiple claimants.
     dispute_note: str | None = None
-    #: Exterior ring as (lon, lat); interior rings are ignored for containment, which
-    #: means a hole would report the zone as present. Recorded as a preprocessing caveat.
-    ring: tuple[tuple[float, float], ...]
+    #: Exterior rings as (lon, lat). Interior rings are not retained: the prepared form
+    #: stores the exterior of each part, and that is what containment needs.
+    parts: tuple[tuple[tuple[float, float], ...], ...] = ()
     holes: tuple[tuple[tuple[float, float], ...], ...] = ()
 
 
@@ -227,8 +249,52 @@ class ZoneIndex(BaseModel):
 
     features: tuple[ZoneFeature, ...] = ()
     #: Set by preprocessing when features were dropped or repaired, so a lossy ingestion
-    #: is REPORTED rather than silently accepted (§22).
+    #: is REPORTED rather than silently accepted (Â§22).
     preprocessing_notes: tuple[str, ...] = ()
+
+
+ZONE_DATASET = "marine_regions_eez_wfs"
+HIGH_SEAS_DATASET = "marine_regions_high_seas_wfs"
+
+
+def _load_zones(data_dir: Path, dataset_id: str) -> tuple[ZoneIndex | None, DatasetProvenance | None, str]:
+    """Load and validate a prepared zone payload.
+
+    Returns (index, provenance, detail). A dataset that fails schema validation yields
+    None with a reason, so the caller reports AMBIGUOUS or NOT_ESTABLISHED rather than
+    crashing or silently finding nothing.
+    """
+    installed = require_usable(data_dir, dataset_id)
+    if installed is None:
+        return None, None, _absent_detail(data_dir, dataset_id)
+    payload = load_prepared(data_dir, dataset_id) or {}
+    try:
+        return ZoneIndex.model_validate(payload), installed.provenance(), ""
+    except ValueError as exc:
+        return None, installed.provenance(), f"schema validation failed: {exc}"[:200]
+
+
+def _feature_contains(lon: float, lat: float, feature: ZoneFeature) -> bool:
+    """Whether a point falls inside a feature, respecting interior rings.
+
+    The previous version returned True on the first part that contained the point, which
+    made the hole check unreachable DEAD CODE: a point inside an interior ring was
+    reported as inside the zone. That is the opposite of correct, and Marine Regions
+    features are MultiPolygons some of which carry holes, so this was reachable on real
+    data rather than only in a fixture.
+
+    A feature is MULTI-PART, so the test is per-part: inside a part AND not inside any of
+    that part's holes. Holes are held at feature level in the prepared form, so they are
+    tested against every part -- which is conservative in the right direction: a point in
+    any declared hole is not counted as inside.
+    """
+    for part in feature.parts:
+        if _point_in_ring(lon, lat, part) is not True:
+            continue
+        if any(_point_in_ring(lon, lat, list(hole)) is True for hole in feature.holes):
+            continue
+        return True
+    return False
 
 
 def _point_in_ring(lon: float, lat: float, ring: Sequence[tuple[float, float]]) -> bool | None:
@@ -236,7 +302,7 @@ def _point_in_ring(lon: float, lat: float, ring: Sequence[tuple[float, float]]) 
 
     Delegates rather than reimplementing: a second containment test would eventually
     disagree with the first on an edge case, and "which of these two is right" is not a
-    question an operator can answer (§23).
+    question an operator can answer (Â§23).
     """
     result: bool | None = point_in_polygon(lon, lat, [list(ring)])
     return result
@@ -247,7 +313,7 @@ def classify_zone(
 ) -> ZoneClassification:
     """Which maritime zone a point falls in, per the installed dataset.
 
-    THE HIGH-SEAS RULE, EXPLICITLY (§20)
+    THE HIGH-SEAS RULE, EXPLICITLY (Â§20)
     -------------------------------------
     A point is NOT high seas merely because no EEZ polygon contained it. Four
     conditions must ALL hold, and any one failing yields a different answer:
@@ -263,66 +329,52 @@ def classify_zone(
     a missing polygon is exactly how an unintegrated dataset silently becomes a legal
     claim. Absence yields AMBIGUOUS, which is a real answer and an honest one.
     """
-    installed = require_usable(data_dir, "marine_regions_eez")
-    if installed is None:
-        return ZoneClassification(
-            zone=MaritimeZone.NOT_ESTABLISHED,
-            reason=f"zone dataset not usable: {_absent_detail(data_dir, 'marine_regions_eez')}",
-            provenance=known_zone_provenance(data_dir),
-        )
-
-    payload = load_prepared(data_dir, "marine_regions_eez") or {}
-    try:
-        index = ZoneIndex.model_validate(payload)
-    except ValueError as exc:
+    index, provenance, problem = _load_zones(data_dir, ZONE_DATASET)
+    if index is None:
+        if provenance is None:
+            # Nothing installed and nothing to consult.
+            return ZoneClassification(
+                zone=MaritimeZone.NOT_ESTABLISHED,
+                reason=problem,
+                provenance=known_zone_provenance(data_dir),
+            )
+        # Installed and PRESENT, but the payload could not be read. That is AMBIGUOUS,
+        # not NOT_ESTABLISHED: reporting a corrupt-but-installed dataset as "not
+        # established" tells the operator to install something they already have.
         return ZoneClassification(
             zone=MaritimeZone.AMBIGUOUS,
-            reason=f"zone payload failed schema validation: {exc}"[:200],
-            provenance=installed.provenance(),
+            reason=problem,
+            provenance=provenance,
         )
-
+    if index is None:
+        return ZoneClassification(
+            zone=MaritimeZone.AMBIGUOUS,
+            reason=problem,
+            provenance=provenance,
+        )
     if not index.features:
         return ZoneClassification(
             zone=MaritimeZone.NOT_ESTABLISHED,
             reason="zone payload contains no features",
-            provenance=installed.provenance(),
+            provenance=provenance,
         )
 
-    inside: list[ZoneFeature] = []
-    for feature in index.features:
-        if _point_in_ring(lon, lat, feature.ring) is not True:
-            continue
-        # A point inside a hole is not inside the polygon.
-        if any(_point_in_ring(lon, lat, list(hole)) is True for hole in feature.holes):
-            continue
-        inside.append(feature)
+    inside = [feature for feature in index.features if _feature_contains(lon, lat, feature)]
 
-    if not inside:
-        # Condition 4: high seas only if an explicit HIGH_SEAS polygon contains it.
-        for feature in index.features:
-            if feature.zone is not MaritimeZone.HIGH_SEAS:
-                continue
-            if _point_in_ring(lon, lat, feature.ring) is True:
-                return ZoneClassification(
-                    zone=MaritimeZone.HIGH_SEAS,
-                    feature_id=feature.id,
-                    sovereign_names=feature.sovereign_names,
-                    dispute_note=feature.dispute_note,
-                    provenance=installed.provenance(),
-                )
+    if len(inside) == 1:
+        winner = inside[0]
         return ZoneClassification(
-            zone=MaritimeZone.AMBIGUOUS,
-            reason=(
-                "no zone polygon contains this point and no HIGH_SEAS polygon is "
-                "available to test against; absence of an EEZ is not evidence of high "
-                "seas"
-            ),
-            provenance=installed.provenance(),
+            zone=winner.zone,
+            feature_id=winner.id,
+            sovereign_names=winner.sovereign_names,
+            dispute_note=winner.dispute_note,
+            provenance=provenance,
         )
 
     if len(inside) > 1:
-        # Overlapping claims are a REAL condition in this dataset, not an error. The
-        # point is reported as disputed with every claiming feature named.
+        # Overlapping claims are a REAL condition in this dataset, not an error: 56 of the
+        # 285 Marine Regions features carry multiple sovereigns or territories. The point
+        # is reported as disputed with every claiming feature and name preserved.
         return ZoneClassification(
             zone=MaritimeZone.DISPUTED,
             feature_id=",".join(sorted(f.id for f in inside))[:200],
@@ -331,29 +383,50 @@ def classify_zone(
             ),
             dispute_note=(
                 f"point falls within {len(inside)} overlapping zone features: "
-                + ", ".join(sorted(f.id for f in inside))[:200]
+                + ", ".join(sorted(str(f.geoname) for f in inside))[:220]
             ),
-            provenance=installed.provenance(),
+            provenance=provenance,
         )
 
-    winner = inside[0]
+    # Condition 4, and the one that matters: HIGH_SEAS only from EXPLICIT geometry.
+    #
+    # The publisher ships a separate high_seas layer -- one feature, 21 ring parts --
+    # precisely so this question can be answered by measurement. A point that matches no
+    # EEZ is only HIGH_SEAS if it falls inside that geometry. Anything else is AMBIGUOUS,
+    # because "inside no EEZ" is an inference about absence and absence is not a legal
+    # category.
+    high_index, high_provenance, high_problem = _load_zones(data_dir, HIGH_SEAS_DATASET)
+    if high_index is not None:
+        for feature in high_index.features:
+            if feature.zone is MaritimeZone.HIGH_SEAS and _feature_contains(lon, lat, feature):
+                return ZoneClassification(
+                    zone=MaritimeZone.HIGH_SEAS,
+                    feature_id=feature.id,
+                    sovereign_names=(),
+                    dispute_note=None,
+                    provenance=high_provenance,
+                )
+
     return ZoneClassification(
-        zone=winner.zone,
-        feature_id=winner.id,
-        sovereign_names=winner.sovereign_names,
-        dispute_note=winner.dispute_note,
-        provenance=installed.provenance(),
+        zone=MaritimeZone.AMBIGUOUS,
+        reason=(
+            "no zone polygon contains this point, and the explicit high-seas geometry "
+            + ("does not either" if high_index is not None
+               else f"is not installed ({high_problem})")
+            + "; absence of an EEZ match is not evidence of high seas"
+        ),
+        provenance=provenance,
     )
 
 
 def known_zone_provenance(data_dir: Path) -> DatasetProvenance | None:
     """Provenance for a zone dataset even when unusable, so the UI can name it."""
-    installed = require_usable(data_dir, "marine_regions_eez")
+    installed = require_usable(data_dir, ZONE_DATASET)
     if installed is not None:
         return installed.provenance()
     from .registry import known_manifest
 
-    manifest = known_manifest("marine_regions_eez")
+    manifest = known_manifest(ZONE_DATASET)
     if manifest is None:
         return None
     provenance: DatasetProvenance = _provenance_of(manifest)
@@ -400,7 +473,7 @@ class NearestPort(BaseModel):
     """Nearest port and the distance to it.
 
     Proximity establishes IDENTITY and DISTANCE, and nothing else. No field here says or
-    implies a destination, an origin, an intent or a port call (§32).
+    implies a destination, an origin, an intent or a port call (Â§32).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -418,7 +491,7 @@ class NearestPort(BaseModel):
     searched_radius_m: float | None = None
     provenance: DatasetProvenance | None = None
     #: Stated on every result so the reading cannot be over-read.
-    interpretation: str = "PROXIMITY IS CONTEXT ONLY — not a destination, origin, intent or port call."
+    interpretation: str = "PROXIMITY IS CONTEXT ONLY â€” not a destination, origin, intent or port call."
     detail: str = ""
 
 
@@ -429,7 +502,7 @@ def nearest_port(
 
     Delegates to the shared :func:`nearest_point`, so the prefilter that bit the earlier
     `_M_PER_DEG_LAT` work applies here too -- and is covered by tests around the
-    threshold rather than assumed (§31).
+    threshold rather than assumed (Â§31).
     """
     installed = require_usable(data_dir, "nga_world_port_index")
     if installed is None:
@@ -498,7 +571,7 @@ class GridCell(BaseModel):
 
     A depth of 0 m over the ocean is a measurement, not a missing value, so the absence
     of data needs its own representation. Rendering it as `0 m` would be a fabricated
-    sounding (§39).
+    sounding (Â§39).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -529,7 +602,7 @@ class PreparedGrid(BaseModel):
     #: Row-major, north to south.
     values: tuple[float | None, ...]
     #: GEBCO type-identifier style source-quality codes, when the installed product
-    #: supplies them. Never invented (§40).
+    #: supplies them. Never invented (Â§40).
     source_types: tuple[str | None, ...] | None = None
     preprocessing_notes: tuple[str, ...] = ()
 
@@ -559,7 +632,7 @@ def sample_bathymetry(data_dir: Path, lon: float, lat: float) -> DepthSample:
     Precision is bounded by the grid: a 15 arc-second cell is about 460 m, so a value is
     reported to whole metres and the resolution is carried alongside. Reporting
     centimetre precision from a global reference grid would be a fabricated sounding
-    (§38).
+    (Â§38).
     """
     installed = require_usable(data_dir, "gebco_2025")
     if installed is None:

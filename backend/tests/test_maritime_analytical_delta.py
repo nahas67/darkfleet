@@ -238,10 +238,11 @@ class TestAnalyticalDeltaIsZero:
         assert classify_zone(data_dir, lon=101.0, lat=6.0).established is False
         assert sample_bathymetry(data_dir, lon=101.0, lat=7.0).meters is None
 
-        install(data_dir, "natural_earth_coastline", fx.coastline_payload())
-        install(data_dir, "marine_regions_eez", fx.eez_payload())
-        install(data_dir, "nga_world_port_index", fx.ports_payload())
-        install(data_dir, "gebco_2025", fx.grid_payload())
+        install(data_dir, fx.COAST_ID, fx.coastline_payload())
+        install(data_dir, fx.EEZ_ID, fx.eez_payload())
+        install(data_dir, fx.HIGH_SEAS_ID, fx.high_seas_payload())
+        install(data_dir, fx.PORTS_ID, fx.ports_payload())
+        install(data_dir, fx.BATHY_ID, fx.grid_payload())
 
         # Context is genuinely present now. Without this the delta below would be
         # vacuous -- "nothing changed" is also what you get when nothing was ever read.
@@ -385,10 +386,11 @@ class TestContextDoesNotEnterEvidence:
 
         before = key_set()
 
-        install(data_dir, "marine_regions_eez", fx.eez_payload())
-        install(data_dir, "nga_world_port_index", fx.ports_payload())
-        install(data_dir, "gebco_2025", fx.grid_payload())
-        install(data_dir, "natural_earth_coastline", fx.coastline_payload())
+        install(data_dir, fx.EEZ_ID, fx.eez_payload())
+        install(data_dir, fx.HIGH_SEAS_ID, fx.high_seas_payload())
+        install(data_dir, fx.PORTS_ID, fx.ports_payload())
+        install(data_dir, fx.BATHY_ID, fx.grid_payload())
+        install(data_dir, fx.COAST_ID, fx.coastline_payload())
 
         after = key_set()
         added = after - before
@@ -443,7 +445,7 @@ class TestPortProximityInfersNothing:
         an operator reads.
         """
         data_dir, scan_ids, client = archive_client
-        install(data_dir, "nga_world_port_index", fx.ports_payload())
+        install(data_dir, fx.PORTS_ID, fx.ports_payload())
 
         for scan_id in scan_ids:
             targets = client.get(f"/api/scans/{scan_id}/targets").json().get("targets") or []

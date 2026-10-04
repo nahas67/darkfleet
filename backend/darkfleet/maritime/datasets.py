@@ -62,6 +62,27 @@ class InstallStatus(str, Enum):
     VERSION_UNKNOWN = "VERSION_UNKNOWN"
 
 
+class SourceMechanism(str, Enum):
+    """How a dataset was obtained.
+
+    Recorded because the provenance it implies is different. A bulk download from a
+    static publication carries a version the publisher states. A service snapshot
+    carries only a RETRIEVAL TIME, and a ``version_established`` flag records whether
+    the service's own metadata tied the data to a named release.
+
+    Conflating them is how a live-service snapshot ends up wearing a static
+    publication's version label -- which is precisely the mislabelling DF-X8.4H §10
+    prohibits.
+    """
+
+    #: A publisher-hosted archive fetched over HTTP.
+    STATIC_DOWNLOAD = "STATIC_DOWNLOAD"
+    #: An OGC Web Feature Service, snapshotted at a point in time.
+    WFS = "WFS"
+    #: An ArcGIS FeatureServer / MapServer, snapshotted at a point in time.
+    ARCGIS_FEATURE_SERVICE = "ARCGIS_FEATURE_SERVICE"
+
+
 class LocalRepresentation(str, Enum):
     """How the payload is stored once prepared.
 
@@ -111,6 +132,25 @@ class DatasetManifest(StrictModel):
     coverage_note: str = ""
     limitations: tuple[str, ...] = ()
     representation: LocalRepresentation
+    #: How this dataset is obtained. Defaults to a static download.
+    source_mechanism: SourceMechanism = SourceMechanism.STATIC_DOWNLOAD
+    #: The service or archive this dataset came from.
+    source_service: str | None = None
+    #: The specific layer within that service.
+    source_layer: str | None = None
+    #: When the snapshot was taken. Required for service snapshots, because it is the
+    #: only version-like fact they carry.
+    retrieved_at: str | None = None
+    #: Whether the SOURCE METADATA ties this data to a named release.
+    #:
+    #: False for a service snapshot whose version cannot be proven. The distinction is
+    #: load-bearing: recording "v12" for data whose own metadata never says v12 is an
+    #: inference from a website headline, and an operator reading the dossier would have
+    #: no way to tell it from a proven version.
+    version_established: bool = True
+    #: Feature count the source reported, when it reports one authoritatively. Used to
+    #: prove completeness after a paginated snapshot rather than trusting an HTTP 200.
+    source_feature_count: int | None = None
     #: Files that must exist, relative to the dataset directory.
     payload_files: tuple[str, ...] = (Field(min_length=1),)
     #: Publisher checksum, when this repository has confirmed it. None means

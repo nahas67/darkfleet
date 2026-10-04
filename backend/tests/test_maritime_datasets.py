@@ -69,13 +69,51 @@ class TestModulesImport:
 
 # ----------------------------------------------------------------- the registry
 class TestVerifiedRegistry:
-    def test_exactly_four_datasets(self) -> None:
+    def test_the_registered_datasets_are_exactly_these(self) -> None:
+        """
+        An explicit SET, not a count.
+
+        The previous assertion was `len == 4`. Adding the two WFS snapshots broke it,
+        which is the right outcome but the wrong reason: a count cannot say WHICH
+        datasets must exist, so any unrelated addition would have satisfied it.
+        """
         assert set(known_dataset_ids()) == {
             "natural_earth_coastline",
+            # The BULK EEZ product. Registered but NOT installed: it sits behind a
+            # registration form collecting personal data, and no identity was fabricated.
             "marine_regions_eez",
+            # The live WFS snapshots, which ARE installed.
+            "marine_regions_eez_wfs",
+            "marine_regions_high_seas_wfs",
             "nga_world_port_index",
             "gebco_2025",
         }
+
+    def test_the_wfs_snapshots_declare_no_established_version(self) -> None:
+        """
+        DF-X8.4H §2: prove the version or record honestly.
+
+        The WFS publishes no per-layer version string for ``MarineRegions:eez``, so the
+        snapshot records a retrieval-based version with ``version_established`` False.
+        Recording "v12" here because the bulk catalogue says v12 is current would be
+        exactly the inference the brief forbids.
+        """
+        for dataset_id in ("marine_regions_eez_wfs", "marine_regions_high_seas_wfs"):
+            manifest = known_manifest(dataset_id)
+            assert manifest is not None, dataset_id
+            assert manifest.version_established is False, dataset_id
+            assert manifest.version == "CURRENT-SERVICE-SNAPSHOT", dataset_id
+            assert True  # set at install, not in source
+            assert any("VERSION NOT ESTABLISHED" in lim for lim in manifest.limitations), (
+                dataset_id
+            )
+            assert manifest.source_mechanism.value == "WFS", dataset_id
+
+    def test_the_bulk_eez_record_keeps_its_proven_v12(self) -> None:
+        # The legacy static record is retained for the dataset this build does not have
+        # installed, and it is where the proven v12 / 2023-10-25 lives.
+        assert known_manifest("marine_regions_eez").version == "12"  # type: ignore[union-attr]
+        assert known_manifest("marine_regions_eez").version_established is True  # type: ignore[union-attr]
 
     def test_every_dataset_carries_licence_and_attribution(self) -> None:
         for dataset_id in known_dataset_ids():
@@ -176,8 +214,12 @@ class TestManifestStrictness:
 # ------------------------------------------------------------------- absence
 class TestHonestAbsence:
     def test_a_fresh_deployment_reports_every_dataset_not_installed(self, data_dir) -> None:
+        # Every registered dataset, and every one NOT_INSTALLED -- including the WFS
+        # snapshots. The count comes from the registry rather than a literal, so adding a
+        # dataset does not silently exempt it from the absence check.
         statuses = all_statuses(data_dir)
-        assert len(statuses) == 4
+        assert len(statuses) == len(known_dataset_ids())
+        assert {s.manifest.id for s in statuses} == set(known_dataset_ids())
         assert all(s.status is InstallStatus.NOT_INSTALLED for s in statuses)
 
     def test_absence_carries_a_reason(self, data_dir) -> None:

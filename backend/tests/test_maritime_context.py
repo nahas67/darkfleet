@@ -36,10 +36,14 @@ def data_dir(tmp_path):
 
 @pytest.fixture()
 def all_installed(data_dir):
-    install(data_dir, "natural_earth_coastline", fx.coastline_payload())
-    install(data_dir, "marine_regions_eez", fx.eez_payload())
-    install(data_dir, "nga_world_port_index", fx.ports_payload())
-    install(data_dir, "gebco_2025", fx.grid_payload())
+    install(data_dir, fx.COAST_ID, fx.coastline_payload())
+    install(data_dir, fx.EEZ_ID, fx.eez_payload())
+    # High seas is a SEPARATE dataset, exactly as the live WFS publishes it.
+    # Omitting it here would make every high-seas assertion vacuously AMBIGUOUS --
+    # a green tick for the wrong reason.
+    install(data_dir, fx.HIGH_SEAS_ID, fx.high_seas_payload())
+    install(data_dir, fx.PORTS_ID, fx.ports_payload())
+    install(data_dir, fx.BATHY_ID, fx.grid_payload())
     return data_dir
 
 
@@ -86,7 +90,7 @@ class TestCoastDistance:
         assert fine.meters is not None and 150_000 < fine.meters < 185_000, fine.meters
 
     def test_far_from_any_coast_is_no_coverage_not_a_huge_number(self, data_dir) -> None:
-        install(data_dir, "natural_earth_coastline", fx.coastline_payload())
+        install(data_dir, fx.COAST_ID, fx.coastline_payload())
         result = coast_distance(data_dir, lon=0.0, lat=-40.0, max_radius_m=300_000)
         assert result.status is ContextStatus.NO_COVERAGE
         assert result.meters is None
@@ -102,7 +106,7 @@ class TestCoastDistance:
         # operator to re-download a file that is present and still broken.
         from darkfleet.maritime.store import dataset_dir
 
-        install(data_dir, "natural_earth_coastline", fx.coastline_payload())
+        install(data_dir, fx.COAST_ID, fx.coastline_payload())
         target = dataset_dir(data_dir, "natural_earth_coastline", "4.1.0") / "coastline.json"
         target.write_text('{"tampered": true}', encoding="utf-8")
         assert coast_distance(data_dir, lon=100.5, lat=6.0).status is ContextStatus.FAILED
@@ -123,7 +127,7 @@ class TestZoneClassification:
     def test_zone_carries_dataset_provenance(self, all_installed) -> None:
         result = classify_zone(all_installed, lon=101.0, lat=6.0)
         assert result.provenance is not None
-        assert result.provenance.version == "12"
+        assert result.provenance.version == "CURRENT-SERVICE-SNAPSHOT"
         assert result.provenance.license.value == "CC_BY"
 
     def test_high_seas_only_from_an_explicit_polygon(self, all_installed) -> None:
@@ -141,14 +145,14 @@ class TestZoneClassification:
         absence, and inferring HIGH_SEAS from a missing polygon is how an unintegrated
         dataset silently becomes a legal claim.
         """
-        install(data_dir, "marine_regions_eez", fx.wrap_eez_payload())
+        install(data_dir, fx.EEZ_ID, fx.wrap_eez_payload())
         result = classify_zone(data_dir, lon=50.0, lat=20.0)
         assert result.zone is MaritimeZone.AMBIGUOUS
         assert result.established is False
         assert "not evidence of high seas" in (result.reason or "")
 
     def test_overlap_is_disputed_and_keeps_every_claimant(self, data_dir) -> None:
-        install(data_dir, "marine_regions_eez", fx.eez_payload(include_overlap=True))
+        install(data_dir, fx.EEZ_ID, fx.eez_payload(include_overlap=True))
         # 101.5E, 6N is inside both EEZ squares.
         result = classify_zone(data_dir, lon=101.5, lat=6.0)
         assert result.zone is MaritimeZone.DISPUTED
@@ -165,30 +169,46 @@ class TestZoneClassification:
     def test_an_empty_dataset_is_not_established_not_ambiguous(self, all_installed) -> None:
         # A payload that parsed but carries nothing is an ingestion failure, distinct
         # from a geometry that could not decide.
-        install(all_installed, "marine_regions_eez", {"features": []})
+        install(all_installed, fx.EEZ_ID, {"features": []})
         result = classify_zone(all_installed, lon=101.0, lat=6.0)
         assert result.zone is MaritimeZone.NOT_ESTABLISHED
         assert "no features" in (result.reason or "")
 
     def test_a_schema_violation_is_ambiguous_with_a_reason(self, all_installed) -> None:
-        install(all_installed, "marine_regions_eez", {"features": [{"nope": 1}]})
+        # A feature with none of the declared fields. `extra="forbid"` plus missing
+        # required keys makes this invalid, which must surface as AMBIGUOUS with a
+        # reason -- never as an empty result set that reads as "not in any zone".
+        install(all_installed, fx.EEZ_ID, {"features": [{"nope": 1}]})
         result = classify_zone(all_installed, lon=101.0, lat=6.0)
         assert result.zone is MaritimeZone.AMBIGUOUS
-        assert "schema validation" in (result.reason or "")
+        assert result.established is False
+        assert "validation failed" in (result.reason or "") or "schema" in (result.reason or "")
 
     def test_a_hole_excludes_the_point(self, all_installed) -> None:
         # A polygon with an interior ring: the hole is not the zone.
+        # `parts`, not `ring`: the prepared form is multi-part, and writing `ring` made
+        # this payload fail schema validation and return NOT_ESTABLISHED -- which read as
+        # a containment bug rather than a shape mismatch.
         payload = {
             "features": [
                 {
                     "id": "EEZ-holed",
                     "zone": "EXCLUSIVE_ECONOMIC_ZONE",
-                    "ring": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]],
+                    "sovereign_names": ["FIXTURE HOLED"],
+                    "territory_names": [],
+                    "pol_type": "200NM",
+                    "geoname": "HOLED",
+                    "area_km2": 1.0,
+                    "mrgid_eez": 9,
+                    "source": None,
+                    "dispute_note": None,
+                    "parts": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]],
                     "holes": [[[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0], [4.0, 4.0]]],
                 }
-            ]
+            ],
+            "preprocessing_notes": [],
         }
-        install(all_installed, "marine_regions_eez", payload)
+        install(all_installed, fx.EEZ_ID, payload)
         assert classify_zone(all_installed, lon=1.0, lat=1.0).zone is (
             MaritimeZone.EXCLUSIVE_ECONOMIC_ZONE
         )
@@ -205,7 +225,7 @@ class TestZoneClassification:
 class TestAntimeridianZones:
     @pytest.fixture()
     def wrap_dir(self, data_dir):
-        install(data_dir, "marine_regions_eez", fx.wrap_eez_payload())
+        install(data_dir, fx.EEZ_ID, fx.wrap_eez_payload())
         return data_dir
 
     def test_point_east_of_the_seam_is_inside(self, wrap_dir) -> None:
@@ -311,7 +331,7 @@ class TestNearestPort:
             "ports": [{"id": "HIGH", "name": "HIGH LAT PORT", "lon": 10.5, "lat": 80.0}],
             "preprocessing_notes": [],
         }
-        install(data_dir, "nga_world_port_index", payload)
+        install(data_dir, fx.PORTS_ID, payload)
         result = nearest_port(data_dir, lon=10.0, lat=80.0, max_radius_m=200_000)
         assert result.status is ContextStatus.AVAILABLE
         assert result.port_id == "HIGH"
@@ -416,7 +436,7 @@ class TestBathymetry:
     def test_a_positive_step_lat_is_also_handled(self, data_dir) -> None:
         # Some prepared grids run south to north. The sampler must not assume the sign,
         # or half of all grids would return mirrored values.
-        install(data_dir, "gebco_2025", {
+        install(data_dir, fx.BATHY_ID, {
             "origin_lon": 0.0, "origin_lat": 5.0, "step_lon": 1.0, "step_lat": 1.0,
             "n_cols": 1, "n_rows": 3, "values": [-100.0, -200.0, -300.0],
             "preprocessing_notes": [],
