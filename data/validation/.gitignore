@@ -1,0 +1,12 @@
+﻿# Third-party validation corpora are NEVER committed.
+#
+# The repository holds a manifest, checksums, licence findings and small derived
+# fixtures where the licence permits. The archives themselves stay on disk outside
+# version control: UEIKAP alone is 1.6 GB, and a repository that grows by
+# gigabytes of someone else's data is a repository nobody can clone.
+#
+# See docs/WAKE_VALIDATION_SOURCES.md for the licence gate per source.
+*
+!.gitignore
+!manifest*.json
+!SOURCES.md
