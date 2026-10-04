@@ -31,7 +31,16 @@ type Row = {
 
 const FILTERS: ReadonlyArray<{ id: string; label: string; match: (row: Row) => boolean }> = [
   { id: 'MATCHED', label: 'Matched', match: (r) => r.classification === 'SAR_MATCHED_AIS' },
-  { id: 'UNMATCHED', label: 'Unmatched', match: (r) => r.classification === 'SAR_UNMATCHED' },
+  /*
+   * Labelled GHOST VESSELS rather than "Unmatched" because that is the designation
+   * the product uses everywhere else for this class, and an operator who has read
+   * "GHOST VESSEL" in the dossier should be able to find the same set here.
+   *
+   * The predicate stays the canonical classification. There is deliberately no
+   * second Ghost Vessel data model and no persisted count: a stored count would be
+   * able to disagree with the classifications it was derived from.
+   */
+  { id: 'UNMATCHED', label: 'Ghost vessels', match: (r) => r.classification === 'SAR_UNMATCHED' },
   {
     id: 'INFRA',
     label: 'Infrastructure',
@@ -126,7 +135,9 @@ export function ContactList() {
 
   const activate = (row: Row) => {
     if (row.kind === 'sar') {
-      store.select({ kind: 'target', targetId: row.id });
+      // scanId travels with the id: target ids are per-scan, so DF-002 in one stored
+    // scan is a different vessel from DF-002 in another.
+    store.select({ kind: 'target', targetId: row.id, scanId: store.getState().scanId });
       engine.flyTo(row.lat, row.lon);
     } else {
       store.select({ kind: 'mmsi', mmsi: row.mmsi as string });
@@ -176,6 +187,15 @@ export function ContactList() {
                 }}
               >
                 {filter.label}
+                {/*
+                  The count is recomputed from the canonical classifications on every
+                  render, never stored. A persisted Ghost Vessel count could disagree
+                  with the classifications it was derived from, and then both would look
+                  authoritative while meaning different things.
+                */}
+                <span className="df-num ml-1 text-[10px] text-ink-dim" data-df-ghost-count-for={filter.id}>
+                  {rows.filter(filter.match).length}
+                </span>
               </button>
             );
           })}

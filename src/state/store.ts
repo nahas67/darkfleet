@@ -15,6 +15,8 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 
+import { sameTargetRef, targetRefOf } from '../intelligence/targetRef';
+
 import type {
   AisCoverageState,
   AisObservationOut,
@@ -23,6 +25,7 @@ import type {
   ScanScene,
   SceneSummary,
   TargetClassification,
+  VesselTarget,
 } from '../api/contract';
 
 /* ------------------------------------------------------------------ domain */
@@ -146,7 +149,21 @@ export type State = {
   /* --- selection: the single shared reference --- */
   selection:
     | { kind: 'none' }
-    | { kind: 'target'; targetId: string }
+    /**
+     * A SAR target.
+     *
+     * `scanId` is part of the identity, not decoration. Target ids are assigned
+     * per scan as `DF-{index+1:03d}`, so `DF-002` in one stored scan is a
+     * completely different vessel from `DF-002` in another. Selecting on
+     * `targetId` alone can therefore address two distinct targets, and a dossier
+     * that fetched by id alone could render one vessel's header above another
+     * vessel's evidence.
+     *
+     * Optional so that existing writers keep compiling, but every surface that
+     * knows the owning scan should supply it, and `targetRefOf` is the only
+     * sanctioned way to read the pair.
+     */
+    | { kind: 'target'; targetId: string; scanId?: string | null }
     | { kind: 'mmsi'; mmsi: string }
     | { kind: 'scene'; sceneId: string };
 
@@ -178,6 +195,20 @@ export type State = {
 
   /* --- results --- */
   targets: SarTarget[];
+  /**
+   * The full contract record for each detected target.
+   *
+   * `targets` is a deliberate REDUCTION -- what the globe and the contact list need
+   * in order to draw a marker. The dossier needs everything that reduction drops:
+   * correlation decomposition, wake analysis, polarization evidence, backscatter,
+   * footprint and heading. Both are populated from the same validated response, so
+   * the reduced form can never disagree with the authority it was derived from.
+   *
+   * Kept rather than re-fetched per tab: eleven tabs each asking the server for a
+   * payload the client already holds is eleven avoidable round trips and eleven
+   * chances to render two different answers.
+   */
+  targetDetail: VesselTarget[];
   aisOnly: AisContact[];
   scene: ScanScene | null;
   rasterLoaded: boolean;
@@ -221,6 +252,7 @@ const initialState: State = {
   scanError: null,
 
   targets: [],
+  targetDetail: [],
   aisOnly: [],
   scene: null,
   rasterLoaded: false,
@@ -312,7 +344,12 @@ class Store {
       // Compare the identity payload of both sides rather than reaching for one
       // variant's fields, which the compiler cannot narrow from kind alone.
       if (Object.is(current, selection)) return;
-      if ('targetId' in current && 'targetId' in selection && current.targetId === selection.targetId) return;
+      // Target identity is the PAIR. Comparing targetId alone made selecting
+      // `DF-002` in a second scan a silent no-op, so the dossier kept rendering
+      // the first scan's vessel under a header the operator had just changed.
+      if ('targetId' in current && 'targetId' in selection) {
+        if (sameTargetRef(targetRefOf(current), targetRefOf(selection))) return;
+      }
       if ('mmsi' in current && 'mmsi' in selection && current.mmsi === selection.mmsi) return;
       if ('sceneId' in current && 'sceneId' in selection && current.sceneId === selection.sceneId) return;
       if (current.kind === 'none') return;

@@ -124,6 +124,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch (cause) {
+    // An abort is NOT a network failure. Reporting it as one is a lie that the
+    // operator sees: switching targets quickly aborts the superseded requests,
+    // and every one of them would otherwise surface as "the backend could not be
+    // reached" beside a perfectly healthy dossier. Cancellation is the expected
+    // path here, not an error worth showing.
+    if (isAbort(cause)) throw cause;
     throw new ApiError(
       0,
       'NETWORK_ERROR',
@@ -140,8 +146,25 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Was this rejection a cancellation rather than a failure? */
+export function isAbort(cause: unknown): boolean {
+  if (cause instanceof DOMException && cause.name === 'AbortError') return true;
+  return cause instanceof Error && cause.name === 'AbortError';
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  /**
+   * `signal` is accepted on GET as well as POST.
+   *
+   * Every dossier tab loads independently and the operator changes targets
+   * quickly, so a superseded GET is the normal case rather than the exception.
+   * Without a signal those requests cannot be cancelled at all: they run to
+   * completion and then race the newer one to the screen. Aborting is still not
+   * sufficient alone -- a response already in flight when the abort fires can
+   * still resolve -- so callers pair this with a generation token. See
+   * `useOwnedRequest`.
+   */
+  get: <T>(path: string, signal?: AbortSignal) => request<T>(path, { signal }),
   /**
    * `signal` is threaded through so a superseded request can be cancelled.
    *

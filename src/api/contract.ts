@@ -44,7 +44,7 @@ export interface TargetSummaryResponse {
   readonly classification?: string | null;
   /** True when this target id exists in more than one stored scan. */
   readonly ambiguous: boolean;
-  readonly evidence: TargetSummaryEvidence;
+  readonly evidence: EvidenceDocument;
   readonly narrative: NarrativeEnvelope;
 }
 
@@ -258,7 +258,7 @@ export interface TargetEvidenceResponse {
   /** True when the target id exists in more than one stored scan. */
   readonly ambiguous: boolean;
   readonly candidate_scan_ids?: string[];
-  readonly evidence: Record<string, unknown>;
+  readonly evidence: EvidenceDocument;
 }
 
 export interface EvidenceDocumentResponse {
@@ -267,7 +267,7 @@ export interface EvidenceDocumentResponse {
   readonly synthetic: boolean;
   readonly ambiguous: boolean;
   readonly candidate_scan_ids?: string[];
-  readonly evidence: Record<string, unknown>;
+  readonly evidence: ScanRecordDocument;
 }
 
 export interface DebugLayerResponse {
@@ -399,26 +399,28 @@ export interface ScanCreateRequest {
   readonly cfar_config?: CfarConfig | null;
 }
 
+export interface EvidenceDocument {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly target_id: string;
+  readonly classification: "SAR_MATCHED_AIS" | "SAR_UNMATCHED" | "AIS_ONLY" | "STATIONARY_OR_INFRASTRUCTURE" | "SEA_CLUTTER" | "LOW_CONFIDENCE" | "UNRESOLVED";
+  readonly designation: string | null;
+  readonly ghost_vessel: GhostVesselDossier | GhostVesselNotApplicable;
+  readonly observed: ObservedEvidence;
+  readonly uncertainty: UncertaintyEvidence;
+  readonly association: AssociationEvidence;
+  readonly summary: string | null;
+  readonly tags: string[];
+  readonly hypotheses: EvidenceBullet[];
+  readonly unknowns: EvidenceBullet[];
+  readonly sar_chip: Record<string, unknown> | null;
+  readonly provenance: EvidenceProvenance | null;
+}
+
 export interface NarrativeEnvelope {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly status: "OK" | "AI_UNAVAILABLE";
   readonly document?: NarrativeDocument | null;
   readonly reason?: string | null;
-}
-
-export interface TargetSummaryEvidence {
-  readonly target_id: string;
-  readonly classification: string;
-  readonly designation?: string | null;
-  readonly ghost_vessel?: Record<string, unknown> | null;
-  readonly observed?: Record<string, unknown>;
-  readonly uncertainty?: Record<string, unknown>;
-  readonly association?: Record<string, unknown>;
-  readonly summary?: string;
-  readonly tags?: string[];
-  readonly hypotheses?: Record<string, unknown>[];
-  readonly unknowns?: Record<string, unknown>[];
-  readonly sar_chip?: Record<string, unknown> | null;
 }
 
 export interface ProbeGeoreferencing {
@@ -586,6 +588,25 @@ export type ProviderStatus = "AVAILABLE" | "DEGRADED" | "UNAVAILABLE" | "AUTH_RE
 /** The 16 states of a scan, declared in pipeline order. */
 export type ScanStage = "QUEUED" | "SEARCHING_SCENE" | "READING_SAR" | "PREPROCESSING" | "MASKING" | "FILTERING" | "DETECTING" | "EXTRACTING" | "GEOLOCATING" | "LOADING_AIS" | "ALIGNING" | "CORRELATING" | "SCORING" | "PERSISTING" | "COMPLETE" | "FAILED";
 
+export interface ScanRecordDocument {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly schema_version: number;
+  readonly runtime_mode: string;
+  readonly synthetic: boolean;
+  readonly scene: ScanScene;
+  readonly aoi: number[];
+  readonly acquisition_time: string;
+  readonly config: ScanConfigRecord;
+  readonly targets: Record<string, unknown>[];
+  readonly ais_only: AisOnlyTarget[];
+  readonly counts: Record<string, number>;
+  readonly provenance: EvidenceProvenance | null;
+  readonly debug: ScanDebugBlock;
+  readonly processing_time_ms: number;
+  readonly created_at: string;
+}
+
 /** Whether the archive can answer a question, and how completely. */
 export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
 
@@ -607,6 +628,76 @@ export interface CfarConfig {
   readonly kernelSize?: number | null;
   /** Coastline exclusion distance in metres. */
   readonly coastlineBufferMeters?: number | null;
+}
+
+export interface AssociationEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mmsi: string | null;
+  readonly vessel_name: string | null;
+  readonly distance_offset_m: number | null;
+  readonly time_delta_s: number | null;
+  readonly predicted_position: PredictedPosition | null;
+  readonly ais_association_confidence: number;
+  readonly score_decomposition: ScoreDecomposition | null;
+}
+
+export interface EvidenceBullet {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly text: string;
+}
+
+export interface EvidenceProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly software_version: string;
+  readonly processing_version: string;
+  readonly classification_schema: string;
+  readonly recorded_at: string;
+  readonly runtime_mode: string;
+  readonly synthetic: boolean;
+  readonly marine_regions: MarineRegionsProvenance;
+  readonly sar: SarProvenance;
+  readonly aoi: number[];
+  readonly processing: ProcessingProvenance;
+  readonly ais: AisProvenance;
+  readonly matching: MatchingSettings;
+}
+
+export interface GhostVesselDossier {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly is_ghost_vessel: true;
+  readonly designation: string;
+  readonly analytical_classification: string;
+  readonly semantic_warning: string;
+  readonly observed: GhostObservedEvidence;
+  readonly decision: GhostAssociationDecision;
+  readonly hypotheses: EvidenceBullet[];
+  readonly unknowns: EvidenceBullet[];
+}
+
+export interface GhostVesselNotApplicable {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly is_ghost_vessel: false;
+  readonly designation: null;
+  readonly analytical_classification: string;
+}
+
+export interface ObservedEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly position: ObservedPosition;
+  readonly apparent_footprint_m: ApparentFootprint;
+  readonly orientation_deg: number | null;
+  readonly mean_backscatter_db: number;
+  readonly max_backscatter_db: number;
+  readonly pixel_area: number;
+  readonly wake_evident: boolean | null;
+  readonly sar_detection_confidence: number;
+}
+
+export interface UncertaintyEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly length_uncertainty_m: number;
+  readonly match_radius_m: number | null;
+  readonly propagation_note: string;
 }
 
 export interface NarrativeDocument {
@@ -642,6 +733,124 @@ export interface TrackPointOut {
   readonly length_unc_m: number;
 }
 
+export interface ScanConfigRecord {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly config_hash: string;
+  readonly training_cells: number;
+  readonly guard_cells: number;
+  readonly threshold_factor: number;
+  readonly coastline_buffer_meters: number;
+  readonly speckle_filter: string;
+  readonly kernel_size: number;
+  readonly min_pixels: number;
+  readonly max_pixels: number;
+}
+
+export interface ScanDebugBlock {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly cache: DebugCacheInputs;
+  readonly layers?: string[];
+  readonly columns?: Record<string, string[]>;
+  readonly runtime_mode: string;
+  readonly synthetic: boolean;
+}
+
+export interface PredictedPosition {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly lat: number;
+  readonly lon: number;
+}
+
+export interface AisProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly provider: string;
+}
+
+export interface MarineRegionsProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly dataset: string;
+  readonly layer: string;
+  readonly license: string;
+  readonly attribution_required: boolean;
+  readonly credit: string;
+  readonly source_commit: string | null;
+  readonly fetched: string | null;
+  readonly feature_count: number;
+  readonly known_absent: string[];
+}
+
+export interface MatchingSettings {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly weights: number[];
+  readonly min_score: number;
+  readonly window_s: number;
+}
+
+export interface ProcessingProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly config_hash: string;
+  readonly land_mask: LandMaskProvenance;
+  readonly speckle: SpeckleSettings;
+  readonly cfar: CfarSettings;
+}
+
+export interface SarProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly provider: string;
+  readonly collection: string;
+  readonly item_id: string;
+  readonly platform: string;
+  readonly acquisition_time: string;
+  readonly product: string;
+  readonly polarization: string;
+  readonly asset_href: string;
+  readonly crs: string | null;
+  readonly transform: number[] | null;
+  readonly resolution_m: number | null;
+  readonly raster_window: number[] | null;
+}
+
+export interface GhostAssociationDecision {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly candidates_considered: number | null;
+  readonly acceptance_threshold: number | null;
+  readonly closest_rejected_candidate: RejectedCandidate | null;
+  readonly reason_no_association: string;
+  readonly ais_association_confidence: number | null;
+  readonly ais_coverage_state: string;
+  readonly score_decomposition: ScoreDecomposition | null;
+}
+
+export interface GhostObservedEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly target_id: string | null;
+  readonly position: GhostObservedPosition;
+  readonly marine_region: string | null;
+  readonly sar_detection_confidence: number | null;
+  readonly apparent_footprint_m: ApparentFootprint;
+  readonly length_uncertainty_m: number | null;
+  readonly orientation_deg: number | null;
+  readonly mean_backscatter_db: number | null;
+  readonly max_backscatter_db: number | null;
+  readonly wake_detected: boolean | null;
+  readonly polarization_evidence: string | null;
+  readonly multipass_evidence: string | null;
+}
+
+export interface ApparentFootprint {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly length: number;
+  readonly width: number;
+}
+
+export interface ObservedPosition {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly lat: number;
+  readonly lon: number;
+  readonly marine_region: MarineRegionContext;
+  readonly vertical_datum: VerticalDatumContext;
+}
+
 export interface NarrativeModelIdentity {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly model_id: string;
@@ -653,6 +862,63 @@ export interface NarrativeProvenance {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly writer: string;
   readonly network_calls: number;
+}
+
+export interface DebugCacheInputs {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scene_item_id: string;
+  readonly bbox: number[];
+  readonly processing_config: Record<string, unknown>;
+  readonly algorithm_version: string;
+}
+
+export interface CfarSettings {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly training_cells: number;
+  readonly guard_cells: number;
+  readonly threshold_factor: number;
+  readonly min_pixels: number;
+  readonly max_pixels: number;
+}
+
+export interface LandMaskProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly source: string;
+  readonly water_href: string;
+  readonly water_class: number;
+  readonly coastline_buffer_m: number;
+  readonly port_exceptions: number;
+}
+
+export interface SpeckleSettings {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mode: string;
+  readonly kernel: number;
+}
+
+export interface GhostObservedPosition {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly lat: number | null;
+  readonly lon: number | null;
+}
+
+export interface MarineRegionContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly kind: "named_region" | "open_ocean" | "unresolved" | "invalid_position";
+  readonly named_regions: string[];
+  readonly primary: string | null;
+  readonly basin: string | null;
+  readonly note: string | null;
+}
+
+export interface VerticalDatumContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly geoid_model: string;
+  readonly ellipsoid: string;
+  readonly undulation_m: number | null;
+  readonly undulation_available: boolean;
+  readonly altitude_measured: false;
+  readonly note: string;
 }
 
 /**
@@ -696,8 +962,8 @@ export type ContractSchemaName =
   | 'VesselTrackResponse'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'EvidenceDocument'
   | 'NarrativeEnvelope'
-  | 'TargetSummaryEvidence'
   | 'ProbeGeoreferencing'
   | 'ProbePixel'
   | 'ProbeProvenance'
@@ -714,13 +980,40 @@ export type ContractSchemaName =
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'
+  | 'ScanRecordDocument'
   | 'AisCoverageState'
   | 'CfarConfig'
+  | 'AssociationEvidence'
+  | 'EvidenceBullet'
+  | 'EvidenceProvenance'
+  | 'GhostVesselDossier'
+  | 'GhostVesselNotApplicable'
+  | 'ObservedEvidence'
+  | 'UncertaintyEvidence'
   | 'NarrativeDocument'
   | 'TrackGapOut'
   | 'TrackPointOut'
+  | 'ScanConfigRecord'
+  | 'ScanDebugBlock'
+  | 'PredictedPosition'
+  | 'AisProvenance'
+  | 'MarineRegionsProvenance'
+  | 'MatchingSettings'
+  | 'ProcessingProvenance'
+  | 'SarProvenance'
+  | 'GhostAssociationDecision'
+  | 'GhostObservedEvidence'
+  | 'ApparentFootprint'
+  | 'ObservedPosition'
   | 'NarrativeModelIdentity'
   | 'NarrativeProvenance'
+  | 'DebugCacheInputs'
+  | 'CfarSettings'
+  | 'LandMaskProvenance'
+  | 'SpeckleSettings'
+  | 'GhostObservedPosition'
+  | 'MarineRegionContext'
+  | 'VerticalDatumContext'
 ;
 
 /**
@@ -1235,24 +1528,12 @@ export const SCANCREATEREQUEST_FIELDS = [
 ] as const;
 
 /**
- * Property names of {@link NarrativeEnvelope} as they appear on the wire.
+ * Property names of {@link EvidenceDocument} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
  * so the permitted keys cannot drift from the contract they enforce.
  */
-export const NARRATIVEENVELOPE_FIELDS = [
-  'status',
-  'document',
-  'reason',
-] as const;
-
-/**
- * Property names of {@link TargetSummaryEvidence} as they appear on the wire.
- *
- * Generated. Runtime validation reads this instead of keeping its own list,
- * so the permitted keys cannot drift from the contract they enforce.
- */
-export const TARGETSUMMARYEVIDENCE_FIELDS = [
+export const EVIDENCEDOCUMENT_FIELDS = [
   'target_id',
   'classification',
   'designation',
@@ -1265,6 +1546,19 @@ export const TARGETSUMMARYEVIDENCE_FIELDS = [
   'hypotheses',
   'unknowns',
   'sar_chip',
+  'provenance',
+] as const;
+
+/**
+ * Property names of {@link NarrativeEnvelope} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const NARRATIVEENVELOPE_FIELDS = [
+  'status',
+  'document',
+  'reason',
 ] as const;
 
 /**
@@ -1495,6 +1789,30 @@ export const SCANSCENE_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link ScanRecordDocument} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANRECORDDOCUMENT_FIELDS = [
+  'scan_id',
+  'schema_version',
+  'runtime_mode',
+  'synthetic',
+  'scene',
+  'aoi',
+  'acquisition_time',
+  'config',
+  'targets',
+  'ais_only',
+  'counts',
+  'provenance',
+  'debug',
+  'processing_time_ms',
+  'created_at',
+] as const;
+
+/**
  * Property names of {@link CfarConfig} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1509,6 +1827,111 @@ export const CFARCONFIG_FIELDS = [
   'speckleFilter',
   'kernelSize',
   'coastlineBufferMeters',
+] as const;
+
+/**
+ * Property names of {@link AssociationEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ASSOCIATIONEVIDENCE_FIELDS = [
+  'mmsi',
+  'vessel_name',
+  'distance_offset_m',
+  'time_delta_s',
+  'predicted_position',
+  'ais_association_confidence',
+  'score_decomposition',
+] as const;
+
+/**
+ * Property names of {@link EvidenceBullet} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const EVIDENCEBULLET_FIELDS = [
+  'text',
+] as const;
+
+/**
+ * Property names of {@link EvidenceProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const EVIDENCEPROVENANCE_FIELDS = [
+  'software_version',
+  'processing_version',
+  'classification_schema',
+  'recorded_at',
+  'runtime_mode',
+  'synthetic',
+  'marine_regions',
+  'sar',
+  'aoi',
+  'processing',
+  'ais',
+  'matching',
+] as const;
+
+/**
+ * Property names of {@link GhostVesselDossier} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GHOSTVESSELDOSSIER_FIELDS = [
+  'is_ghost_vessel',
+  'designation',
+  'analytical_classification',
+  'semantic_warning',
+  'observed',
+  'decision',
+  'hypotheses',
+  'unknowns',
+] as const;
+
+/**
+ * Property names of {@link GhostVesselNotApplicable} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GHOSTVESSELNOTAPPLICABLE_FIELDS = [
+  'is_ghost_vessel',
+  'designation',
+  'analytical_classification',
+] as const;
+
+/**
+ * Property names of {@link ObservedEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const OBSERVEDEVIDENCE_FIELDS = [
+  'position',
+  'apparent_footprint_m',
+  'orientation_deg',
+  'mean_backscatter_db',
+  'max_backscatter_db',
+  'pixel_area',
+  'wake_evident',
+  'sar_detection_confidence',
+] as const;
+
+/**
+ * Property names of {@link UncertaintyEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const UNCERTAINTYEVIDENCE_FIELDS = [
+  'length_uncertainty_m',
+  'match_radius_m',
+  'propagation_note',
 ] as const;
 
 /**
@@ -1560,6 +1983,184 @@ export const TRACKPOINTOUT_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link ScanConfigRecord} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANCONFIGRECORD_FIELDS = [
+  'config_hash',
+  'training_cells',
+  'guard_cells',
+  'threshold_factor',
+  'coastline_buffer_meters',
+  'speckle_filter',
+  'kernel_size',
+  'min_pixels',
+  'max_pixels',
+] as const;
+
+/**
+ * Property names of {@link ScanDebugBlock} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANDEBUGBLOCK_FIELDS = [
+  'cache',
+  'layers',
+  'columns',
+  'runtime_mode',
+  'synthetic',
+] as const;
+
+/**
+ * Property names of {@link PredictedPosition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PREDICTEDPOSITION_FIELDS = [
+  'lat',
+  'lon',
+] as const;
+
+/**
+ * Property names of {@link AisProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const AISPROVENANCE_FIELDS = [
+  'provider',
+] as const;
+
+/**
+ * Property names of {@link MarineRegionsProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MARINEREGIONSPROVENANCE_FIELDS = [
+  'dataset',
+  'layer',
+  'license',
+  'attribution_required',
+  'credit',
+  'source_commit',
+  'fetched',
+  'feature_count',
+  'known_absent',
+] as const;
+
+/**
+ * Property names of {@link MatchingSettings} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MATCHINGSETTINGS_FIELDS = [
+  'weights',
+  'min_score',
+  'window_s',
+] as const;
+
+/**
+ * Property names of {@link ProcessingProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PROCESSINGPROVENANCE_FIELDS = [
+  'config_hash',
+  'land_mask',
+  'speckle',
+  'cfar',
+] as const;
+
+/**
+ * Property names of {@link SarProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SARPROVENANCE_FIELDS = [
+  'provider',
+  'collection',
+  'item_id',
+  'platform',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'asset_href',
+  'crs',
+  'transform',
+  'resolution_m',
+  'raster_window',
+] as const;
+
+/**
+ * Property names of {@link GhostAssociationDecision} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GHOSTASSOCIATIONDECISION_FIELDS = [
+  'candidates_considered',
+  'acceptance_threshold',
+  'closest_rejected_candidate',
+  'reason_no_association',
+  'ais_association_confidence',
+  'ais_coverage_state',
+  'score_decomposition',
+] as const;
+
+/**
+ * Property names of {@link GhostObservedEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GHOSTOBSERVEDEVIDENCE_FIELDS = [
+  'target_id',
+  'position',
+  'marine_region',
+  'sar_detection_confidence',
+  'apparent_footprint_m',
+  'length_uncertainty_m',
+  'orientation_deg',
+  'mean_backscatter_db',
+  'max_backscatter_db',
+  'wake_detected',
+  'polarization_evidence',
+  'multipass_evidence',
+] as const;
+
+/**
+ * Property names of {@link ApparentFootprint} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const APPARENTFOOTPRINT_FIELDS = [
+  'length',
+  'width',
+] as const;
+
+/**
+ * Property names of {@link ObservedPosition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const OBSERVEDPOSITION_FIELDS = [
+  'lat',
+  'lon',
+  'marine_region',
+  'vertical_datum',
+] as const;
+
+/**
  * Property names of {@link NarrativeModelIdentity} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1580,6 +2181,98 @@ export const NARRATIVEMODELIDENTITY_FIELDS = [
 export const NARRATIVEPROVENANCE_FIELDS = [
   'writer',
   'network_calls',
+] as const;
+
+/**
+ * Property names of {@link DebugCacheInputs} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DEBUGCACHEINPUTS_FIELDS = [
+  'scene_item_id',
+  'bbox',
+  'processing_config',
+  'algorithm_version',
+] as const;
+
+/**
+ * Property names of {@link CfarSettings} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const CFARSETTINGS_FIELDS = [
+  'training_cells',
+  'guard_cells',
+  'threshold_factor',
+  'min_pixels',
+  'max_pixels',
+] as const;
+
+/**
+ * Property names of {@link LandMaskProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const LANDMASKPROVENANCE_FIELDS = [
+  'source',
+  'water_href',
+  'water_class',
+  'coastline_buffer_m',
+  'port_exceptions',
+] as const;
+
+/**
+ * Property names of {@link SpeckleSettings} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SPECKLESETTINGS_FIELDS = [
+  'mode',
+  'kernel',
+] as const;
+
+/**
+ * Property names of {@link GhostObservedPosition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GHOSTOBSERVEDPOSITION_FIELDS = [
+  'lat',
+  'lon',
+] as const;
+
+/**
+ * Property names of {@link MarineRegionContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MARINEREGIONCONTEXT_FIELDS = [
+  'kind',
+  'named_regions',
+  'primary',
+  'basin',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link VerticalDatumContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const VERTICALDATUMCONTEXT_FIELDS = [
+  'geoid_model',
+  'ellipsoid',
+  'undulation_m',
+  'undulation_available',
+  'altitude_measured',
+  'note',
 ] as const;
 
 /**

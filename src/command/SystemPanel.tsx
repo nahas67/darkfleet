@@ -16,6 +16,63 @@ import { useStore } from '../state/store';
 import { healthColor, healthSeverity } from '../design/tokens';
 import { SHORTCUTS } from './useGlobalKeys';
 import { NOT_ESTABLISHED } from '../design/format';
+import { useArchiveCoverage } from '../ais/archiveCoverage';
+
+/**
+ * Deployment-level AIS archive state.
+ *
+ * Lives here rather than on the dossier AIS tab because it answers a different
+ * question than the target-scoped coverage block: does this deployment HAVE an
+ * archive, as opposed to did any receiver cover THIS target's window. Showing the
+ * two side by side would let a reader read a healthy archive as proof that a
+ * particular unmatched target had AIS coverage, which is the specific confusion
+ * this separation prevents.
+ */
+function ArchiveCoverageSection() {
+  const coverage = useArchiveCoverage();
+
+  return (
+    <div className="border border-structural/60 px-2 py-1.5" data-df-archive-coverage>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="df-label text-[10px] uppercase">AIS archive (deployment)</span>
+        <button type="button" className="df-btn text-[10px]" onClick={coverage.reload}>
+          Re-probe
+        </button>
+      </div>
+
+      {coverage.status === 'loading' ? (
+        <p className="pt-1 text-[11px] text-ink-dim">Probing the local AIS archive…</p>
+      ) : coverage.status === 'failed' ? (
+        <p className="pt-1 text-[11px] text-fault">
+          The archive probe failed: {coverage.reason}. That is a connection failure, not an
+          absent archive.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between gap-2 pt-1">
+            <span className="df-num text-[11px]">{coverage.value.state}</span>
+            {/*
+              `observation_count` is null under NOT_CONFIGURED because with nothing
+              to count a number would imply a measurement. Rendering 0 here would turn
+              "this deployment has no archive" into "there were no vessels", which is
+              the exact substitution this product refuses everywhere else.
+            */}
+            <span className="df-num text-[11px]">
+              {coverage.value.observation_count === null
+                ? NOT_ESTABLISHED
+                : `${coverage.value.observation_count} obs`}
+            </span>
+          </div>
+          <p className="pt-1 text-[11px] leading-relaxed text-ink-2">{coverage.value.detail}</p>
+          <p className="pt-1 text-[10px] leading-relaxed text-ink-dim">
+            This is the state of the whole deployment. A target can still report NO COVERAGE while
+            this reads AVAILABLE, because coverage is also a question of place and time.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function SystemPanel() {
   const state = useStore();
@@ -36,7 +93,9 @@ export function SystemPanel() {
       </header>
 
       <div className="p-3">
-        <p className="df-label mb-1.5 text-[10px]">Source health</p>
+        <ArchiveCoverageSection />
+
+        <p className="df-label mb-1.5 mt-3 text-[10px]">Source health</p>
         {state.providers.length === 0 ? (
           <p className="text-[11px] text-ink-dim" data-df-providers-empty>
             {state.providersLoading

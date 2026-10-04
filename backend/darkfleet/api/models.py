@@ -37,12 +37,14 @@ from pydantic import (
 from darkfleet.jobs.models import ScanStage
 
 from ..providers import ProviderStatus
+from .evidence_models import EvidenceDocument, ScanRecordDocument
 from .targets import AisOnlyTarget, ScanScene, VesselTarget
 
 __all__ = [
     "ApiError",
     "BBox",
     "DebugLayerResponse",
+    "EvidenceDocument",
     "EvidenceDocumentResponse",
     "ExportFormatNotImplemented",
     "HealthResponse",
@@ -52,12 +54,14 @@ __all__ = [
     "RuntimeModeLiteral",
     "ScanAccepted",
     "ScanCreateRequest",
+    "ScanRecordDocument",
     "ScanStateResponse",
     "ScanTargetsResponse",
     "SceneListResponse",
     "SceneSummary",
     "StageEventOut",
     "TargetEvidenceResponse",
+    "TargetSummaryResponse",
     "jsonable",
 ]
 
@@ -427,8 +431,9 @@ class HealthResponse(BaseModel):
 # to. These models exist so that route has a checkable contract.
 #
 # The envelope is strict (`extra="forbid"`) because its shape is entirely ours.
-# `evidence` is the shared evidence document and is deliberately open; see the
-# module note in the checkpoint report for what that does and does not buy.
+# `evidence` is the shared evidence document and is strict too: it is declared
+# in :mod:`darkfleet.api.evidence_models`, which enumerates every key
+# :func:`darkfleet.evidence.target_evidence` emits.
 # =====================================================================
 
 
@@ -504,41 +509,15 @@ class NarrativeEnvelope(BaseModel):
         return self
 
 
-class TargetSummaryEvidence(BaseModel):
-    """The deterministic evidence document, as served on this route.
-
-    Open by design, because this is the same document `/targets/{id}` and
-    `/evidence/{id}` serve, and it carries deeply nested blocks (marine region,
-    vertical datum, score decomposition, multipass) that are still untyped. The
-    keys declared here are the ones a caller branches on.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    target_id: str
-    classification: str
-    #: Human-facing designation, e.g. ``GHOST VESSEL``. Null when the target is
-    #: neither a Ghost Vessel nor a named-vessel match.
-    designation: str | None = None
-    #: Present for Ghost Vessels; carries the semantic warning and the analytical
-    #: classification separately, because the two are not the same claim.
-    ghost_vessel: dict[str, Any] | None = None
-    observed: dict[str, Any] = Field(default_factory=dict)
-    uncertainty: dict[str, Any] = Field(default_factory=dict)
-    association: dict[str, Any] = Field(default_factory=dict)
-    summary: str = ""
-    tags: list[str] = Field(default_factory=list)
-    hypotheses: list[dict[str, Any]] = Field(default_factory=list)
-    unknowns: list[dict[str, Any]] = Field(default_factory=list)
-    sar_chip: dict[str, Any] | None = None
-
-
 class TargetSummaryResponse(BaseModel):
     """``GET /api/targets/{id}/summary``: evidence plus optional narrative.
 
     `classification` is nullable because a stored target may predate the field; it
     is not nullable to hide a missing classification, and `evidence.classification`
     carries the authoritative value when this is null.
+
+    `evidence` is the same declared document `/targets/{id}` serves, so the two
+    routes can no longer drift apart in a way only a reader would notice.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -549,12 +528,12 @@ class TargetSummaryResponse(BaseModel):
     ambiguous: bool = Field(
         description="True when this target id exists in more than one stored scan."
     )
-    evidence: TargetSummaryEvidence
+    evidence: EvidenceDocument
     narrative: NarrativeEnvelope
 
 
 class TargetEvidenceResponse(BaseModel):
-    """``GET /api/targets/{id}``: ``evidence.target_evidence`` output verbatim."""
+    """``GET /api/targets/{id}``: the target's evidence slice, fully declared."""
 
     scan_id: str
     runtime_mode: str
@@ -563,18 +542,29 @@ class TargetEvidenceResponse(BaseModel):
         description="True when the target id exists in more than one stored scan."
     )
     candidate_scan_ids: list[str] = Field(default_factory=list)
-    evidence: dict[str, Any]
+    #: Typed rather than ``dict[str, Any]``. This is the document a UI is about
+    #: to render as the authoritative analytical record, and an untyped dict
+    #: cannot be validated -- so a field rename or a missing block would be
+    #: silently invisible, which is the same defect class as a stale golden.
+    evidence: EvidenceDocument
 
 
 class EvidenceDocumentResponse(BaseModel):
-    """``GET /api/evidence/{target_id}``: the owning scan's whole evidence document."""
+    """``GET /api/evidence/{target_id}``: the owning scan's whole record.
+
+    Despite the name, this route does NOT serve the per-target evidence
+    document: it serves the persisted record of the scan that owns the target,
+    which is why ``evidence.targets`` and ``evidence.config`` exist on it.
+    :class:`~darkfleet.api.evidence_models.ScanRecordDocument` types that shape
+    separately so the distinction is declared rather than assumed.
+    """
 
     scan_id: str
     runtime_mode: str
     synthetic: bool
     ambiguous: bool
     candidate_scan_ids: list[str] = Field(default_factory=list)
-    evidence: dict[str, Any]
+    evidence: ScanRecordDocument
 
 
 class LayerStats(BaseModel):

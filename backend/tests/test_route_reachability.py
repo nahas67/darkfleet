@@ -102,25 +102,38 @@ def test_routes_are_discovered_from_the_source() -> None:
     assert "GET /detectors" in labels
 
 
-def test_known_orphan_stays_orphaned_until_it_has_a_surface() -> None:
-    """`/ais/coverage` currently has no caller.
+def test_ais_coverage_is_called_from_the_system_panel() -> None:
+    """`/ais/coverage` now has a caller, and the assertion was INVERTED on purpose.
 
-    This test exists so that closing the gap flips it, and re-opening it flips it
-    back. If the endpoint is removed instead, this fails and the removal has to
-    be a deliberate edit to this test rather than a silent drift.
+    This test began as `assert reached is False` -- a standing pin that the route had
+    no frontend caller, so that giving it one would have to be a deliberate edit
+    rather than silent drift. DF-X7.6 gave it one and the pin flipped, which is the
+    mechanism working.
+
+    Why it was given a surface: the route is a DEPLOYMENT-level probe -- does this
+    installation have an AIS archive at all -- whereas the target-scoped
+    `/targets/{id}/ais-observations` coverage block answers whether a receiver
+    covered THAT window. Those disagree routinely: a healthy archive still yields
+    NO_COVERAGE for a target over unmonitored water. It was therefore classified
+    neither REDUNDANT nor INTERNAL_SUPPORT, and placed on the SYSTEM panel where
+    the deployment scope is unambiguous, rather than on the dossier AIS tab where it
+    would sit beside a window-scoped fact and invite the reader to conflate them.
+
+    The assertion now pins that placement: the route must stay called, so a later
+    refactor that drops the probe fails here instead of silently degrading the
+    system panel.
     """
-    import ast as _ast
-
     from route_reachability import _template_paths
 
     literals: set[str] = set()
     for path in (Path(__file__).resolve().parents[2] / "src").rglob("*"):
         if path.suffix in (".ts", ".tsx"):
             literals |= _template_paths(path.read_text(encoding="utf-8"))
-    del _ast
 
     reached = any(_matches("/ais/coverage", x) for x in literals)
-    assert reached is False, (
-        "/ais/coverage now has a frontend caller; update this test and the "
-        "CURRENT_STATE orphan count."
+    assert reached is True, (
+        "/ais/coverage has lost its only caller. Either the SYSTEM panel's "
+        "deployment-level AIS archive probe was removed, or its URL stopped being a "
+        "legible literal the reachability gate can read. Both are regressions worth "
+        "a deliberate fix rather than a silent acceptance."
     )

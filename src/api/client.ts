@@ -262,7 +262,8 @@ export async function loadScanResults(scanId: string): Promise<void> {
       });
       return;
     }
-    const targets = (payload.targets ?? []).map(toSarTarget);
+    const detailTargets = payload.targets ?? [];
+    const targets = detailTargets.map(toSarTarget);
     const aisOnly: AisContact[] = (payload.ais_only ?? []).map((row) => ({
       mmsi: row.mmsi,
       lat: row.lat,
@@ -275,6 +276,15 @@ export async function loadScanResults(scanId: string): Promise<void> {
     const selected = store.getState().selection;
     store.set({
       targets,
+      // The full contract record, kept alongside the globe projection.
+      //
+      // `toSarTarget` reduces a target to what the globe and contact list need to
+      // draw a marker. Everything the dossier shows -- correlation decomposition,
+      // wake analysis, polarization, backscatter, footprint, heading -- is
+      // discarded by that projection. Re-fetching it per tab would mean eleven
+      // requests for a payload the client already holds, so the authority is
+      // retained once here and the projection stays a projection.
+      targetDetail: detailTargets,
       aisOnly,
       scene: payload.scene ?? null,
       scanError: null,

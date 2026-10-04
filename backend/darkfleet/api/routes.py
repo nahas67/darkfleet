@@ -63,6 +63,7 @@ from darkfleet.api.advanced import (
     TrackHypothesisOut,
     TracksOut,
 )
+from darkfleet.api.evidence_models import EvidenceDocument, ScanRecordDocument
 from darkfleet.api.models import (
     DEFERRED_EXPORT_FORMATS,
     SUPPORTED_EXPORT_FORMATS,
@@ -1520,13 +1521,31 @@ def get_target(
     owners = _locate_target(state, target_id, scan_id)
     owner = owners[0]
     record = owner["record"]
+    # Validated into EvidenceDocument rather than passed through as a dict. The
+    # builder is the authority on what the document contains; the model is the
+    # check that the document still matches what any consumer was promised. A
+    # builder key with no declaration raises here rather than shipping a field
+    # the interface cannot see.
+    #
+    # An absent provenance block is passed through as None rather than as `{}`:
+    # the builder carries null provenance out as null, so a record that cannot
+    # say how it was produced renders as an absent audit trail.
+    provenance = owner["record"].get("provenance") or None
     return TargetEvidenceResponse(
         scan_id=str(record.get("scan_id", "")),
         runtime_mode=str(record.get("runtime_mode", "REAL")),
         synthetic=bool(record.get("synthetic", False)),
         ambiguous=len(owners) > 1,
         candidate_scan_ids=[str(o["record"].get("scan_id", "")) for o in owners],
-        evidence=jsonable(target_evidence(owner["target"], dict(record.get("provenance") or {}), None)),
+        evidence=EvidenceDocument.model_validate(
+            jsonable(
+                target_evidence(
+                    owner["target"],
+                    dict(provenance) if provenance else None,
+                    None,
+                )
+            )
+        ),
     )
 
 
@@ -1536,7 +1555,13 @@ def get_evidence(
     state: State,
     scan_id: str | None = Query(default=None, description="Disambiguates repeated target ids."),
 ) -> EvidenceDocumentResponse:
-    """The whole evidence document of the scan that owns the target (API-008)."""
+    """The whole persisted record of the scan that owns the target (API-008).
+
+    Note this is the SCAN RECORD, not the per-target evidence document that
+    `/targets/{id}` serves: it carries every target in the scan. The two are
+    typed separately (``ScanRecordDocument`` vs ``EvidenceDocument``) so the
+    difference is declared instead of being a naming coincidence.
+    """
     owners = _locate_target(state, target_id, scan_id)
     record = owners[0]["record"]
     return EvidenceDocumentResponse(
@@ -1545,7 +1570,7 @@ def get_evidence(
         synthetic=bool(record.get("synthetic", False)),
         ambiguous=len(owners) > 1,
         candidate_scan_ids=[str(o["record"].get("scan_id", "")) for o in owners],
-        evidence=jsonable(record),
+        evidence=ScanRecordDocument.model_validate(jsonable(record)),
     )
 
 
@@ -2573,12 +2598,16 @@ def summarise_target(
     untyped response generates no OpenAPI schema, no TypeScript type and no
     validator keys, so a change to this payload could not be detected by any
     consumer -- the contract existed only as a convention nobody could check.
+
+    `evidence` is the same declared document `/targets/{id}` serves, so a change
+    to either route's payload is a schema change both routes inherit.
     """
     owners = _locate_target(state, target_id, scan_id)
     owner = owners[0]
+    provenance = owner["record"].get("provenance") or None
     evidence = target_evidence(
         owner["target"],
-        owner["record"].get("provenance") or {},
+        dict(provenance) if provenance else None,
         owner["target"].get("sar_chip"),
     )
     narrative = summarise(evidence, model_id=model_id)

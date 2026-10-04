@@ -178,7 +178,10 @@ export function MissionTimeline() {
             title={`${event.label} — ${event.detail}`}
             data-df-timeline-event={event.kind}
             onClick={() => {
-              if (event.targetId) store.select({ kind: 'target', targetId: event.targetId });
+              if (event.targetId)
+      // The timeline event carries no scan of its own; the currently loaded scan is
+      // the one whose event this is, so the store is the authority here.
+      store.select({ kind: 'target', targetId: event.targetId, scanId: store.getState().scanId });
               const target = state.targets.find((t) => t.id === event.targetId);
               if (target) engine.flyTo(target.lat, target.lon);
             }}

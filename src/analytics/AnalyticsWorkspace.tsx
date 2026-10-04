@@ -156,7 +156,7 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
       // Analytics -> target. Only through the authoritative id; the alternative
       // would be nearest-point matching in the browser, which manufactures a
       // relation the backend never asserted.
-      store.select({ kind: 'target', targetId });
+      store.select({ kind: 'target', targetId, scanId: store.getState().scanId });
       // A centroid row carries the pixel anchor, so lock the probe on it and the
       // coordinate comes from the backend like any other.
       if (typeof row.pixel_row === 'number' && typeof row.pixel_col === 'number') {

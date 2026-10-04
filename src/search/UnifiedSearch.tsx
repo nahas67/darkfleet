@@ -142,7 +142,8 @@ export function UnifiedSearch() {
               className="flex w-full items-baseline gap-2 border-b border-structural/50 px-3 py-1.5 text-left hover:bg-raised/60 focus-visible:outline-2 focus-visible:outline-info"
               data-df-search-result={result.kind}
               onClick={() => {
-                if (result.kind === 'TARGET') store.select({ kind: 'target', targetId: result.id });
+                if (result.kind === 'TARGET')
+      store.select({ kind: 'target', targetId: result.id, scanId: store.getState().scanId });
                 if (result.kind === 'MMSI') store.select({ kind: 'mmsi', mmsi: result.id });
                 if (result.kind === 'SCENE') store.select({ kind: 'scene', sceneId: result.id });
                 engine.flyTo(result.lat, result.lon);

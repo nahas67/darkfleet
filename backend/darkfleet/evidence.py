@@ -75,7 +75,7 @@ def build_provenance(
 
 def target_evidence(
     target: dict[str, Any],
-    provenance: dict[str, Any],
+    provenance: dict[str, Any] | None,
     chip: dict[str, Any] | None,
     *,
     ais_coverage: dict[str, Any] | None = None,
@@ -86,8 +86,18 @@ def target_evidence(
     into one paragraph, because a reader who skims prose cannot tell which clause
     was measured and which was suggested. An empty block still renders, so
     "nothing found" is never mistaken for "not examined".
+
+    ``provenance`` is nullable and stays null on the way out. A record that cannot
+    say how it was produced must render as an absent audit trail, not as an empty
+    one: substituting ``{}`` would assert that the acquisition was recorded and
+    carried no detail, which is a different -- and unsupported -- claim.
     """
-    corr = target.get("corr", {})
+    # `or {}` rather than `.get("corr", {})`: the default only applies when the key is
+    # ABSENT, so an explicit `"corr": None` -- which a stored record or a partially
+    # written target can carry -- reached `.get` on None and raised. A missing
+    # correlation block is an ordinary state, not an exceptional one, and it must
+    # render as "no association" rather than 500 the evidence route.
+    corr = target.get("corr") or {}
     decomposition = corr.get("scoreDecomposition")
     lat, lon = target["lat"], target["lon"]
     designation = display_label(target["cls"])[0]
@@ -127,9 +137,23 @@ def target_evidence(
         "uncertainty": {
             "length_uncertainty_m": target["lenUncM"],
             "match_radius_m": decomposition["matchRadiusMeters"] if decomposition else None,
+            # This note used to be emitted unconditionally: "AIS position propagated to
+            # acquisition time by dead reckoning". For an UNMATCHED target there is no
+            # MMSI, so no AIS position was propagated and nothing was dead reckoned --
+            # the note asserted a computation that never happened, inside the
+            # uncertainty block, which is the one place a reader is most likely to
+            # take a statement at face value.
+            #
+            # It is now conditioned on an association actually existing. The no-correction
+            # caveat is kept in both branches because it is a property of the data, not
+            # of the association.
             "propagation_note": (
                 "AIS position propagated to acquisition time by dead reckoning; "
                 "no gyro/IMU correction available."
+                if corr.get("mmsi")
+                else "No AIS position was propagated for this target: it carries no "
+                "association, so no dead reckoning was performed. "
+                "No gyro/IMU correction available."
             ),
         },
         "association": {

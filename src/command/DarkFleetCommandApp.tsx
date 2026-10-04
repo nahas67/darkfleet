@@ -29,7 +29,7 @@ import { useGlobalKeys } from './useGlobalKeys';
 import { TacticalWorld } from '../tactical/TacticalWorld';
 import { MissionTimeline } from '../timeline/MissionTimeline';
 import { ContactList } from '../contacts/ContactList';
-import { TargetIntel } from '../intelligence/TargetIntel';
+import { DossierWorkspace } from '../dossier/DossierWorkspace';
 import { LayerConsole } from '../sensors/LayerConsole';
 import { ScanWorkflow } from '../missions/ScanWorkflow';
 import { SceneBrowser } from '../scenes/SceneBrowser';
@@ -121,7 +121,19 @@ export function DarkFleetCommandApp() {
           className={
             activeWorkspace === 'ANALYTICS'
               ? 'relative z-30 flex w-[min(68rem,72vw)] shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm'
-              : 'relative z-30 flex w-80 shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm xl:w-96'
+              : activeWorkspace === 'INTELLIGENCE'
+                /*
+                 * The dossier carries an eleven-tab strip, a two-column header, wide
+                 * score and observation tables and a provenance drawer. At the 320px
+                 * default those tables wrap per-character and the score decomposition
+                 * becomes unreadable, so this workspace is given the width its content
+                 * requires -- but bounded against the viewport so the globe is never
+                 * squeezed out of existence. The `min()` is doing real work here: an
+                 * unbounded width would simply take the whole screen at 1920 and leave
+                 * no globe at all, which is a different failure from a cramped one.
+                 */
+                ? 'relative z-30 flex w-[min(58rem,62vw)] shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm'
+                : 'relative z-30 flex w-80 shrink-0 flex-col border-l border-structural bg-base/85 backdrop-blur-sm xl:w-96'
           }
           aria-label="Operation workspace"
           data-df-workspace-panel
@@ -135,9 +147,16 @@ export function DarkFleetCommandApp() {
           ) : null}
           {activeWorkspace === 'SEARCH' ? <UnifiedSearch /> : null}
           {activeWorkspace === 'INTELLIGENCE' ? (
+            /*
+             * The dossier replaces TargetIntel here. TargetIntel's five tabs are a
+             * subset of what the dossier now answers, and keeping both would leave two
+             * surfaces disagreeing about the same target -- the exact duplication this
+             * checkpoint exists to remove. ContactList is retained because it is the
+             * other way to change the single global selection, not part of the dossier.
+             */
             <>
               <div className="min-h-0 flex-[3] overflow-hidden border-b border-structural">
-                <TargetIntel />
+                <DossierWorkspace />
               </div>
               <div className="min-h-0 flex-[2] overflow-hidden">
                 <ContactList />
