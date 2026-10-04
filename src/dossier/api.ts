@@ -31,6 +31,7 @@ import {
   REVISITPLANOUT_FIELDS,
   TARGETAISRESPONSE_FIELDS,
   TARGETEVIDENCERESPONSE_FIELDS,
+  TARGETMARITIMECONTEXTRESPONSE_FIELDS,
   TARGETSUMMARYRESPONSE_FIELDS,
   TRACKSOUT_FIELDS,
 } from '../api/contract';
@@ -41,6 +42,7 @@ import type {
   RevisitPlanOut,
   TargetAisResponse,
   TargetEvidenceResponse,
+  TargetMaritimeContextResponse,
   TargetSummaryResponse,
   TracksOut,
 } from '../api/contract';
@@ -74,6 +76,10 @@ const validateEvidenceDocument = contractValidator<EvidenceDocumentResponse>(
 const validateCoverage = contractValidator<AisCoverageOut>(
   AISCOVERAGEOUT_FIELDS,
   'AisCoverageOut',
+);
+const validateMaritimeContext = contractValidator<TargetMaritimeContextResponse>(
+  TARGETMARITIMECONTEXTRESPONSE_FIELDS,
+  'TargetMaritimeContextResponse',
 );
 
 /* ------------------------------------------------------------------- URL build */
@@ -119,6 +125,38 @@ export function loadTargetSummary(ref: TargetRef): Branch<TargetSummaryResponse>
     validateSummary(
       await api.get<unknown>(`/api/targets/${targetPath(ref)}/summary?${scanParam(ref)}`, signal),
     );
+}
+
+/**
+ * Maritime context: where this vessel sits in reference geography.
+ *
+ * SCAN-SCOPED BY CONSTRUCTION. The path carries BOTH halves of the target identity,
+ * because `DF-002` exists in many scans and a target-id-only URL would resolve to
+ * whichever scan was read last. There is deliberately no `/targets/{id}/maritime-context`
+ * form.
+ *
+ * This is CONTEXT, not evidence. It arrives on its own branch so a failure here cannot
+ * disturb the evidence tabs, and it is rendered separately from OBSERVED evidence so a
+ * reader never takes "inside Malaysia's EEZ" for a measurement about the vessel.
+ */
+export function loadMaritimeContext(ref: TargetRef): Branch<TargetMaritimeContextResponse> {
+  return async (signal) => {
+    // `scanId` is nullable because a bare selection may name a target with no scan. The
+    // maritime route REQUIRES both halves of the identity -- `DF-002` exists in many
+    // scans -- so a ref without a scan cannot address it, and the loader refuses rather
+    // than building a URL that would resolve to the wrong vessel.
+    if (ref.scanId === null) {
+      throw new Error(
+        'maritime context requires a scan-scoped target: this selection has no scan id',
+      );
+    }
+    return validateMaritimeContext(
+      await api.get<unknown>(
+        `/api/scans/${encodeURIComponent(ref.scanId)}/targets/${encodeURIComponent(ref.targetId)}/maritime-context`,
+        signal,
+      ),
+    );
+  };
 }
 
 /**

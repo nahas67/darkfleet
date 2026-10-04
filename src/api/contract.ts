@@ -377,6 +377,93 @@ export interface VesselTrackResponse {
   readonly note: string;
 }
 
+export interface SourceRef {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly provider: string;
+  readonly dataset: string;
+  readonly version: string;
+  readonly license: LicenseKind;
+  readonly attribution: string;
+  readonly identifier?: string;
+  readonly release_date?: string | null;
+  readonly terms_notes?: string;
+  readonly limitations?: string[];
+  readonly coverage_note?: string;
+  readonly install_status: string;
+}
+
+export interface TargetPosition {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly latitude: number;
+  readonly longitude: number;
+}
+
+export interface ZoneContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: ContextStatus;
+  readonly zone?: MaritimeZone | null;
+  readonly feature_id?: string | null;
+  readonly sovereign_names?: string[];
+  readonly dispute_note?: string | null;
+  readonly reason?: string | null;
+  readonly established?: boolean;
+  readonly disputed?: boolean;
+  readonly provenance?: SourceRef | null;
+  readonly detail?: string;
+}
+
+export interface CoastContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: ContextStatus;
+  readonly meters?: number | null;
+  readonly method?: DistanceMethod;
+  readonly sample_spacing_m?: number | null;
+  readonly searched_radius_m?: number | null;
+  readonly provenance?: SourceRef | null;
+  readonly detail?: string;
+}
+
+export interface PortContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: ContextStatus;
+  readonly port_id?: string | null;
+  readonly name?: string | null;
+  readonly country?: string | null;
+  readonly harbor_type?: string | null;
+  readonly harbor_size?: string | null;
+  readonly longitude?: number | null;
+  readonly latitude?: number | null;
+  readonly meters?: number | null;
+  readonly method?: DistanceMethod;
+  readonly searched_radius_m?: number | null;
+  readonly provenance?: SourceRef | null;
+  readonly interpretation?: string;
+  readonly detail?: string;
+}
+
+export interface BathymetryContext {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: ContextStatus;
+  readonly meters?: number | null;
+  readonly resolution_deg?: number | null;
+  readonly source_type?: string | null;
+  readonly provenance?: SourceRef | null;
+  readonly detail?: string;
+}
+
+export interface TargetMaritimeContextResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly target_id: string;
+  readonly position: TargetPosition;
+  readonly maritime_zone: ZoneContext;
+  readonly nearest_coast: CoastContext;
+  readonly nearest_port: PortContext;
+  readonly bathymetry: BathymetryContext;
+  readonly generated_at: string;
+  readonly context_version?: number;
+}
+
 export interface ProbeRequest {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   /** Row index in the window raster; 0 is the first row. */
@@ -609,6 +696,17 @@ export interface ScanRecordDocument {
 
 /** Whether the archive can answer a question, and how completely. */
 export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
+
+/** How a dataset may be used. Modelled rather than free-text because the distinction changes what DarkFleet is permitted to DO. "Downloadable" alone says nothing about redistribution, and reading "I could fetch it" as "I may ship it" is exactly the mistake DF-X8 §58 warns about. Marine Regions is th... */
+export type LicenseKind = "PUBLIC_DOMAIN" | "CC_BY" | "CC_BY_SA" | "ODBL" | "DOWNLOAD_ONLY" | "AUTHENTICATED" | "COMMERCIAL" | "UNDETERMINED";
+
+/** Per-channel state. Deliberately finer than InstallStatus. A channel can fail for a reason that has nothing to do with installation, and an operator needs to know which: a dataset that is installed but has no data for the Pacific is a different problem from one that was never downloaded (Â§46). */
+export type ContextStatus = "AVAILABLE" | "NOT_INSTALLED" | "NO_COVERAGE" | "FAILED" | "NOT_ESTABLISHED";
+
+/** Law of the Sea zones, as a DATASET represents them. Surfaced in the UI as a *dataset-represented* zone. DarkFleet reports a third party's representation; it does not determine sovereignty. ``DISPUTED`` and ``AMBIGUOUS`` are real answers, not failures, and neither may be collapsed into a confident... */
+export type MaritimeZone = "TERRITORIAL_SEA" | "CONTIGUOUS_ZONE" | "EXCLUSIVE_ECONOMIC_ZONE" | "INTERNAL_WATERS" | "ARCHIPELAGIC_WATERS" | "HIGH_SEAS" | "DISPUTED" | "AMBIGUOUS" | "NOT_ESTABLISHED";
+
+export type DistanceMethod = "GEODESIC_METER" | "PLANAR_DEGREE" | "DENSIFIED_POINT_METER";
 
 export interface CfarConfig {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
@@ -960,6 +1058,13 @@ export type ContractSchemaName =
   | 'ScanAisResponse'
   | 'TargetAisResponse'
   | 'VesselTrackResponse'
+  | 'SourceRef'
+  | 'TargetPosition'
+  | 'ZoneContext'
+  | 'CoastContext'
+  | 'PortContext'
+  | 'BathymetryContext'
+  | 'TargetMaritimeContextResponse'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
   | 'EvidenceDocument'
@@ -982,6 +1087,10 @@ export type ContractSchemaName =
   | 'ScanStage'
   | 'ScanRecordDocument'
   | 'AisCoverageState'
+  | 'LicenseKind'
+  | 'ContextStatus'
+  | 'MaritimeZone'
+  | 'DistanceMethod'
   | 'CfarConfig'
   | 'AssociationEvidence'
   | 'EvidenceBullet'
@@ -1499,6 +1608,128 @@ export const VESSELTRACKRESPONSE_FIELDS = [
   'width_m',
   'observations',
   'note',
+] as const;
+
+/**
+ * Property names of {@link SourceRef} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SOURCEREF_FIELDS = [
+  'provider',
+  'dataset',
+  'version',
+  'license',
+  'attribution',
+  'identifier',
+  'release_date',
+  'terms_notes',
+  'limitations',
+  'coverage_note',
+  'install_status',
+] as const;
+
+/**
+ * Property names of {@link TargetPosition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETPOSITION_FIELDS = [
+  'latitude',
+  'longitude',
+] as const;
+
+/**
+ * Property names of {@link ZoneContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ZONECONTEXT_FIELDS = [
+  'status',
+  'zone',
+  'feature_id',
+  'sovereign_names',
+  'dispute_note',
+  'reason',
+  'established',
+  'disputed',
+  'provenance',
+  'detail',
+] as const;
+
+/**
+ * Property names of {@link CoastContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const COASTCONTEXT_FIELDS = [
+  'status',
+  'meters',
+  'method',
+  'sample_spacing_m',
+  'searched_radius_m',
+  'provenance',
+  'detail',
+] as const;
+
+/**
+ * Property names of {@link PortContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PORTCONTEXT_FIELDS = [
+  'status',
+  'port_id',
+  'name',
+  'country',
+  'harbor_type',
+  'harbor_size',
+  'longitude',
+  'latitude',
+  'meters',
+  'method',
+  'searched_radius_m',
+  'provenance',
+  'interpretation',
+  'detail',
+] as const;
+
+/**
+ * Property names of {@link BathymetryContext} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const BATHYMETRYCONTEXT_FIELDS = [
+  'status',
+  'meters',
+  'resolution_deg',
+  'source_type',
+  'provenance',
+  'detail',
+] as const;
+
+/**
+ * Property names of {@link TargetMaritimeContextResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETMARITIMECONTEXTRESPONSE_FIELDS = [
+  'scan_id',
+  'target_id',
+  'position',
+  'maritime_zone',
+  'nearest_coast',
+  'nearest_port',
+  'bathymetry',
+  'generated_at',
+  'context_version',
 ] as const;
 
 /**

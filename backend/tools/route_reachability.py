@@ -45,7 +45,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ROUTES = ROOT / "backend" / "darkfleet" / "api" / "routes.py"
+#: Route modules scanned for ``@router.<verb>`` declarations.
+#:
+#: DISCOVERED, not hardcoded to one file. Maritime context lives in its own router
+#: module, and a tool that read only ``routes.py`` silently omitted it -- the
+#: denominator stayed at 23 and the new route was never checked at all. A gate that
+#: ignores a whole module reports a clean number while measuring less, which is the
+#: failure mode this change removes.
+ROUTE_MODULES = sorted((ROOT / "backend" / "darkfleet" / "api").glob("*routes*.py"))
+if not ROUTE_MODULES:
+    raise SystemExit("no route modules found under backend/darkfleet/api")
 SRC = ROOT / "src"
 INDEX_HTML = ROOT / "index.html"
 
@@ -86,7 +95,27 @@ class Caller:
 
 
 def declared_routes() -> list[Route]:
-    return [Route(m.group(1).upper(), m.group(2)) for m in _ROUTE.finditer(ROUTES.read_text(encoding="utf-8"))]
+    """Every route declared across every discovered route module.
+
+    A router declared with a non-default prefix has the prefix applied here, because the
+    same prefix appears in the frontend URL and omitting it would make the route look
+    unreachable rather than mis-declared.
+    """
+    found: list[Route] = []
+    for module in ROUTE_MODULES:
+        source = module.read_text(encoding="utf-8")
+        prefix_match = re.search(
+            r'APIRouter\(\s*prefix\s*=\s*"([^"]*)"', source
+        )
+        prefix = prefix_match.group(1) if prefix_match else "/api"
+        for match in _ROUTE.finditer(source):
+            found.append(Route(match.group(1).upper(), prefix + match.group(2)))
+    # Deduplicate: the same verb+path declared twice is a bug elsewhere, but it must not
+    # inflate the denominator.
+    unique: dict[tuple[str, str], Route] = {}
+    for route in found:
+        unique.setdefault((route.verb, route.path), route)
+    return sorted(unique.values(), key=lambda r: (r.path, r.verb))
 
 
 def _template_paths(source: str) -> set[str]:

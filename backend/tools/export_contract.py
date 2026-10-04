@@ -96,6 +96,18 @@ SCHEMAS: tuple[str, ...] = (
     "ScanAisResponse",
     "TargetAisResponse",
     "VesselTrackResponse",
+    # Maritime context (DF-X8.4). Generated rather than hand-written in the frontend
+    # precisely because of per-channel provenance: the coastline version, the boundary
+    # snapshot version and the port dataset currency all come from the installed
+    # manifest, and a string duplicated into a component would drift from the backend
+    # with nothing noticing.
+    "SourceRef",
+    "TargetPosition",
+    "ZoneContext",
+    "CoastContext",
+    "PortContext",
+    "BathymetryContext",
+    "TargetMaritimeContextResponse",
 )
 
 HEADER = """// GENERATED FILE - DO NOT EDIT BY HAND.

@@ -98,8 +98,10 @@ def test_routes_are_discovered_from_the_source() -> None:
     routes = declared_routes()
     assert routes, "no routes discovered -- the decorator regex is stale"
     labels = {r.label for r in routes}
-    assert "POST /scans" in labels
-    assert "GET /detectors" in labels
+    # Prefixed: a label must match what a request URL actually contains, since that is
+    # how the tool matches it against frontend path literals.
+    assert "POST /api/scans" in labels
+    assert "GET /api/detectors" in labels
 
 
 def test_ais_coverage_is_called_from_the_system_panel() -> None:
@@ -136,4 +138,60 @@ def test_ais_coverage_is_called_from_the_system_panel() -> None:
         "deployment-level AIS archive probe was removed, or its URL stopped being a "
         "legible literal the reachability gate can read. Both are regressions worth "
         "a deliberate fix rather than a silent acceptance."
+    )
+
+# ------------------------------------------------- discovery across modules
+
+
+def test_route_modules_are_discovered_not_hardcoded() -> None:
+    from tools import route_reachability
+
+    modules = [m.name for m in route_reachability.ROUTE_MODULES]
+    assert any("maritime" in name for name in modules), modules
+    assert any(name.endswith("routes.py") for name in modules), modules
+
+
+def test_the_maritime_context_route_is_discovered() -> None:
+    from tools import route_reachability
+
+    labels = {route.label for route in route_reachability.declared_routes()}
+    assert "GET /api/scans/{scan_id}/targets/{target_id}/maritime-context" in labels, (
+        sorted(labels)
+    )
+
+
+def test_no_route_module_is_silently_ignored() -> None:
+    """
+    The sharp form: a module full of routes that contributes NONE is a gate with a hole.
+
+    Asserting only that the maritime route appears would pass even if a third module
+    were added tomorrow and ignored. This checks the property generally.
+    """
+    import re
+
+    from tools import route_reachability
+
+    pattern = re.compile(r'@router\.(get|post|put|delete|patch)\(\s*"')
+    discovered = route_reachability.declared_routes()
+    for module in route_reachability.ROUTE_MODULES:
+        source = module.read_text(encoding="utf-8")
+        if not pattern.search(source):
+            continue
+        # Upper-cased: the declaration regex captures the decorator's lowercase verb
+        # while `declared_routes` normalises to uppercase, so comparing them raw would
+        # report every module as having contributed nothing.
+        module_verbs = {verb.upper() for verb in pattern.findall(source)}
+        contributed = {r.verb for r in discovered}
+        assert module_verbs & contributed, (
+            f"{module.name} declares {sorted(module_verbs)} but contributed no route"
+        )
+
+
+def test_labels_carry_the_declared_prefix() -> None:
+    from tools import route_reachability
+
+    labels = {route.label for route in route_reachability.declared_routes()}
+    assert any(label.startswith("GET /api/") for label in labels), sorted(labels)
+    assert not any(label.startswith("GET /scans") for label in labels), (
+        "a label lost its /api prefix and would never match a real request URL"
     )
