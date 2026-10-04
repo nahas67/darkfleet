@@ -1,705 +1,892 @@
 {
- "meta": {
-  "generator": "legacy-ts-engine",
-  "sceneId": "SIM-S1C-MALACCA-001",
-  "config": {
-   "trainingCells": 16,
-   "guardCells": 4,
-   "thresholdFactor": 3.5,
-   "coastlineBufferMeters": 150,
-   "speckleFilter": "median",
-   "kernelSize": 3,
-   "minPixels": 3,
-   "maxPixels": 1000
+  "meta": {
+    "generator": "legacy-ts-engine",
+    "sceneId": "SIM-S1C-MALACCA-001",
+    "config": {
+      "trainingCells": 16,
+      "guardCells": 4,
+      "thresholdFactor": 3.5,
+      "coastlineBufferMeters": 150,
+      "speckleFilter": "median",
+      "kernelSize": 3,
+      "minPixels": 3,
+      "maxPixels": 1000
+    },
+    "width": 180,
+    "height": 180,
+    "resolutionMeters": 10,
+    "acquisitionTime": "2026-09-18T14:32:18Z",
+    "bbox": [
+      103.65,
+      1.1,
+      104.05,
+      1.4
+    ],
+    "geolocation": {
+      "method": "pixel_centroid_via_affine_window_transform",
+      "crs": "EPSG:4326",
+      "transform": [
+        0.002222222222222175,
+        0.0,
+        103.65,
+        0.0,
+        -0.0016666666666666657,
+        1.4
+      ],
+      "centre_offset": 0.5,
+      "migrated_by": "GEO-CORR",
+      "note": "Coordinates are measured from the grid transform, not interpolated across meta.bbox. The bbox coincides with the grid extent, so the only change is the pixel-centre convention."
+    }
   },
-  "width": 180,
-  "height": 180,
-  "resolutionMeters": 10,
-  "acquisitionTime": "2026-09-18T14:32:18Z",
-  "bbox": [
-   103.65,
-   1.1,
-   104.05,
-   1.4
+  "counts": {
+    "detPixels": 97,
+    "components": 12,
+    "targets": 12,
+    "aisOnly": 2,
+    "matched": 4,
+    "unmatched": 7,
+    "infra": 1
+  },
+  "geodesy": {
+    "dist": 1113.194907932737,
+    "radius": 1292.59999992,
+    "propagated": {
+      "lat": 1.2,
+      "lon": 103.805547,
+      "projectedDistanceMeters": 617.3333328
+    },
+    "headingDiff": 3
+  },
+  "components": [
+    {
+      "cx": 32.0741,
+      "cy": 40.5221,
+      "area": 8,
+      "major": 1.6915,
+      "minor": 1.3542,
+      "orient": 90,
+      "maxDb": 3.7,
+      "meanDb": 2.4,
+      "wake": false,
+      "wakeHdg": null,
+      "bbox": {
+        "minX": 31,
+        "minY": 39,
+        "maxX": 33,
+        "maxY": 42
+      },
+      "clutterMeanDb": -21.7,
+      "wakeConfidence": 0.18,
+      "wakeDirectionDeg": null,
+      "wakeLengthM": null,
+      "wakeArmAngleDeg": 150.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "arm contrast below margin (1.11 dB)",
+      "wakeAnalysis": {
+        "detected": false,
+        "confidence": 0.18,
+        "heading_deg": null,
+        "wake_direction_deg": null,
+        "apparent_length_m": null,
+        "arm_angle_deg": 150.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "arm contrast below margin (1.11 dB)"
+      }
+    },
+    {
+      "cx": 126.1488,
+      "cy": 58.5005,
+      "area": 6,
+      "major": 1.6142,
+      "minor": 1,
+      "orient": 179,
+      "maxDb": 2.9,
+      "meanDb": 1.8,
+      "wake": true,
+      "wakeHdg": 200.0,
+      "bbox": {
+        "minX": 125,
+        "minY": 58,
+        "maxX": 127,
+        "maxY": 59
+      },
+      "clutterMeanDb": -17.7,
+      "wakeConfidence": 0.42,
+      "wakeDirectionDeg": 20.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 21.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +21 deg to hull axis, contrast 1.70 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 0.42,
+        "heading_deg": 200.0,
+        "wake_direction_deg": 20.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 21.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +21 deg to hull axis, contrast 1.70 dB over background"
+      }
+    },
+    {
+      "cx": 79.2891,
+      "cy": 68.2922,
+      "area": 7,
+      "major": 2.2838,
+      "minor": 1,
+      "orient": 30,
+      "maxDb": 1.8,
+      "meanDb": 1.4,
+      "wake": false,
+      "wakeHdg": null,
+      "bbox": {
+        "minX": 78,
+        "minY": 67,
+        "maxX": 81,
+        "maxY": 69
+      },
+      "clutterMeanDb": -19.5,
+      "wakeConfidence": 0.01,
+      "wakeDirectionDeg": null,
+      "wakeLengthM": null,
+      "wakeArmAngleDeg": 164.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "arm contrast below margin (0.05 dB)",
+      "wakeAnalysis": {
+        "detected": false,
+        "confidence": 0.01,
+        "heading_deg": null,
+        "wake_direction_deg": null,
+        "apparent_length_m": null,
+        "arm_angle_deg": 164.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "arm contrast below margin (0.05 dB)"
+      }
+    },
+    {
+      "cx": 63.5766,
+      "cy": 76.1143,
+      "area": 13,
+      "major": 4.9931,
+      "minor": 1,
+      "orient": 32,
+      "maxDb": 2.7,
+      "meanDb": 2,
+      "wake": false,
+      "wakeHdg": null,
+      "bbox": {
+        "minX": 60,
+        "minY": 74,
+        "maxX": 67,
+        "maxY": 78
+      },
+      "clutterMeanDb": -19.4,
+      "wakeConfidence": 0.04,
+      "wakeDirectionDeg": null,
+      "wakeLengthM": null,
+      "wakeArmAngleDeg": 160.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "arm contrast below margin (0.21 dB)",
+      "wakeAnalysis": {
+        "detected": false,
+        "confidence": 0.04,
+        "heading_deg": null,
+        "wake_direction_deg": null,
+        "apparent_length_m": null,
+        "arm_angle_deg": 160.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "arm contrast below margin (0.21 dB)"
+      }
+    },
+    {
+      "cx": 90.6009,
+      "cy": 84.2018,
+      "area": 5,
+      "major": 1.5415,
+      "minor": 1,
+      "orient": 108,
+      "maxDb": 1.4,
+      "meanDb": 1.4,
+      "wake": true,
+      "wakeHdg": 134.0,
+      "bbox": {
+        "minX": 90,
+        "minY": 83,
+        "maxX": 91,
+        "maxY": 85
+      },
+      "clutterMeanDb": -21.1,
+      "wakeConfidence": 1.0,
+      "wakeDirectionDeg": 314.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 26.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +26 deg to hull axis, contrast 4.17 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 1.0,
+        "heading_deg": 134.0,
+        "wake_direction_deg": 314.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 26.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +26 deg to hull axis, contrast 4.17 dB over background"
+      }
+    },
+    {
+      "cx": 95.3083,
+      "cy": 87.6541,
+      "area": 3,
+      "major": 1.5,
+      "minor": 1,
+      "orient": 47,
+      "maxDb": 2.9,
+      "meanDb": 2.7,
+      "wake": false,
+      "wakeHdg": null,
+      "bbox": {
+        "minX": 95,
+        "minY": 87,
+        "maxX": 96,
+        "maxY": 88
+      },
+      "clutterMeanDb": -22,
+      "wakeConfidence": 0.06,
+      "wakeDirectionDeg": null,
+      "wakeLengthM": null,
+      "wakeArmAngleDeg": 157.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "arm contrast below margin (0.36 dB)",
+      "wakeAnalysis": {
+        "detected": false,
+        "confidence": 0.06,
+        "heading_deg": null,
+        "wake_direction_deg": null,
+        "apparent_length_m": null,
+        "arm_angle_deg": 157.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "arm contrast below margin (0.36 dB)"
+      }
+    },
+    {
+      "cx": 122.0129,
+      "cy": 96.6704,
+      "area": 13,
+      "major": 2.9299,
+      "minor": 1.3107,
+      "orient": 35,
+      "maxDb": 3.3,
+      "meanDb": 2.2,
+      "wake": true,
+      "wakeHdg": 189.0,
+      "bbox": {
+        "minX": 120,
+        "minY": 95,
+        "maxX": 124,
+        "maxY": 98
+      },
+      "clutterMeanDb": -21.3,
+      "wakeConfidence": 0.54,
+      "wakeDirectionDeg": 9.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 154.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +154 deg to hull axis, contrast 1.85 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 0.54,
+        "heading_deg": 189.0,
+        "wake_direction_deg": 9.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 154.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +154 deg to hull axis, contrast 1.85 dB over background"
+      }
+    },
+    {
+      "cx": 51.8599,
+      "cy": 109.8974,
+      "area": 8,
+      "major": 1.7349,
+      "minor": 1.357,
+      "orient": 134,
+      "maxDb": 2,
+      "meanDb": 1.8,
+      "wake": true,
+      "wakeHdg": 103.0,
+      "bbox": {
+        "minX": 51,
+        "minY": 109,
+        "maxX": 53,
+        "maxY": 111
+      },
+      "clutterMeanDb": -18.4,
+      "wakeConfidence": 1.0,
+      "wakeDirectionDeg": 283.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 31.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +31 deg to hull axis, contrast 5.72 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 1.0,
+        "heading_deg": 103.0,
+        "wake_direction_deg": 283.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 31.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +31 deg to hull axis, contrast 5.72 dB over background"
+      }
+    },
+    {
+      "cx": 57.8192,
+      "cy": 113.3108,
+      "area": 8,
+      "major": 2.3105,
+      "minor": 1.0287,
+      "orient": 125,
+      "maxDb": 2.5,
+      "meanDb": 1.5,
+      "wake": true,
+      "wakeHdg": 336.0,
+      "bbox": {
+        "minX": 57,
+        "minY": 112,
+        "maxX": 59,
+        "maxY": 115
+      },
+      "clutterMeanDb": -18.4,
+      "wakeConfidence": 1.0,
+      "wakeDirectionDeg": 156.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 149.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +149 deg to hull axis, contrast 5.23 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 1.0,
+        "heading_deg": 336.0,
+        "wake_direction_deg": 156.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 149.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +149 deg to hull axis, contrast 5.23 dB over background"
+      }
+    },
+    {
+      "cx": 47.5115,
+      "cy": 114.0111,
+      "area": 6,
+      "major": 1.6186,
+      "minor": 1,
+      "orient": 91,
+      "maxDb": 2,
+      "meanDb": 1.7,
+      "wake": true,
+      "wakeHdg": 103.0,
+      "bbox": {
+        "minX": 47,
+        "minY": 113,
+        "maxX": 48,
+        "maxY": 115
+      },
+      "clutterMeanDb": -16.7,
+      "wakeConfidence": 1.0,
+      "wakeDirectionDeg": 283.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 12.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +12 deg to hull axis, contrast 7.56 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 1.0,
+        "heading_deg": 103.0,
+        "wake_direction_deg": 283.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 12.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +12 deg to hull axis, contrast 7.56 dB over background"
+      }
+    },
+    {
+      "cx": 53.4646,
+      "cy": 116.7052,
+      "area": 7,
+      "major": 1.9807,
+      "minor": 1.0661,
+      "orient": 149,
+      "maxDb": 2.9,
+      "meanDb": 2.1,
+      "wake": true,
+      "wakeHdg": 307.0,
+      "bbox": {
+        "minX": 52,
+        "minY": 116,
+        "maxX": 55,
+        "maxY": 118
+      },
+      "clutterMeanDb": -16.7,
+      "wakeConfidence": 1.0,
+      "wakeDirectionDeg": 127.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 158.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +158 deg to hull axis, contrast 4.33 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 1.0,
+        "heading_deg": 307.0,
+        "wake_direction_deg": 127.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 158.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +158 deg to hull axis, contrast 4.33 dB over background"
+      }
+    },
+    {
+      "cx": 103.9696,
+      "cy": 117.2032,
+      "area": 6,
+      "major": 1.8599,
+      "minor": 1,
+      "orient": 145,
+      "maxDb": 2.6,
+      "meanDb": 2.2,
+      "wake": true,
+      "wakeHdg": 160.0,
+      "bbox": {
+        "minX": 103,
+        "minY": 116,
+        "maxX": 105,
+        "maxY": 118
+      },
+      "clutterMeanDb": -20.9,
+      "wakeConfidence": 0.65,
+      "wakeDirectionDeg": 340.0,
+      "wakeLengthM": 220.0,
+      "wakeArmAngleDeg": 15.0,
+      "wakeMethod": "polar-ray-arm-pair",
+      "wakeNotes": "symmetric arm pair at +15 deg to hull axis, contrast 1.98 dB over background",
+      "wakeAnalysis": {
+        "detected": true,
+        "confidence": 0.65,
+        "heading_deg": 160.0,
+        "wake_direction_deg": 340.0,
+        "apparent_length_m": 220.0,
+        "arm_angle_deg": 15.0,
+        "method": "polar-ray-arm-pair",
+        "notes": "symmetric arm pair at +15 deg to hull axis, contrast 1.98 dB over background"
+      }
+    }
   ],
-  "geolocation": {
-   "method": "pixel_centroid_via_affine_window_transform",
-   "crs": "EPSG:4326",
-   "transform": [
-    0.002222222222222175,
-    0.0,
-    103.65,
-    0.0,
-    -0.0016666666666666657,
-    1.4
-   ],
-   "centre_offset": 0.5,
-   "migrated_by": "GEO-CORR",
-   "note": "Coordinates are measured from the grid transform, not interpolated across meta.bbox. The bbox coincides with the grid extent, so the only change is the pixel-centre convention."
-  }
- },
- "counts": {
-  "detPixels": 97,
-  "components": 12,
-  "targets": 12,
-  "aisOnly": 2,
-  "matched": 4,
-  "unmatched": 7,
-  "infra": 1
- },
- "geodesy": {
-  "dist": 1113.194907932737,
-  "radius": 1292.59999992,
-  "propagated": {
-   "lat": 1.2,
-   "lon": 103.805547,
-   "projectedDistanceMeters": 617.3333328
-  },
-  "headingDiff": 3
- },
- "components": [
-  {
-   "cx": 32.0741,
-   "cy": 40.5221,
-   "area": 8,
-   "major": 1.6915,
-   "minor": 1.3542,
-   "orient": 90,
-   "maxDb": 3.7,
-   "meanDb": 2.4,
-   "wake": false,
-   "wakeHdg": null,
-   "bbox": {
-    "minX": 31,
-    "minY": 39,
-    "maxX": 33,
-    "maxY": 42
-   },
-   "clutterMeanDb": -21.7
-  },
-  {
-   "cx": 126.1488,
-   "cy": 58.5005,
-   "area": 6,
-   "major": 1.6142,
-   "minor": 1,
-   "orient": 179,
-   "maxDb": 2.9,
-   "meanDb": 1.8,
-   "wake": false,
-   "wakeHdg": null,
-   "bbox": {
-    "minX": 125,
-    "minY": 58,
-    "maxX": 127,
-    "maxY": 59
-   },
-   "clutterMeanDb": -17.7
-  },
-  {
-   "cx": 79.2891,
-   "cy": 68.2922,
-   "area": 7,
-   "major": 2.2838,
-   "minor": 1,
-   "orient": 30,
-   "maxDb": 1.8,
-   "meanDb": 1.4,
-   "wake": true,
-   "wakeHdg": 210,
-   "bbox": {
-    "minX": 78,
-    "minY": 67,
-    "maxX": 81,
-    "maxY": 69
-   },
-   "clutterMeanDb": -19.5
-  },
-  {
-   "cx": 63.5766,
-   "cy": 76.1143,
-   "area": 13,
-   "major": 4.9931,
-   "minor": 1,
-   "orient": 32,
-   "maxDb": 2.7,
-   "meanDb": 2,
-   "wake": true,
-   "wakeHdg": 32,
-   "bbox": {
-    "minX": 60,
-    "minY": 74,
-    "maxX": 67,
-    "maxY": 78
-   },
-   "clutterMeanDb": -19.4
-  },
-  {
-   "cx": 90.6009,
-   "cy": 84.2018,
-   "area": 5,
-   "major": 1.5415,
-   "minor": 1,
-   "orient": 108,
-   "maxDb": 1.4,
-   "meanDb": 1.4,
-   "wake": false,
-   "wakeHdg": null,
-   "bbox": {
-    "minX": 90,
-    "minY": 83,
-    "maxX": 91,
-    "maxY": 85
-   },
-   "clutterMeanDb": -21.1
-  },
-  {
-   "cx": 95.3083,
-   "cy": 87.6541,
-   "area": 3,
-   "major": 1.5,
-   "minor": 1,
-   "orient": 47,
-   "maxDb": 2.9,
-   "meanDb": 2.7,
-   "wake": true,
-   "wakeHdg": 227,
-   "bbox": {
-    "minX": 95,
-    "minY": 87,
-    "maxX": 96,
-    "maxY": 88
-   },
-   "clutterMeanDb": -22
-  },
-  {
-   "cx": 122.0129,
-   "cy": 96.6704,
-   "area": 13,
-   "major": 2.9299,
-   "minor": 1.3107,
-   "orient": 35,
-   "maxDb": 3.3,
-   "meanDb": 2.2,
-   "wake": true,
-   "wakeHdg": 35,
-   "bbox": {
-    "minX": 120,
-    "minY": 95,
-    "maxX": 124,
-    "maxY": 98
-   },
-   "clutterMeanDb": -21.3
-  },
-  {
-   "cx": 51.8599,
-   "cy": 109.8974,
-   "area": 8,
-   "major": 1.7349,
-   "minor": 1.357,
-   "orient": 134,
-   "maxDb": 2,
-   "meanDb": 1.8,
-   "wake": false,
-   "wakeHdg": null,
-   "bbox": {
-    "minX": 51,
-    "minY": 109,
-    "maxX": 53,
-    "maxY": 111
-   },
-   "clutterMeanDb": -18.4
-  },
-  {
-   "cx": 57.8192,
-   "cy": 113.3108,
-   "area": 8,
-   "major": 2.3105,
-   "minor": 1.0287,
-   "orient": 125,
-   "maxDb": 2.5,
-   "meanDb": 1.5,
-   "wake": true,
-   "wakeHdg": 305,
-   "bbox": {
-    "minX": 57,
-    "minY": 112,
-    "maxX": 59,
-    "maxY": 115
-   },
-   "clutterMeanDb": -18.4
-  },
-  {
-   "cx": 47.5115,
-   "cy": 114.0111,
-   "area": 6,
-   "major": 1.6186,
-   "minor": 1,
-   "orient": 91,
-   "maxDb": 2,
-   "meanDb": 1.7,
-   "wake": true,
-   "wakeHdg": 271,
-   "bbox": {
-    "minX": 47,
-    "minY": 113,
-    "maxX": 48,
-    "maxY": 115
-   },
-   "clutterMeanDb": -16.7
-  },
-  {
-   "cx": 53.4646,
-   "cy": 116.7052,
-   "area": 7,
-   "major": 1.9807,
-   "minor": 1.0661,
-   "orient": 149,
-   "maxDb": 2.9,
-   "meanDb": 2.1,
-   "wake": true,
-   "wakeHdg": 149,
-   "bbox": {
-    "minX": 52,
-    "minY": 116,
-    "maxX": 55,
-    "maxY": 118
-   },
-   "clutterMeanDb": -16.7
-  },
-  {
-   "cx": 103.9696,
-   "cy": 117.2032,
-   "area": 6,
-   "major": 1.8599,
-   "minor": 1,
-   "orient": 145,
-   "maxDb": 2.6,
-   "meanDb": 2.2,
-   "wake": true,
-   "wakeHdg": 325,
-   "bbox": {
-    "minX": 103,
-    "minY": 116,
-    "maxX": 105,
-    "maxY": 118
-   },
-   "clutterMeanDb": -20.9
-  }
- ],
- "targets": [
-  {
-   "id": "DF-001",
-   "cls": "STATIONARY_OR_INFRASTRUCTURE",
-   "lat": 1.3316298333333332,
-   "lon": 103.72238688888889,
-   "sarConf": 0.78,
-   "aisConf": 0.0,
-   "lenM": 17,
-   "widM": 14,
-   "lenUncM": 10,
-   "hdg": 90,
-   "wake": false,
-   "meanDb": 2.4,
-   "maxDb": 3.7,
-   "area": 8,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Stationary radar return at 1.3316N, 103.7224E. High point-backscatter (3.7 dB), no wake; fixed infrastructure.",
-   "tags": [
-    "STATIC_INFRASTRUCTURE",
-    "HIGH_RCS"
-   ]
-  },
-  {
-   "id": "DF-002",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.3016658333333333,
-   "lon": 103.93144177777778,
-   "sarConf": 0.71,
-   "aisConf": 0.0,
-   "lenM": 16,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 179,
-   "wake": false,
-   "meanDb": 1.8,
-   "maxDb": 2.9,
-   "area": 6,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED"
-   ]
-  },
-  {
-   "id": "DF-003",
-   "cls": "SAR_MATCHED_AIS",
-   "lat": 1.2853463333333333,
-   "lon": 103.82730911111112,
-   "sarConf": 0.8,
-   "aisConf": 0.62,
-   "lenM": 23,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 210,
-   "wake": true,
-   "meanDb": 1.4,
-   "maxDb": 1.8,
-   "area": 7,
-   "corr": {
-    "matched": true,
-    "mmsi": "538007142",
-    "vesselName": "ORIENT ADVANCE",
-    "distanceOffsetMeters": 244,
-    "timeDeltaSeconds": 24,
-    "predictedLat": 1.286666,
-    "predictedLon": 103.825556,
-    "scoreDecomposition": {
-     "spatialScore": 0.802,
-     "temporalScore": 0.973,
-     "headingScore": 0.0,
-     "sizeScore": 0.128,
-     "compositeScore": 0.623,
-     "matchRadiusMeters": 1230,
-     "distanceOffsetMeters": 244,
-     "timeDeltaSeconds": 24
+  "targets": [
+    {
+      "id": "DF-001",
+      "cls": "STATIONARY_OR_INFRASTRUCTURE",
+      "lat": 1.3316298333333332,
+      "lon": 103.72238688888889,
+      "sarConf": 0.78,
+      "aisConf": 0.0,
+      "lenM": 17,
+      "widM": 14,
+      "lenUncM": 10,
+      "hdg": 90,
+      "wake": false,
+      "meanDb": 2.4,
+      "maxDb": 3.7,
+      "area": 8,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Stationary radar return at 1.3316N, 103.7224E. High point-backscatter (3.7 dB) and a near-circular footprint; consistent with fixed infrastructure.",
+      "tags": [
+        "STATIC_INFRASTRUCTURE",
+        "HIGH_RCS"
+      ]
+    },
+    {
+      "id": "DF-002",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.3016658333333333,
+      "lon": 103.93144177777778,
+      "sarConf": 0.71,
+      "aisConf": 0.0,
+      "lenM": 16,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 179,
+      "wake": false,
+      "meanDb": 1.8,
+      "maxDb": 2.9,
+      "area": 6,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-003",
+      "cls": "SAR_MATCHED_AIS",
+      "lat": 1.2853463333333333,
+      "lon": 103.82730911111112,
+      "sarConf": 0.72,
+      "aisConf": 0.62,
+      "lenM": 23,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 30,
+      "wake": true,
+      "meanDb": 1.4,
+      "maxDb": 1.8,
+      "area": 7,
+      "corr": {
+        "matched": true,
+        "mmsi": "538007142",
+        "vesselName": "ORIENT ADVANCE",
+        "distanceOffsetMeters": 244,
+        "timeDeltaSeconds": 24,
+        "predictedLat": 1.286666,
+        "predictedLon": 103.825556,
+        "scoreDecomposition": {
+          "spatialScore": 0.802,
+          "temporalScore": 0.973,
+          "headingScore": 0.022,
+          "sizeScore": 0.128,
+          "compositeScore": 0.627,
+          "matchRadiusMeters": 1230,
+          "distanceOffsetMeters": 244,
+          "timeDeltaSeconds": 24
+        }
+      },
+      "assessment": "Correlated with AIS MMSI 538007142 (ORIENT ADVANCE). Spatial delta 244m at dt 24s.",
+      "tags": [
+        "CORRELATED_AIS",
+        "CHEMICAL_TANKER"
+      ]
+    },
+    {
+      "id": "DF-004",
+      "cls": "SAR_MATCHED_AIS",
+      "lat": 1.2723095,
+      "lon": 103.79239244444445,
+      "sarConf": 0.73,
+      "aisConf": 0.61,
+      "lenM": 50,
+      "widM": 10,
+      "lenUncM": 11,
+      "hdg": 32,
+      "wake": true,
+      "meanDb": 2,
+      "maxDb": 2.7,
+      "area": 13,
+      "corr": {
+        "matched": true,
+        "mmsi": "563189210",
+        "vesselName": "MAERSK MC-KINNEY",
+        "distanceOffsetMeters": 289,
+        "timeDeltaSeconds": 33,
+        "predictedLat": 1.273333,
+        "predictedLon": 103.79,
+        "scoreDecomposition": {
+          "spatialScore": 0.769,
+          "temporalScore": 0.963,
+          "headingScore": 0.0,
+          "sizeScore": 0.17,
+          "compositeScore": 0.612,
+          "matchRadiusMeters": 1250,
+          "distanceOffsetMeters": 289,
+          "timeDeltaSeconds": 33
+        }
+      },
+      "assessment": "Correlated with AIS MMSI 563189210 (MAERSK MC-KINNEY). Spatial delta 289m at dt 33s.",
+      "tags": [
+        "CORRELATED_AIS",
+        "CONTAINER_SHIP"
+      ]
+    },
+    {
+      "id": "DF-005",
+      "cls": "SAR_MATCHED_AIS",
+      "lat": 1.2588303333333333,
+      "lon": 103.85244644444444,
+      "sarConf": 0.74,
+      "aisConf": 0.55,
+      "lenM": 15,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 108,
+      "wake": false,
+      "meanDb": 1.4,
+      "maxDb": 1.4,
+      "area": 5,
+      "corr": {
+        "matched": true,
+        "mmsi": "477421900",
+        "vesselName": "COSCO SHIPPING SCORPIO",
+        "distanceOffsetMeters": 756,
+        "timeDeltaSeconds": 42,
+        "predictedLat": 1.256667,
+        "predictedLon": 103.858888,
+        "scoreDecomposition": {
+          "spatialScore": 0.399,
+          "temporalScore": 0.953,
+          "headingScore": 0.822,
+          "sizeScore": 0.045,
+          "compositeScore": 0.548,
+          "matchRadiusMeters": 1257,
+          "distanceOffsetMeters": 756,
+          "timeDeltaSeconds": 42
+        }
+      },
+      "assessment": "Correlated with AIS MMSI 477421900 (COSCO SHIPPING SCORPIO). Spatial delta 756m at dt 42s.",
+      "tags": [
+        "CORRELATED_AIS",
+        "CRUDE_OIL_TANKER"
+      ]
+    },
+    {
+      "id": "DF-006",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.2530765,
+      "lon": 103.86290733333334,
+      "sarConf": 0.62,
+      "aisConf": 0.0,
+      "lenM": 15,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 47,
+      "wake": true,
+      "meanDb": 2.7,
+      "maxDb": 2.9,
+      "area": 3,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~15m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-007",
+      "cls": "SAR_MATCHED_AIS",
+      "lat": 1.2380493333333333,
+      "lon": 103.92225088888888,
+      "sarConf": 0.77,
+      "aisConf": 0.66,
+      "lenM": 29,
+      "widM": 13,
+      "lenUncM": 10,
+      "hdg": 35,
+      "wake": true,
+      "meanDb": 2.2,
+      "maxDb": 3.3,
+      "area": 13,
+      "corr": {
+        "matched": true,
+        "mmsi": "636019882",
+        "vesselName": "PACIFIC RUBY",
+        "distanceOffsetMeters": 131,
+        "timeDeltaSeconds": 42,
+        "predictedLat": 1.238334,
+        "predictedLon": 103.921111,
+        "scoreDecomposition": {
+          "spatialScore": 0.895,
+          "temporalScore": 0.953,
+          "headingScore": 0.0,
+          "sizeScore": 0.127,
+          "compositeScore": 0.66,
+          "matchRadiusMeters": 1250,
+          "distanceOffsetMeters": 131,
+          "timeDeltaSeconds": 42
+        }
+      },
+      "assessment": "Correlated with AIS MMSI 636019882 (PACIFIC RUBY). Spatial delta 131m at dt 42s.",
+      "tags": [
+        "CORRELATED_AIS",
+        "BULK_CARRIER"
+      ]
+    },
+    {
+      "id": "DF-008",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.2160043333333332,
+      "lon": 103.76635533333334,
+      "sarConf": 0.71,
+      "aisConf": 0.0,
+      "lenM": 17,
+      "widM": 14,
+      "lenUncM": 10,
+      "hdg": 134,
+      "wake": false,
+      "meanDb": 1.8,
+      "maxDb": 2,
+      "area": 8,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~17m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-009",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.2103153333333334,
+      "lon": 103.77959822222222,
+      "sarConf": 0.72,
+      "aisConf": 0.0,
+      "lenM": 23,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 125,
+      "wake": true,
+      "meanDb": 1.5,
+      "maxDb": 2.5,
+      "area": 8,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~23m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-010",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.2091481666666666,
+      "lon": 103.75669222222223,
+      "sarConf": 0.69,
+      "aisConf": 0.0,
+      "lenM": 16,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 91,
+      "wake": true,
+      "meanDb": 1.7,
+      "maxDb": 2,
+      "area": 6,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-011",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.204658,
+      "lon": 103.76992133333334,
+      "sarConf": 0.7,
+      "aisConf": 0.0,
+      "lenM": 20,
+      "widM": 11,
+      "lenUncM": 10,
+      "hdg": 149,
+      "wake": true,
+      "meanDb": 2.1,
+      "maxDb": 2.9,
+      "area": 7,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~20m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
+    },
+    {
+      "id": "DF-012",
+      "cls": "SAR_UNMATCHED",
+      "lat": 1.2038280000000001,
+      "lon": 103.88215466666666,
+      "sarConf": 0.75,
+      "aisConf": 0.0,
+      "lenM": 19,
+      "widM": 10,
+      "lenUncM": 10,
+      "hdg": 145,
+      "wake": true,
+      "meanDb": 2.2,
+      "maxDb": 2.6,
+      "area": 6,
+      "corr": {
+        "matched": false,
+        "mmsi": null,
+        "vesselName": null,
+        "distanceOffsetMeters": null,
+        "timeDeltaSeconds": null,
+        "predictedLat": null,
+        "predictedLon": null,
+        "scoreDecomposition": null
+      },
+      "assessment": "Unmatched surface radar return (~19m). No sufficiently confident AIS association in the available observations.",
+      "tags": [
+        "SAR_UNMATCHED",
+        "AIS_UNASSOCIATED"
+      ]
     }
-   },
-   "assessment": "Correlated with AIS MMSI 538007142 (ORIENT ADVANCE). Spatial delta 244m at dt 24s.",
-   "tags": [
-    "CORRELATED_AIS",
-    "CHEMICAL_TANKER"
-   ]
-  },
-  {
-   "id": "DF-004",
-   "cls": "SAR_MATCHED_AIS",
-   "lat": 1.2723095,
-   "lon": 103.79239244444445,
-   "sarConf": 0.81,
-   "aisConf": 0.61,
-   "lenM": 50,
-   "widM": 10,
-   "lenUncM": 11,
-   "hdg": 32,
-   "wake": true,
-   "meanDb": 2,
-   "maxDb": 2.7,
-   "area": 13,
-   "corr": {
-    "matched": true,
-    "mmsi": "563189210",
-    "vesselName": "MAERSK MC-KINNEY",
-    "distanceOffsetMeters": 289,
-    "timeDeltaSeconds": 33,
-    "predictedLat": 1.273333,
-    "predictedLon": 103.79,
-    "scoreDecomposition": {
-     "spatialScore": 0.769,
-     "temporalScore": 0.963,
-     "headingScore": 0.0,
-     "sizeScore": 0.17,
-     "compositeScore": 0.612,
-     "matchRadiusMeters": 1250,
-     "distanceOffsetMeters": 289,
-     "timeDeltaSeconds": 33
-    }
-   },
-   "assessment": "Correlated with AIS MMSI 563189210 (MAERSK MC-KINNEY). Spatial delta 289m at dt 33s.",
-   "tags": [
-    "CORRELATED_AIS",
-    "CONTAINER_SHIP"
-   ]
-  },
-  {
-   "id": "DF-005",
-   "cls": "SAR_MATCHED_AIS",
-   "lat": 1.2588303333333333,
-   "lon": 103.85244644444444,
-   "sarConf": 0.74,
-   "aisConf": 0.55,
-   "lenM": 15,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 108,
-   "wake": false,
-   "meanDb": 1.4,
-   "maxDb": 1.4,
-   "area": 5,
-   "corr": {
-    "matched": true,
-    "mmsi": "477421900",
-    "vesselName": "COSCO SHIPPING SCORPIO",
-    "distanceOffsetMeters": 756,
-    "timeDeltaSeconds": 42,
-    "predictedLat": 1.256667,
-    "predictedLon": 103.858888,
-    "scoreDecomposition": {
-     "spatialScore": 0.399,
-     "temporalScore": 0.953,
-     "headingScore": 0.822,
-     "sizeScore": 0.045,
-     "compositeScore": 0.548,
-     "matchRadiusMeters": 1257,
-     "distanceOffsetMeters": 756,
-     "timeDeltaSeconds": 42
-    }
-   },
-   "assessment": "Correlated with AIS MMSI 477421900 (COSCO SHIPPING SCORPIO). Spatial delta 756m at dt 42s.",
-   "tags": [
-    "CORRELATED_AIS",
-    "CRUDE_OIL_TANKER"
-   ]
-  },
-  {
-   "id": "DF-006",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.2530765,
-   "lon": 103.86290733333334,
-   "sarConf": 0.7,
-   "aisConf": 0.0,
-   "lenM": 15,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 227,
-   "wake": true,
-   "meanDb": 2.7,
-   "maxDb": 2.9,
-   "area": 3,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~15m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED",
-    "UNDERWAY"
-   ]
-  },
-  {
-   "id": "DF-007",
-   "cls": "SAR_MATCHED_AIS",
-   "lat": 1.2380493333333333,
-   "lon": 103.92225088888888,
-   "sarConf": 0.85,
-   "aisConf": 0.66,
-   "lenM": 29,
-   "widM": 13,
-   "lenUncM": 10,
-   "hdg": 35,
-   "wake": true,
-   "meanDb": 2.2,
-   "maxDb": 3.3,
-   "area": 13,
-   "corr": {
-    "matched": true,
-    "mmsi": "636019882",
-    "vesselName": "PACIFIC RUBY",
-    "distanceOffsetMeters": 131,
-    "timeDeltaSeconds": 42,
-    "predictedLat": 1.238334,
-    "predictedLon": 103.921111,
-    "scoreDecomposition": {
-     "spatialScore": 0.895,
-     "temporalScore": 0.953,
-     "headingScore": 0.0,
-     "sizeScore": 0.127,
-     "compositeScore": 0.66,
-     "matchRadiusMeters": 1250,
-     "distanceOffsetMeters": 131,
-     "timeDeltaSeconds": 42
-    }
-   },
-   "assessment": "Correlated with AIS MMSI 636019882 (PACIFIC RUBY). Spatial delta 131m at dt 42s.",
-   "tags": [
-    "CORRELATED_AIS",
-    "BULK_CARRIER"
-   ]
-  },
-  {
-   "id": "DF-008",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.2160043333333332,
-   "lon": 103.76635533333334,
-   "sarConf": 0.71,
-   "aisConf": 0.0,
-   "lenM": 17,
-   "widM": 14,
-   "lenUncM": 10,
-   "hdg": 134,
-   "wake": false,
-   "meanDb": 1.8,
-   "maxDb": 2,
-   "area": 8,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~17m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED"
-   ]
-  },
-  {
-   "id": "DF-009",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.2103153333333334,
-   "lon": 103.77959822222222,
-   "sarConf": 0.8,
-   "aisConf": 0.0,
-   "lenM": 23,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 305,
-   "wake": true,
-   "meanDb": 1.5,
-   "maxDb": 2.5,
-   "area": 8,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~23m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED",
-    "UNDERWAY"
-   ]
-  },
-  {
-   "id": "DF-010",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.2091481666666666,
-   "lon": 103.75669222222223,
-   "sarConf": 0.77,
-   "aisConf": 0.0,
-   "lenM": 16,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 271,
-   "wake": true,
-   "meanDb": 1.7,
-   "maxDb": 2,
-   "area": 6,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED",
-    "UNDERWAY"
-   ]
-  },
-  {
-   "id": "DF-011",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.204658,
-   "lon": 103.76992133333334,
-   "sarConf": 0.78,
-   "aisConf": 0.0,
-   "lenM": 20,
-   "widM": 11,
-   "lenUncM": 10,
-   "hdg": 149,
-   "wake": true,
-   "meanDb": 2.1,
-   "maxDb": 2.9,
-   "area": 7,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~20m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED",
-    "UNDERWAY"
-   ]
-  },
-  {
-   "id": "DF-012",
-   "cls": "SAR_UNMATCHED",
-   "lat": 1.2038280000000001,
-   "lon": 103.88215466666666,
-   "sarConf": 0.83,
-   "aisConf": 0.0,
-   "lenM": 19,
-   "widM": 10,
-   "lenUncM": 10,
-   "hdg": 325,
-   "wake": true,
-   "meanDb": 2.2,
-   "maxDb": 2.6,
-   "area": 6,
-   "corr": {
-    "matched": false,
-    "mmsi": null,
-    "vesselName": null,
-    "distanceOffsetMeters": null,
-    "timeDeltaSeconds": null,
-    "predictedLat": null,
-    "predictedLon": null,
-    "scoreDecomposition": null
-   },
-   "assessment": "Unmatched surface radar return (~19m). No sufficiently confident AIS association in the available observations.",
-   "tags": [
-    "SAR_UNMATCHED",
-    "AIS_UNASSOCIATED",
-    "UNDERWAY"
-   ]
-  }
- ]
+  ]
 }

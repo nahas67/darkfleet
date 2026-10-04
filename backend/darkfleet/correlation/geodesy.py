@@ -53,10 +53,20 @@ def dynamic_radius(base_m: float, delta_seconds: float, sog_knots: float, max_m:
     return min(base_m + drift, max_m)
 
 
-def orient_diff(deg1: float, deg2: float, wake_visible: bool) -> float:
-    """Legacy-exact: directed 0..180 with wake, undirected 0..90 without."""
-    if wake_visible:
-        diff = abs(deg1 - deg2) % 360
-        return diff if diff <= 180 else 360 - diff
+def orient_diff(deg1: float, deg2: float) -> float:
+    """Undirected angular difference between two hull axes, 0..90 degrees.
+
+    A hull axis is a line, not an arrow: it has no direction of travel, so the
+    separation between two axes is only defined modulo a half-turn. Folding to
+    0..90 is therefore the correct metric for comparing orientations, and it is
+    the only one this function offers.
+
+    This used to take a `wake_visible` flag that selected between this undirected
+    metric and a directed 0..180 one, so a wake detection silently changed HOW
+    heading agreement was measured -- and the change was large: `orient_diff(0,
+    170)` was 10 degrees without a wake and 170 with one. A bare parameter with a
+    default-free boolean is an invitation to reintroduce that coupling, so the
+    parameter is gone rather than merely unused.
+    """
     diff = abs(deg1 - deg2) % 180
     return diff if diff <= 90 else 180 - diff

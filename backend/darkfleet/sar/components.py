@@ -44,26 +44,6 @@ HALF_CHIP = CHIP // 2
 WAKE_HALF_CHIP = int(R_END_PX) + 1
 
 
-def _kelvin_sampler(
-    grid: np.ndarray, cx: float, cy: float, axis_deg: float, width: int, height: int
-) -> tuple[bool, float | None]:
-    rad = math.radians(axis_deg)
-    dx, dy = math.cos(rad), math.sin(rad)
-    d1 = d2 = 0
-    for step in range(8, 25, 3):
-        p1x, p1y = round(cx + dx * step), round(cy + dy * step)
-        p2x, p2y = round(cx - dx * step), round(cy - dy * step)
-        if 0 <= p1x < width and 0 <= p1y < height and (grid[p1y, p1x] < -20.5 or grid[p1y, p1x] > -13.0):
-            d1 += 1
-        if 0 <= p2x < width and 0 <= p2y < height and (grid[p2y, p2x] < -20.5 or grid[p2y, p2x] > -13.0):
-            d2 += 1
-    if d1 >= 3 and d1 > d2 + 1:
-        return True, (axis_deg + 180) % 360
-    if d2 >= 3 and d2 > d1 + 1:
-        return True, axis_deg
-    return False, None
-
-
 def extract_components(
     mask: np.ndarray,
     db: np.ndarray,
@@ -115,21 +95,19 @@ def extract_components(
         clutter_vals = chip[dist > 7]
         clutter_mean = round(float(clutter_vals.mean()), 1)
 
-        wake, wake_hdg = _kelvin_sampler(db, cx, cy, round(orient), width, height)
-
-        # The real detector runs here and is recorded in full, under a name
-        # correlation never reads. `wake` above is still the legacy sampler's
-        # verdict and still drives SAR confidence, classification, heading
-        # tolerance and the assessment narrative -- so routing the measured
-        # detector into those would move six confidences by +-0.08 and reassign two
-        # vessels on the legacy parity fixture. That is an analytical decision
-        # about whether a detected wake should move detection confidence at all,
-        # and it is not one to make as a side effect of adding a readout.
+        # The real detector is the ONLY wake measurement.
         #
-        # What this buys immediately, and is the point: the wake EVIDENCE an
-        # investigator needs is real and measured -- method, contrast, arm
-        # geometry, apparent length -- instead of a bare boolean that read False
-        # for all 84 stored targets because nothing ever ran.
+        # `_kelvin_sampler` was a six-point hull-axis brightness threshold: it
+        # could not detect a Kelvin wake (a bright hull satisfied it, and a real
+        # arm lies ~19.5 degrees off the axis), it reported False for all 84
+        # stored targets, and it held scoring authority it had not earned. It is
+        # DELETED rather than replaced -- substituting one unvalidated authority
+        # for another is not a fix.
+        #
+        # The result is evidence. It does not touch SAR confidence, AIS
+        # association, heading tolerance or classification. See
+        # `SCORING_MODEL_VERSION` in darkfleet.correlation.match and
+        # docs/WAKE_SCORING_DELTA.md for the measurements behind that decision.
         wake_analysis = analyse_wake(
             db, cy, cx, round(orient), pixel_spacing_m, half_chip=WAKE_HALF_CHIP
         )
@@ -143,8 +121,8 @@ def extract_components(
                 "orient": round(orient),
                 "maxDb": max_db,
                 "meanDb": mean_db,
-                "wake": wake,
-                "wakeHdg": wake_hdg,
+                "wake": wake_analysis.detected,
+                "wakeHdg": wake_analysis.heading_deg,
                 # Measured wake evidence. Named so that no existing consumer of
                 # `wake` can pick these up by accident -- correlation must not
                 # change because a readout was added.

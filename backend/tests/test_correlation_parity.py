@@ -44,7 +44,7 @@ def _run() -> dict:
 def test_geodesy_spot() -> None:
     assert 1104.0 < geodesic_meters(1.20, 103.80, 1.21, 103.80) < 1108.0
     assert dynamic_radius(1200, 60, 15, 2800) == 1200 + 60 * 15 * 0.514444444 * 0.20
-    assert orient_diff(122, 125, False) == 3
+    assert orient_diff(122, 125) == 3
     p = propagate(1.20, 103.80, 20, 90, 60)
     assert abs(p["lon"] - 103.805547) < 1e-6
 

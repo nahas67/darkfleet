@@ -88,13 +88,48 @@ def component_position(comp: dict[str, Any]) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
-def _sar_confidence(comp: dict[str, Any], wake: bool) -> float:
+#: Identifies the scoring semantics in force, and is recorded on every evidence
+#: export so a result can be traced to the model that produced it.
+#:
+#: ``sar-scoring/v1``
+#:     Wake evidence carried scoring authority: `+0.08` to SAR confidence, a
+#:     widened heading tolerance, and the ability to veto the stationary test.
+#:     The wake flag came from `_kelvin_sampler`, a six-point hull-axis brightness
+#:     threshold that could not detect a Kelvin wake and reported False for all 84
+#:     stored targets.
+#:
+#: ``sar-scoring/v2``
+#:     Wake is EVIDENCE ONLY. `sarConf` describes the SAR detection itself and
+#:     nothing else. See `docs/WAKE_SCORING_DELTA.md` for the measured
+#:     consequences of v1 and the reasoning behind this change.
+SCORING_MODEL_VERSION = "sar-scoring/v2"
+
+
+def _sar_confidence(comp: dict[str, Any]) -> float:
+    """Confidence in the SAR DETECTION itself, 0..1.
+
+    Derived only from what the radar measured: peak-to-clutter ratio and component
+    area. Two things are deliberately absent.
+
+    AIS is absent because this is the SAR detection's confidence; folding in an
+    AIS association would make the number describe the match rather than the
+    detection, and `aisConf` already exists for that.
+
+    Wake is absent because its contribution was never validated. `+0.08` was a
+    bare constant, and the measurement in `docs/WAKE_SCORING_DELTA.md` shows it was
+    load-bearing enough to transfer MMSI 477421900 between two detections and move
+    a vessel into Ghost Vessel state. A constant that can reassign a named vessel
+    is not evidence until it is validated.
+
+    Note also that absence of wake is not evidence of absence. A stationary or
+    slow vessel may show no wake at all, and viewing geometry and sea state affect
+    visibility, so there is deliberately NO penalty term either. Any future
+    conditional model must be validated before it touches this function.
+    """
     snr: float = float(comp["maxDb"]) - float(comp["clutterMeanDb"])
     conf: float = min(0.98, max(0.35, 0.45 + (snr / 35) * 0.45))
     if comp["area"] < 4:
         conf *= 0.8
-    if wake:
-        conf = min(0.99, conf + 0.08)
     return round(conf, 2)
 
 
@@ -139,8 +174,14 @@ def correlate(
                 continue
             spatial = max(0.0, 1 - dist / radius)
             temporal = max(0.0, 1 - abs(dt) / WINDOW_S)
-            eff_hdg = comp["wakeHdg"] if comp["wake"] and comp["wakeHdg"] is not None else comp["orient"]
-            hdg = max(0.0, 1 - orient_diff(eff_hdg, ob["cog"], comp["wake"]) / 90)
+            eff_hdg = comp["orient"]
+            # `orient_diff` is called with the wake flag permanently False. The
+            # flag used to switch between a directed 0..180 metric and an
+            # undirected 0..90 one, so a wake detection silently changed how
+            # heading agreement was measured. Hull orientation is the only
+            # validated primary source, and it is a line, so the undirected metric
+            # is the correct one unconditionally.
+            hdg = max(0.0, 1 - orient_diff(eff_hdg, ob["cog"]) / 90)
             size = 0.8
             if ob.get("length", 0) > 0:
                 size = max(0.0, 1 - abs(apparent_len - ob["length"]) / max(ob["length"], 50))
@@ -207,9 +248,13 @@ def correlate(
         apparent_len = round(comp["major"] * resolution_m)
         apparent_wid = round(comp["minor"] * resolution_m)
         len_unc = max(10, round(apparent_len * 0.22))
-        sar_conf = _sar_confidence(comp, comp["wake"])
+        sar_conf = _sar_confidence(comp)
         aspect = comp["major"] / max(1.0, comp["minor"])
-        stationary = comp["maxDb"] > 2.0 and aspect < 1.4 and not comp["wake"]
+        # No wake term. This used to be `... and not comp["wake"]`, which let an
+        # unvalidated wake flag veto the stationary classification. Bright
+        # point-target infrastructure with no visible wake is exactly the case
+        # that must not be reclassified by an absent signal.
+        stationary = comp["maxDb"] > 2.0 and aspect < 1.4
         m = matched.get(idx)
         best_ais = m["ais"] if m else None
         score = m["score"] if m else 0.0
@@ -226,7 +271,8 @@ def correlate(
             cls = "STATIONARY_OR_INFRASTRUCTURE"
             assessment = (
                 f"Stationary radar return at {lat:.4f}N, {lon:.4f}E. High "
-                f"point-backscatter ({comp['maxDb']} dB), no wake; fixed infrastructure."
+                f"point-backscatter ({comp['maxDb']} dB) and a near-circular "
+                f"footprint; consistent with fixed infrastructure."
             )
             tags += ["STATIC_INFRASTRUCTURE", "HIGH_RCS"]
         elif (
@@ -264,8 +310,12 @@ def correlate(
                 f"confident AIS association in the available observations."
             )
             tags += ["SAR_UNMATCHED", "AIS_UNASSOCIATED"]
-            if comp["wake"]:
-                tags.append("UNDERWAY")
+            # A wake detection is recorded as a TAG, never as a score adjustment.
+            # "Wake-like linear evidence present" is an observation; it is not a
+            # claim that the vessel is underway, because that would need a
+            # validated conditional model. See SCORING_MODEL_VERSION.
+            if (comp.get("wakeAnalysis") or {}).get("detected"):
+                tags.append("WAKE_EVIDENCE_PRESENT")
 
         # Computed for EVERY target, not just the unmatched branch: the winning
         # candidate and the runner-up are both needed to explain a match, and an
@@ -340,7 +390,7 @@ def correlate(
                 "lenM": apparent_len,
                 "widM": apparent_wid,
                 "lenUncM": len_unc,
-                "hdg": comp["wakeHdg"] if comp["wake"] and comp["wakeHdg"] is not None else comp["orient"],
+                "hdg": comp["orient"],
                 "wake": comp["wake"],
             # The MEASURED wake evidence, carried separately from the legacy
             # `wake` boolean above so that no correlation decision can change
