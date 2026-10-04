@@ -1,89 +1,134 @@
 /**
  * Layer console.
  *
- * Groups map to what a source actually provides. A layer that cannot be shown is
- * disabled AND carries the reason -- a greyed-out toggle with no explanation
- * reads as a bug, and an enabled toggle that draws nothing reads as a lie.
+ * NOW DRIVEN BY THE REGISTRY, NOT BY A LOCAL LIST.
+ *
+ * This component previously held its own `DEFINITIONS` array of eleven layers, its
+ * own `LayerGroup` enum, and derived `visible` from data availability on every
+ * render. The result was three defects:
+ *
+ *   1. `visible` was RECOMPUTED, so a toggle wrote to the store and snapped back. Ten
+ *      of eleven controls did nothing while looking operational.
+ *   2. Labels, groups and the id union existed here AND in the engine AND in the
+ *      store. Nothing compared them, so they drifted silently.
+ *   3. Only GRATICULE reached the engine, via a hardcoded `if`.
+ *
+ * Now: the registry declares every layer's label, category and renderer; the store
+ * holds only the operator's choices; `engine.setLayerVisibility` is the sole path to
+ * Cesium. There is no group enum here and no `if (id === ...)` special case.
+ *
+ * Availability is still DERIVED rather than stored, because a stored capability flag
+ * drifts out of step with the data and ends up offering an empty layer. But a derived
+ * unavailability is now only a reason to DISABLE the control -- it no longer
+ * overrides the operator's choice, which is what made toggles non-sticky.
  */
 
-import { useStore, store, type LayerGroup, type LayerId, type LayerState } from '../state/store';
-import { engine } from '../globe/engine';
+import { useStore, store, type LayerId } from '../state/store';
+import {
+  asDefinition,
+  listLayers,
+  type LayerCategory,
+  type LayerEntry,
+} from '../globe/layerRegistry';
 import { groupColor } from '../design/tokens';
 
-type Definition = {
-  id: LayerId;
-  group: LayerGroup;
-  label: string;
-  /** Why this layer is unavailable, when it is. Absence of a reason means usable. */
-  requires?: 'scan' | 'ais' | 'raster';
-  /**
-   * A fixed reason this layer cannot be enabled. Used where the capability
-   * exists elsewhere but not as a simultaneous globe overlay.
-   */
-  blockedReason?: string;
+/**
+ * What a layer needs before it has anything to draw.
+ *
+ * Derived from real state at render time. A layer whose backing data is absent is
+ * DISABLED WITH A REASON -- never shown as an enabled toggle that draws nothing,
+ * and never silently dropped from the list.
+ */
+type Requirement = 'scan' | 'ais' | 'raster';
+
+const REQUIREMENT: Partial<Record<LayerId, Requirement>> = {
+  SAR_RASTER: 'raster',
+  SAR_SCENE_FOOTPRINT: 'scan',
+  SAR_DETECTIONS: 'scan',
+  UNCERTAINTY_RADII: 'scan',
+  AIS_CONTACTS: 'ais',
+  AIS_TRACKS: 'ais',
+  AIS_PREDICTED: 'ais',
+  CORRELATION_LINKS: 'scan',
 };
 
-const DEFINITIONS: readonly Definition[] = [
-  { id: 'SAR_RASTER', group: 'SENSORS', label: 'Sentinel-1 SAR raster', requires: 'raster' },
-  { id: 'SAR_SCENE_FOOTPRINT', group: 'SENSORS', label: 'Scene footprint', requires: 'scan' },
-  { id: 'SAR_DETECTIONS', group: 'CONTACTS', label: 'SAR detections', requires: 'scan' },
-  { id: 'UNCERTAINTY_RADII', group: 'ANALYSIS', label: 'Geolocation uncertainty', requires: 'scan' },
-  { id: 'AIS_CONTACTS', group: 'CONTACTS', label: 'AIS contacts', requires: 'ais' },
-  { id: 'AIS_TRACKS', group: 'CONTACTS', label: 'AIS observed track', requires: 'ais' },
-  { id: 'AIS_PREDICTED', group: 'CONTACTS', label: 'AIS predicted segment', requires: 'ais' },
-  { id: 'CORRELATION_LINKS', group: 'ANALYSIS', label: 'Correlation links', requires: 'scan' },
-  {
-    id: 'LAND_MASK',
-    group: 'ANALYSIS',
-    label: 'Land mask',
-    // The globe attaches ONE raster at a time, because the backend serves one
-    // layer per request and compositing them client-side would mean inventing
-    // the blend. The mask is real and rendered server-side -- in ANALYTICS.
-    blockedReason:
-      'The globe draws one SAR raster at a time. View the land mask in ANALYTICS, or run it as the raster layer.',
-  },
-  {
-    id: 'CFAR_DEBUG',
-    group: 'ANALYSIS',
-    label: 'CFAR threshold',
-    blockedReason:
-      'The globe draws one SAR raster at a time. View the CFAR threshold in ANALYTICS, or run it as the raster layer.',
-  },
-  { id: 'GRATICULE', group: 'REFERENCE', label: 'Graticule' },
+/**
+ * Layers the globe cannot show as a simultaneous overlay, with the reason.
+ *
+ * Kept as a declared block rather than a `notImplemented` flag on the definition,
+ * because these are not missing features -- the capability exists and is rendered
+ * server-side in ANALYTICS. The globe attaches ONE raster at a time.
+ */
+const BLOCKED: Partial<Record<LayerId, string>> = {
+  LAND_MASK:
+    'The globe draws one SAR raster at a time. View the land mask in ANALYTICS, or run it as the raster layer.',
+  CFAR_DEBUG:
+    'The globe draws one SAR raster at a time. View the CFAR threshold in ANALYTICS, or run it as the raster layer.',
+};
+
+/** Display order. Categories with no layers are simply absent from the panel. */
+const CATEGORY_ORDER: readonly LayerCategory[] = [
+  'SENSOR',
+  'CONTACT',
+  'MARITIME_BOUNDARY',
+  'MARITIME_REFERENCE',
+  'SEABED',
+  'ANALYSIS',
+  'OPERATIONAL',
 ];
 
-const GROUP_ORDER: readonly LayerGroup[] = ['SENSORS', 'CONTACTS', 'REFERENCE', 'ANALYSIS'];
+export type LayerRow = {
+  id: LayerId;
+  label: string;
+  category: LayerCategory;
+  /** The operator's stored choice. Not recomputed. */
+  visible: boolean;
+  opacity: number;
+  supportsOpacity: boolean;
+  /** Why this layer cannot be shown, when it cannot. Absence means usable. */
+  unavailableReason?: string;
+};
 
 /**
- * Derive layer availability from real state.
+ * Derive the console rows: registry order, real availability, stored choices.
  *
- * Capability is computed, not stored: a flag that can drift out of step with the
- * data is how a product ends up offering an empty layer.
+ * The important property is that `visible` here is READ, not derived. An earlier
+ * version computed it as `unavailableReason === undefined`, which is precisely why
+ * toggles could not stick.
  */
-export function deriveLayers(state: ReturnType<typeof useStore>): LayerState[] {
+export function deriveLayers(state: ReturnType<typeof useStore>): LayerRow[] {
   const hasScan = state.scanId !== null && state.targets.length > 0;
   // Both must hold: the artifact exists AND it is actually on the globe.
   const hasRaster = state.rasterLoaded && state.scanId !== null;
   const hasAis = state.aisOnly.length > 0 || state.track !== null;
+  const satisfied: Record<Requirement, boolean> = { scan: hasScan, ais: hasAis, raster: hasRaster };
 
-  return DEFINITIONS.map((definition) => {
-    let unavailableReason: string | undefined = definition.blockedReason;
-    if (!unavailableReason && definition.requires === 'scan' && !hasScan) {
-      unavailableReason = 'No completed scan has produced detections.';
-    } else if (!unavailableReason && definition.requires === 'raster' && !hasRaster) {
-      unavailableReason = 'This scan has no rendered raster artifact.';
-    } else if (!unavailableReason && definition.requires === 'ais' && !hasAis) {
-      unavailableReason = 'No AIS source has answered for the current selection.';
+  const reasons: Record<Requirement, string> = {
+    scan: 'No completed scan has produced detections.',
+    ais: 'No AIS source has answered for the current selection.',
+    raster: 'This scan has no rendered raster artifact.',
+  };
+
+  return listLayers().map((entry: LayerEntry) => {
+    const id = entry.id as LayerId;
+    const choice = state.layerState[id];
+    const required = REQUIREMENT[id];
+    const blockedReason = BLOCKED[id];
+
+    let unavailableReason = blockedReason;
+    if (!unavailableReason && required !== undefined && !satisfied[required]) {
+      unavailableReason = reasons[required];
     }
-    // Visibility defaults on when the layer is usable, and off when it is not, so
-    // the operator never has to enable something that has nothing to draw.
-    const visible = unavailableReason === undefined;
+
     return {
-      id: definition.id,
-      group: definition.group,
-      label: definition.label,
-      visible,
-      opacity: 1,
+      id,
+      label: entry.label,
+      category: entry.category,
+      visible: choice?.visible ?? entry.defaultVisibility,
+      opacity: choice?.opacity ?? 1,
+      // Opacity on a point or vector layer has no meaning, so the control is not
+      // rendered. A slider that does nothing is an inert control.
+      supportsOpacity: entry.supportsOpacity,
       ...(unavailableReason ? { unavailableReason } : {}),
     };
   });
@@ -91,15 +136,29 @@ export function deriveLayers(state: ReturnType<typeof useStore>): LayerState[] {
 
 export function LayerConsole() {
   const state = useStore();
-  const layers = deriveLayers(state);
+  const rows = deriveLayers(state);
 
-  const commit = (next: LayerState[]) => {
-    // Drive the engine as well as the store. A toggle that only changes state
-    // is a control that appears to work and does nothing.
-    for (const layer of next) {
-      if (layer.id === 'GRATICULE') engine.setGraticule(layer.visible);
-    }
-    store.set({ layers: next });
+  /**
+   * Write one layer's choice to the store.
+   *
+   * The store is the single authority and the engine reads it from
+   * `TacticalWorld`'s layer effect, so this component does NOT call the engine. That
+   * is the difference between one path and two: an earlier version drove GRATICULE
+   * here directly while every other layer went nowhere.
+   */
+  const commit = (id: LayerId, patch: { visible?: boolean; opacity?: number }) => {
+    store.set((prev) => ({
+      layerState: {
+        ...prev.layerState,
+        [id]: {
+          visible: patch.visible ?? prev.layerState[id].visible,
+          opacity: patch.opacity ?? prev.layerState[id].opacity,
+          ...(prev.layerState[id].unavailableReason
+            ? { unavailableReason: prev.layerState[id].unavailableReason }
+            : {}),
+        },
+      },
+    }));
   };
 
   return (
@@ -108,75 +167,64 @@ export function LayerConsole() {
         <span className="df-label">Active layers</span>
       </header>
       <div className="p-3">
-        {GROUP_ORDER.map((group) => {
-          const rows = layers.filter((layer) => layer.group === group);
-          if (rows.length === 0) return null;
+        {CATEGORY_ORDER.map((category) => {
+          const groupRows = rows.filter((row) => row.category === category);
+          if (groupRows.length === 0) return null;
           return (
-            <div key={group} className="mb-4">
+            <div key={category} className="mb-4">
               <div className="mb-1.5 flex items-center gap-2">
                 <span
                   aria-hidden="true"
                   className="h-2 w-0.5"
-                  style={{ background: groupColor[group] }}
+                  style={{ background: groupColor[category] }}
                 />
-                <span className="df-label text-[10px]">{group}</span>
+                <span className="df-label text-[10px]">{category}</span>
               </div>
               <ul className="space-y-1">
-                {rows.map((layer) => {
-                  const disabled = layer.unavailableReason !== undefined;
+                {groupRows.map((row) => {
+                  const disabled = row.unavailableReason !== undefined;
+                  const shown = row.visible && !disabled;
                   return (
-                    <li key={layer.id} data-df-layer={layer.id}>
+                    <li key={row.id} data-df-layer={row.id}>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           className="df-btn flex-1 justify-start"
                           style={
-                            layer.visible && !disabled
+                            shown
                               ? { color: 'var(--df-text)', borderColor: 'var(--df-structural-bright)' }
                               : undefined
                           }
-                          aria-pressed={layer.visible && !disabled}
+                          aria-pressed={shown}
                           disabled={disabled}
-                          title={layer.unavailableReason ?? layer.label}
-                          onClick={() =>
-                            commit(
-                              layers.map((l) =>
-                                l.id === layer.id ? { ...l, visible: !l.visible } : l,
-                              ),
-                            )
-                          }
+                          title={row.unavailableReason ?? row.label}
+                          onClick={() => commit(row.id, { visible: !row.visible })}
                         >
-                          <span className="df-mono text-[10px]">
-                            {layer.visible && !disabled ? '◉' : '○'}
-                          </span>
-                          <span className="truncate normal-case tracking-normal">{layer.label}</span>
+                          <span className="df-mono text-[10px]">{shown ? '◉' : '○'}</span>
+                          <span className="truncate normal-case tracking-normal">{row.label}</span>
                         </button>
-                        {!disabled ? (
+                        {row.supportsOpacity && !disabled ? (
                           <input
                             type="range"
                             min={0}
                             max={1}
                             step={0.05}
-                            value={layer.opacity}
-                            aria-label={`${layer.label} opacity`}
+                            value={row.opacity}
+                            aria-label={`${row.label} opacity`}
                             className="w-16 accent-[var(--df-cyan)]"
                             onChange={(event) =>
-                              commit(
-                                layers.map((l) =>
-                                  l.id === layer.id
-                                    ? { ...l, opacity: Number(event.target.value) }
-                                    : l,
-                                ),
-                              )
+                              commit(row.id, { opacity: Number(event.target.value) })
                             }
                           />
                         ) : (
-                          <span className="df-num w-16 text-right text-ink-dim">n/a</span>
+                          <span className="df-num w-16 text-right text-ink-dim">
+                            {row.supportsOpacity ? 'n/a' : '—'}
+                          </span>
                         )}
                       </div>
                       {disabled ? (
                         <p className="df-num mt-0.5 pl-1 text-[10px] text-ink-dim">
-                          {layer.unavailableReason}
+                          {row.unavailableReason}
                         </p>
                       ) : null}
                     </li>
@@ -190,3 +238,10 @@ export function LayerConsole() {
     </section>
   );
 }
+
+/**
+ * Re-exported so drift checks can compare what the registry declares against what the
+ * engine can actually render. `asDefinition` keeps the optional `notImplemented` key
+ * readable off the literal-typed entries.
+ */
+export { asDefinition };

@@ -114,18 +114,23 @@ export type VesselTrack = {
 
 export type LayerGroup = 'SENSORS' | 'CONTACTS' | 'REFERENCE' | 'ANALYSIS';
 
-export type LayerId =
-  | 'SAR_SCENE_FOOTPRINT'
-  | 'SAR_RASTER'
-  | 'SAR_DETECTIONS'
-  | 'UNCERTAINTY_RADII'
-  | 'AIS_CONTACTS'
-  | 'AIS_TRACKS'
-  | 'AIS_PREDICTED'
-  | 'CORRELATION_LINKS'
-  | 'GRATICULE'
-  | 'LAND_MASK'
-  | 'CFAR_DEBUG';
+/**
+ * The layer id union is INFERRED from the registry, not restated here.
+ *
+ * It used to be a hand-written union here. That is a second declaration of the same
+ * fact, and the reason nothing could detect drift: a layer added to the engine but
+ * forgotten here compiled cleanly and simply never rendered. One declaration, in the
+ * registry, which is also where the renderer name lives.
+ */
+import { defaultLayerState, type LayerId as RegistryLayerId } from '../globe/layerRegistry';
+
+export type LayerId = RegistryLayerId;
+
+/** Per-layer operator choices. Only what the operator chose lives here. */
+export type LayerStateMap = Record<
+  LayerId,
+  { visible: boolean; opacity: number; unavailableReason?: string }
+>;
 
 export type LayerState = {
   id: LayerId;
@@ -229,7 +234,20 @@ export type State = {
   providersLoading: boolean;
 
   /* --- presentation --- */
-  layers: LayerState[];
+  /**
+   * Layer visibility and opacity, keyed by registry id.
+   *
+   * The single layer-state authority (DF-X8 §9). A map rather than the previous array
+   * of `{id, group, label, visible, opacity}` because that array carried `label` and
+   * `group` as DATA -- properties of the registry -- so every consumer trusted a
+   * second copy of them and nothing detected the two disagreeing. Here the map holds
+   * only what the operator chose; label, category and renderer are looked up.
+   *
+   * Initialised from the registry rather than `[]`, so every declared layer has an
+   * entry before anything toggles it. A missing key then means "never initialised",
+   * which is a bug, rather than silently defaulting.
+   */
+  layerState: LayerStateMap;
   workspace: string;
 };
 
@@ -269,7 +287,7 @@ const initialState: State = {
   providers: [],
   providersLoading: false,
 
-  layers: [],
+  layerState: defaultLayerState(),
   workspace: 'TACTICAL',
 };
 

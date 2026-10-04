@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { engine, type TargetHandle } from '../globe/engine';
+import { isLayerId } from '../globe/layerRegistry';
 import { isWebGLAvailable } from '../globe/cesiumViewer';
 import { store, useStore } from '../state/store';
 import { fmt, fmtLatLon } from '../design/format';
@@ -93,6 +94,11 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     engine.setAisContacts(
       state.aisOnly.map((contact) => ({ mmsi: contact.mmsi, lat: contact.lat, lon: contact.lon })),
     );
+    // The setters above CLEAR and re-add their entities, and Cesium gives every new
+    // entity `show = true`. Without this the layer toggles would be authoritative only
+    // until the next target update, at which point every switched-off layer would
+    // reappear. One call per batch keeps the store the single authority.
+    engine.refreshLayers();
   }, [targets, selection, state.aisOnly, webgl, initError]);
 
   // The observed track, split so propagation is visibly a hypothesis.
@@ -101,7 +107,24 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     if (!webgl || initError !== null) return;
     const observed = (track?.observed ?? []).map((fix) => ({ lat: fix.lat, lon: fix.lon }));
     engine.setTrack(observed, null);
+    engine.refreshLayers();
   }, [track, webgl, initError]);
+
+  /*
+   * Layer visibility, applied from the store.
+   *
+   * This is the whole path DF-X8 §10 requires: store -> engine -> Cesium. It runs on
+   * every change to `state.layerState`, and the registry validates that each id names
+   * a layer that exists, so a typo fails here rather than producing a dead control.
+   */
+  const layerState = state.layerState;
+  useEffect(() => {
+    if (!webgl || initError !== null) return;
+    for (const [id, layer] of Object.entries(layerState)) {
+      if (!isLayerId(id)) continue;
+      engine.setLayerVisibility(id, layer.visible);
+    }
+  }, [layerState, webgl, initError]);
 
   if (!webgl || initError !== null) {
     return (

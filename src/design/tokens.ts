@@ -103,12 +103,23 @@ export const healthColor: Readonly<Record<string, string>> = {
   NOT_CONFIGURED: palette.textDim,
 };
 
-/** Layer group accents. Thin, used only for a 2px group rule and the active chip. */
+/**
+ * Layer category accents. Thin, used only for a 2px group rule and the active chip.
+ *
+ * Keyed by the REGISTRY's category names rather than the old display groups, so a
+ * category with no accent cannot silently inherit an unrelated colour. Maritime and
+ * seabed categories are declared here in advance: an unaccented category renders a
+ * rule with no colour at all, which reads as a rendering fault rather than a new
+ * group.
+ */
 export const groupColor: Readonly<Record<string, string>> = {
-  SENSORS: palette.cyan,
-  CONTACTS: palette.green,
-  REFERENCE: palette.textSecondary,
+  SENSOR: palette.cyan,
+  CONTACT: palette.green,
+  OPERATIONAL: palette.textSecondary,
   ANALYSIS: palette.amber,
+  MARITIME_BOUNDARY: palette.violet,
+  MARITIME_REFERENCE: palette.green,
+  SEABED: palette.cyan,
 };
 
 /**

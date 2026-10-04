@@ -37,6 +37,7 @@ import {
 } from 'cesium';
 
 import { initializeCesiumViewer } from './cesiumViewer';
+import { defaultLayerState, getLayer, type LayerId } from './layerRegistry';
 import { classificationColor } from '../design/tokens';
 import { toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
 
@@ -64,10 +65,35 @@ export class TacticalEngine {
   #container: HTMLElement | null = null;
   #callbacks: EngineCallbacks = {};
   #rasterProvider: SingleTileImageryProvider | null = null;
+  /**
+   * The raster's ImageryLayer handle.
+   *
+   * Previously only the provider was kept, so the raster could be added and removed
+   * but never shown or hidden without destroying and rebuilding it. Toggling a layer
+   * must not re-request the image.
+   */
+  #rasterLayer: ImageryLayer | null = null;
+  /**
+   * Layer visibility, the engine's copy of the single authority in the store.
+   *
+   * Applied to real Cesium objects by `#syncLayerVisibility`. This exists so a toggle
+   * has a visible effect on objects that are ALREADY on the globe -- previously ten
+   * of eleven controls had no way to reach a renderer at all.
+   */
+  #layerVisible: Map<string, boolean> = new Map(
+    Object.entries(defaultLayerState()).map(([id, s]) => [id, s.visible]),
+  );
   #rasterRectangle: { west: number; south: number; east: number; north: number } | null = null;
   #targetEntities = new Map<string, { entity: unknown; handle: TargetHandle }>();
   #trackEntities: Array<unknown> = [];
   #linkEntities: Array<unknown> = [];
+  /**
+   * Detection-uncertainty circles.
+   *
+   * Separate from `#linkEntities` on purpose -- see `setUncertainty`. Sharing one
+   * array made the two layers overwrite each other.
+   */
+  #uncertaintyEntities: Array<unknown> = [];
   #aoiEntity: unknown = null;
   #graticuleProvider: ImageryLayer | null = null;
   #footprintEntity: unknown = null;
@@ -592,17 +618,23 @@ export class TacticalEngine {
   setUncertainty(entries: ReadonlyArray<{ id: string; lat: number; lon: number; radiusM: number }>): void {
     const viewer = this.#viewer;
     if (!viewer) return;
-    for (const entity of this.#linkEntities) {
+    // Own storage. This previously reused `#linkEntities`, which made
+    // `setUncertainty` and `setCorrelationLinks` mutually destructive: drawing
+    // uncertainty radii removed every correlation link, and re-drawing the links
+    // removed the radii. Two independent layers sharing one array is invisible until
+    // the moment one of them is refreshed, at which point the other silently
+    // disappears.
+    for (const entity of this.#uncertaintyEntities) {
       try {
         viewer.entities.remove(entity as never);
       } catch {
         /* already gone */
       }
     }
-    this.#linkEntities = [];
+    this.#uncertaintyEntities = [];
     for (const entry of entries) {
       if (!Number.isFinite(entry.radiusM) || entry.radiusM <= 0) continue;
-      this.#linkEntities.push(
+      this.#uncertaintyEntities.push(
         viewer.entities.add({
           name: `uncertainty:${entry.id}`,
           position: Cartesian3.fromDegrees(entry.lon, entry.lat),
@@ -621,6 +653,101 @@ export class TacticalEngine {
         }),
       );
     }
+  }
+
+  /* ---------------------------------------------------------------- layers */
+
+  /**
+   * Show or hide one layer.
+   *
+   * The registry declares which renderer owns a layer; this applies the decision to
+   * the Cesium objects that renderer produced. It is idempotent and applied
+   * immediately, so the effect is observable on objects that are already on the
+   * globe rather than only on the next data load.
+   *
+   * The store is the single authority (§9). This is the engine applying it, not a
+   * second opinion: the same call re-asserts the state on every setter, so a layer
+   * cannot escape by being re-created while switched off.
+   */
+  setLayerVisibility(layerId: LayerId, visible: boolean): void {
+    this.#layerVisible.set(layerId, visible);
+    this.#syncLayerVisibility();
+  }
+
+  /**
+   * Re-assert every layer's visibility against the objects currently on the globe.
+   *
+   * Called after a batch of layer setters has run. Each setter clears and re-adds its
+   * entities, and Cesium gives a new entity `show = true` by default -- so without
+   * this, switching a layer off and then loading new data would bring it back. One
+   * call after the batch is what makes the store authoritative rather than
+   * approximately authoritative.
+   */
+  refreshLayers(): void {
+    this.#syncLayerVisibility();
+  }
+
+  /** Whether a layer is currently visible. */
+  isLayerVisible(layerId: LayerId): boolean {
+    return this.#isVisible(layerId);
+  }
+
+  #isVisible(layerId: LayerId): boolean {
+    const explicit = this.#layerVisible.get(layerId);
+    return explicit ?? getLayer(layerId).defaultVisibility;
+  }
+
+  /** Cesium stores `name` as a Property, so read it defensively. */
+  #entityName(entity: unknown): string {
+    const raw = (entity as { name?: unknown }).name;
+    if (typeof raw === 'string') return raw;
+    const getter = (raw as { getValue?: () => unknown } | undefined)?.getValue;
+    if (typeof getter !== 'function') return '';
+    const value = getter.call(raw);
+    return typeof value === 'string' ? value : '';
+  }
+
+  /**
+   * Push the current visibility authority onto every owned Cesium object.
+   *
+   * Called after each toggle AND after each layer setter. The second call is what
+   * closes the window where a freshly added entity appears over a layer the operator
+   * switched off.
+   */
+  #syncLayerVisibility(): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+
+    const apply = (id: LayerId, entity: unknown): void => {
+      (entity as { show?: boolean }).show = this.#isVisible(id);
+    };
+    const applyEach = (id: LayerId, entities: Iterable<unknown>): void => {
+      const on = this.#isVisible(id);
+      for (const entity of entities) apply(id, entity);
+    };
+
+    for (const { entity } of this.#targetEntities.values()) apply('SAR_DETECTIONS', entity);
+    applyEach('UNCERTAINTY_RADII', this.#uncertaintyEntities);
+    applyEach('AIS_CONTACTS', this.#aisEntities);
+    applyEach('SAR_SCENE_FOOTPRINT', this.#footprintEntity ? [this.#footprintEntity] : []);
+    applyEach('CORRELATION_LINKS', this.#linkEntities);
+
+    /*
+     * `setTrack` builds THREE entities -- the observed polyline, the head fix and the
+     * predicted polyline -- so TWO registry layers share one renderer and cannot be
+     * separated by array membership. They are told apart by entity name, which is
+     * why those names are set explicitly in the renderer rather than left to Cesium's
+     * default: the mapping depends on them.
+     */
+    for (const entity of this.#trackEntities) {
+      const name = this.#entityName(entity);
+      if (name.includes('predicted')) apply('AIS_PREDICTED', entity);
+      else if (name === 'ais-fix') apply('AIS_CONTACTS', entity);
+      else apply('AIS_TRACKS', entity);
+    }
+
+    if (this.#rasterLayer) this.#rasterLayer.show = this.#isVisible('SAR_RASTER');
+    if (this.#graticuleProvider) this.#graticuleProvider.show = this.#isVisible('GRATICULE');
   }
 
   /* ---------------------------------------------------------------- raster */
@@ -674,8 +801,11 @@ export class TacticalEngine {
       this.#rasterProvider = provider;
       this.#rasterRectangle = rectangle;
       const layer: ImageryLayer = viewer.imageryLayers.addImageryProvider(provider);
+      this.#rasterLayer = layer;
       layer.alpha = 0.95;
-      layer.show = true;
+      // Honour the current authority rather than hardcoding `true`: a raster loaded
+      // while its layer is toggled off must not appear.
+      layer.show = this.#isVisible('SAR_RASTER');
       return true;
     } catch (error) {
       // Logged, not swallowed. A previous revision caught and discarded, so a
@@ -683,6 +813,7 @@ export class TacticalEngine {
       // entry pointing at the cause.
       console.error('DarkFleet: SAR raster layer was not added', error);
       this.#rasterProvider = null;
+      this.#rasterLayer = null;
       this.#rasterRectangle = null;
       return false;
     }
@@ -698,6 +829,7 @@ export class TacticalEngine {
       }
     }
     this.#rasterProvider = null;
+    this.#rasterLayer = null;
     this.#rasterRectangle = null;
   }
 
