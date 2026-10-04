@@ -51,6 +51,13 @@ OUT = ROOT / "src" / "api" / "contract.ts"
 #: appended after the interfaces so a literal union can reference them.
 SCHEMAS: tuple[str, ...] = (
     "ScoreDecomposition",
+    # Target summary (DF-X7V section 42). This route answered with a bare
+    # `dict[str, Any]`, so it had no schema to translate and therefore no
+    # TypeScript type and no validator keys. Listed as a root because the
+    # allowlist only seeds from here: transitive references are discovered, but a
+    # root has to be named. The narrative models are pulled in automatically
+    # through the envelope's field references.
+    "TargetSummaryResponse",
     # Coordinate probe (DF-X6B). The REQUEST side needs no entry here -- request
     # bodies are discovered from the paths. The response does, because responses
     # are an explicit allowlist by design: only schemas the frontend consumes are

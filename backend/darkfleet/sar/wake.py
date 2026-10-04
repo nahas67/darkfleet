@@ -9,12 +9,32 @@ weak line buried in sea clutter is swamped by the per-row background, and any
 per-angle normalisation then cancels the signal it is meant to find. Direct ray
 sampling measures the arm contrast where it physically is — in the along-ray
 mean backscatter — with no projection bookkeeping in between.
+
+WHY THERE IS A STATE AND NOT JUST A BOOLEAN
+
+Wake is a SECONDARY evidence channel. The primary product of a scan is the SAR
+detection, its AIS correlation and its classification, and none of those depend
+on a wake. So this module distinguishes four outcomes rather than collapsing them
+into `detected: bool`, because "the detector could not answer" and "the detector
+answered no" are different facts and a caller that cannot tell them apart will
+eventually read an absence as evidence against a vessel:
+
+    ANALYSED        the detector ran to completion. Either answer is a result.
+    NOT_ANALYSED    it was never run for this observation.
+    NOT_AVAILABLE   it could not run: no usable pixels, or nothing to measure.
+    FAILED          it raised. The exception is carried as provenance.
+
+The fourth state is the one that has to exist. An unhandled exception here
+propagates out of `sar.components.extract_components` and aborts the entire scan,
+destroying every other detection in the scene because an optional channel
+crashed. Turning the crash into a reported state is what makes it safe to run.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
@@ -43,6 +63,28 @@ MIN_CONF_SATURATION_DB = 1.2
 # Half-width of the angular envelope sampled about a candidate wake axis.
 ARM_ENVELOPE_HALF = 20.0
 
+#: The one analysis method this module implements, named once so a caller
+#: reporting a failure has the same method string as a caller reporting a
+#: result. A FAILED result that named something else would be unverifiable.
+WAKE_METHOD = "polar-ray-arm-pair"
+
+
+class WakeAnalysisState(StrEnum):
+    """Which of the four outcomes produced this result.
+
+    A `str` enum so the value survives JSON and compares against a literal in a
+    schema, a query and a test without a bespoke serialiser.
+    """
+
+    #: Ran to completion. `detected` is a real answer either way.
+    ANALYSED = "ANALYSED"
+    #: Never run for this observation. Nothing was attempted.
+    NOT_ANALYSED = "NOT_ANALYSED"
+    #: Could not run. Nothing was measured -- no pixels, no usable chip.
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+    #: Raised. `error_type` and `error_message` say what and why.
+    FAILED = "FAILED"
+
 
 @dataclass(frozen=True)
 class WakeAnalysis:
@@ -61,9 +103,101 @@ class WakeAnalysis:
     arm_angle_line_deg: float | None
     method: str
     notes: str
+    #: Which outcome this result reports. Defaults to the only one a successful
+    #: call can produce, so adding it cannot change an existing call site's
+    #: meaning -- only the failure path has to opt in.
+    state: WakeAnalysisState = WakeAnalysisState.ANALYSED
+    #: Exception class name, set only on FAILED. Kept as a name rather than a
+    #: type so the record stays JSON-safe and comparable without importing.
+    error_type: str | None = None
+    #: Exception message, set only on FAILED. Never the whole traceback: the
+    #: traceback is a debugging aid, the message is the reason.
+    error_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """The persisted payload, including the state and any failure provenance.
+
+        `state`, `error_type` and `error_message` were once suppressed here,
+        because `api.targets.WakeEvidence` is `extra="forbid"` and emitting an
+        undeclared key becomes a validation error on every target read. The
+        detector does not get to decide that a failure is not worth reporting, so
+        the wire model was extended instead and these fields now travel.
+
+        The practical difference: with them suppressed, a FAILED analysis and a
+        clean non-detection both presented `detected: false, confidence: 0.0`, and
+        a caller reading a stored record could not tell "the detector raised" from
+        "the detector looked and found nothing".
+        """
+        payload = asdict(self)
+        # `state` is a StrEnum; `asdict` leaves it as the enum member, which is not
+        # JSON-serialisable and would not validate against the declared literal.
+        state = payload.get("state")
+        if isinstance(state, WakeAnalysisState):
+            payload["state"] = state.value
+        return payload
+
+    @classmethod
+    def unavailable(cls, reason: str, method: str = WAKE_METHOD) -> WakeAnalysis:
+        """The detector could not measure. Not a failure, and not an answer.
+
+        Distinct from FAILED because nothing went wrong: there was simply nothing
+        to measure. That distinction matters to a caller deciding whether to
+        alert on it.
+        """
+        return cls(
+            detected=False,
+            confidence=0.0,
+            heading_deg=None,
+            wake_direction_deg=None,
+            apparent_length_m=None,
+            arm_angle_deg=None,
+            arm_angle_line_deg=None,
+            method=method,
+            notes=f"wake not available: {reason}",
+            state=WakeAnalysisState.NOT_AVAILABLE,
+        )
+
+    @classmethod
+    def failed(cls, exc: BaseException, method: str = WAKE_METHOD) -> WakeAnalysis:
+        """The detector raised. Report it; do not propagate it.
+
+        Every measurement is left at its no-detection value because none was
+        made. `notes` restates the exception in a sentence a reader of the target
+        record can act on, which is the whole point -- a failure that is only
+        visible in a log line has not been reported to the person scanning.
+        """
+        kind = type(exc).__name__
+        message = str(exc).strip()
+        return cls(
+            detected=False,
+            confidence=0.0,
+            heading_deg=None,
+            wake_direction_deg=None,
+            apparent_length_m=None,
+            arm_angle_deg=None,
+            arm_angle_line_deg=None,
+            method=method,
+            notes=f"wake analysis failed ({kind}): {message or 'no message'}",
+            state=WakeAnalysisState.FAILED,
+            error_type=kind,
+            error_message=message or None,
+        )
+
+    @classmethod
+    def not_analysed(cls, reason: str, method: str = WAKE_METHOD) -> WakeAnalysis:
+        """The detector was never attempted. Nothing to report either way."""
+        return cls(
+            detected=False,
+            confidence=0.0,
+            heading_deg=None,
+            wake_direction_deg=None,
+            apparent_length_m=None,
+            arm_angle_deg=None,
+            arm_angle_line_deg=None,
+            method=method,
+            notes=f"wake not analysed: {reason}",
+            state=WakeAnalysisState.NOT_ANALYSED,
+        )
 
 
 def _chip(db: np.ndarray, cy: float, cx: float, half: int) -> np.ndarray:
@@ -228,21 +362,41 @@ def analyse_wake(
     be implicit -- the only caller passed 24 against a reach of 22, which is why
     it was never noticed -- and is now stated and enforced, because the pipeline
     passes a component chip whose size belongs to a different concern.
+
+    It is a programmer error and it stays an exception. The inputs this function
+    *measures* -- a raster with no finite pixels, a centroid that is not a
+    number -- are not: those are properties of the data, and they come back as
+    `NOT_AVAILABLE` so the caller gets an answer instead of a traceback.
     """
     if half_chip < int(R_END_PX):
         raise ValueError(
             f"half_chip={half_chip} cannot contain a ray reach of R_END_PX={R_END_PX:.0f}; "
             "the arm measurement would fall outside the chip"
         )
-    method = "polar-ray-arm-pair"
-    chip = _chip(np.asarray(db, dtype=np.float64), cy, cx, half_chip)
-    if np.isfinite(chip).sum() < 64:
-        return WakeAnalysis(
-            detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
-            method=method,
-            notes="chip too small or non-finite for wake analysis",
+    method = WAKE_METHOD
+    img = np.asarray(db, dtype=np.float64)
+    # Guard the two inputs that used to raise from deep inside array bookkeeping.
+    #
+    # A non-finite centre reached `_chip`, which called `round(nan)` and raised
+    # `ValueError: cannot convert float NaN to integer` -- an error about integer
+    # conversion, raised at a call site that had nothing to do with why the
+    # measurement was impossible. An empty or wholly non-finite raster has no
+    # pixels to sample. Both mean "no answer available", and both are ordinary
+    # states of real data rather than bugs in this function.
+    if not (math.isfinite(float(cy)) and math.isfinite(float(cx))):
+        return WakeAnalysis.unavailable(
+            f"component centre is not a finite position (cy={cy}, cx={cx})", method
         )
+    if img.size == 0:
+        return WakeAnalysis.unavailable("source raster is empty", method)
+    if not np.isfinite(img).any():
+        return WakeAnalysis.unavailable("source raster has no finite pixels", method)
+
+    chip = _chip(img, cy, cx, half_chip)
+    if np.isfinite(chip).sum() < 64:
+        # A component on the raster edge gets a chip that is mostly padding. The
+        # detector ran; there was not enough image under the arms to measure.
+        return WakeAnalysis.unavailable("chip too small or non-finite for wake analysis", method)
 
     # Search the FULL 360 deg sweep in the un-rotated chip, so the measured
     # wake direction is a real image measurement rather than an echo of the
@@ -254,12 +408,7 @@ def analyse_wake(
     reference = other[np.isfinite(other)]
     background = float(np.median(reference)) if reference.size else float(np.nanmedian(chip))
     if n_valid < 8:
-        return WakeAnalysis(
-            detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
-            method=method,
-            notes="no measurable rays in chip",
-        )
+        return WakeAnalysis.unavailable("no measurable rays in chip", method)
 
     # Candidate wake axes: the stern lies opposite the hull axis, but the pair
     # is searched over the whole circle so the reported heading is a measurement
@@ -286,12 +435,7 @@ def analyse_wake(
             best_dir = float(axis) % 360.0
 
     if best_dir is None:
-        return WakeAnalysis(
-            detected=False, confidence=0.0, heading_deg=None, wake_direction_deg=None,
-            apparent_length_m=None, arm_angle_deg=None, arm_angle_line_deg=None,
-            method=method,
-            notes="no measurable rays in chip",
-        )
+        return WakeAnalysis.unavailable("no measurable rays in chip", method)
 
     margin = float(best_margin)
     # The wake axis is astern; the vessel heads opposite it. Because the hull

@@ -28,6 +28,7 @@ from .geolocation import (
     geolocation_uncertainty_m,
 )
 from .observability import stage as log_stage
+from .polarization import NOT_AVAILABLE
 from .providers import Georeferencing, RealDataUnavailableError
 from .providers.stac import (
     SarAsset,
@@ -40,6 +41,7 @@ from .sar import landmask as landmask_mod
 from .sar.cfar import run_ca_cfar
 from .sar.components import extract_components
 from .sar.georef import read_window
+from .sar.polarization_channel import domain_for, for_scene_polarization
 from .sar.preprocess import grd_branch, rtc_branch
 from .sar.speckle import apply_speckle
 
@@ -106,6 +108,73 @@ def _class_counts(targets: list[dict[str, Any]]) -> dict[str, int]:
     for t in targets:
         counts[t["cls"]] = counts.get(t["cls"], 0) + 1
     return counts
+
+
+
+def _component_mask(
+    comp: dict[str, Any], db: np.ndarray
+) -> np.ndarray | None:
+    """This component's own bright pixels, as a boolean mask over the window grid.
+
+    The polarization statistics must describe the SAME component whose dossier is
+    open, so the mask comes from this component's own extent and never from a
+    nearest-target inference.
+
+    It is NOT the whole bounding box. A 3x3 box around a 5-pixel hull contains 4
+    pixels of open water at roughly -40 dB, so a box mask reports a mean some 40 dB
+    below the component's own `meanDb` -- a statistic about a rectangle, presented
+    as a statistic about a vessel. It also makes `p95_db` collapse onto `max_db`,
+    because the 95th percentile of nine samples is the brightest of them.
+
+    The selection is therefore thresholded at the midpoint between the component's
+    own measured clutter floor and its own peak, both read from the component
+    itself. The midpoint is used rather than the peak because a hull is not
+    uniformly bright: its deck, its sides and its superstructure differ by several
+    dB, and a peak threshold would select only the brightest sliver of the vessel.
+
+    Returns None when the component has no usable extent, so the channel can report
+    EMPTY_MASK explicitly rather than scoring an empty selection.
+    """
+    bbox = comp.get("bbox") or {}
+    try:
+        row0 = int(bbox["minY"])
+        row1 = int(bbox["maxY"])
+        col0 = int(bbox["minX"])
+        col1 = int(bbox["maxX"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    height, width = db.shape[:2]
+    rows = slice(max(0, row0), min(height, row1 + 1))
+    cols = slice(max(0, col0), min(width, col1 + 1))
+    if rows.start >= rows.stop or cols.start >= cols.stop:
+        return None
+
+    patch = np.asarray(db[rows, cols], dtype=np.float64)
+    if patch.size == 0:
+        return None
+
+    mask = np.zeros(db.shape[:2], dtype=bool)
+    try:
+        clutter = float(comp["clutterMeanDb"])
+        peak = float(comp["maxDb"])
+    except (KeyError, TypeError, ValueError):
+        # Without the component's own levels there is no defensible threshold, and
+        # guessing one would put a tuned constant between the measurement and the
+        # number it produces. Fall back to the bounding box and say so.
+        mask[rows, cols] = True
+        return mask
+
+    cut = clutter + 0.5 * (peak - clutter)
+    selected = np.isfinite(patch) & (patch >= cut)
+    if not selected.any():
+        # The component's peak is not present in the window we were handed, which
+        # means this array is not the one the component was measured on. Selecting
+        # the whole box would report numbers from the wrong array as though they
+        # were this target's, so decline instead.
+        return None
+    mask[rows, cols] = selected
+    return mask
 
 
 def run_scan(
@@ -314,6 +383,63 @@ def run_scan(
     targets = out["targets"]
     matched = sum(1 for t in targets if t["cls"] == "SAR_MATCHED_AIS")
     log_stage("MATCH", f"associated {matched} targets")
+
+    # ---- POLARIZATION -----------------------------------------------------
+    # Runs on every component, and today almost always reports NOT_AVAILABLE,
+    # which is the correct answer rather than a gap.
+    #
+    # Traced rather than assumed: SarAsset carries ONE polarization and ONE
+    # asset_href, and read_window does ds.read(1). A production scan therefore
+    # reads exactly ONE polarization, so there are no co-registered arrays and
+    # no VH/VV ratio can be computed without synthesising a channel.
+    # Synthesising one yields a number that looks like a measurement of this
+    # vessel and is actually a ratio of unrelated things, so it is not done.
+    #
+    # Statistics for the polarization that WAS read are still reported, which
+    # is genuinely useful. Evidence only: it touches no score and no class.
+    _pol_read = str(raster_meta.get("polarization") or "") or None
+    _pol_measured = 0
+    for _i, _comp in enumerate(comps):
+        # Section 39: this channel is secondary evidence, so nothing it can do may
+        # abort the scan. The guard is here rather than inside the channel because a
+        # channel that raises has still not produced evidence, and an unguarded
+        # attribute access on its return value would take the whole SAR detection,
+        # the AIS correlation and the classification down with it -- the exact
+        # failure mode this section forbids.
+        try:
+            _result = for_scene_polarization(
+                _pol_read,
+                product=raster_meta.get("product"),
+                db=filtered,
+                mask=_component_mask(_comp, filtered),
+            )
+            _payload = _result.to_dict() if _result is not None else None
+            _measured = bool(_result is not None and _result.measured)
+        except Exception as _exc:  # noqa: BLE001 - deliberate: never fatal
+            _payload = {
+                "status": "FAILED",
+                "available": [],
+                "requested": ["VV", "VH"],
+                "single_pol": True,
+                "per_pol": {},
+                "vh_over_vv_db": None,
+                "dual_pol_flags": {"vh_over_vv": NOT_AVAILABLE},
+                "calibration_domain": domain_for(raster_meta.get("product")),
+                "reason": (
+                    "polarization extraction failed; the SAR detection is unaffected "
+                    f"({type(_exc).__name__}: {_exc})"
+                ),
+                "notes": [],
+            }
+            _measured = False
+        if _i < len(targets) and _payload is not None:
+            targets[_i]["polarizationEvidence"] = _payload
+        _pol_measured += int(_measured)
+    log_stage(
+        "POLAR",
+        f"polarization read={_pol_read or 'none'}; {_pol_measured}/{len(comps)} "
+        "measured; dual-pol NOT_AVAILABLE on a single-pol acquisition",
+    )
 
     # ---- SCORE / PERSIST --------------------------------------------------
     emit("SCORING", "assembling score decomposition and confidence")

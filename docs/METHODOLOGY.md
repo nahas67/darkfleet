@@ -108,10 +108,71 @@ not evidence of evasion, illegality, or intent.
 | `SAR_MATCHED_AIS` | Association above the composite threshold |
 | `SAR_UNMATCHED` | Radar return, no association met the threshold |
 | `AIS_ONLY` | AIS transmission with no corresponding radar return |
-| `STATIONARY_OR_INFRASTRUCTURE` | High backscatter, compact aspect, no wake |
+| `STATIONARY_OR_INFRASTRUCTURE` | High backscatter, compact aspect. No wake term. |
 | `SEA_CLUTTER` | Weak, small, no SNR support |
 | `LOW_CONFIDENCE` | A sub-threshold candidate exists but was not established |
 | `UNRESOLVED` | Competing candidates; association deliberately withheld |
+
+## What `sarConf` means
+
+`sarConf` is confidence **in the SAR detection itself**. It answers one question:
+*how sure is the detector that this is a vessel-sized surface return?* It is not a
+score for the target's identity, its type, or its behaviour, and it is not a
+probability that the target is doing anything.
+
+What contributes to it:
+
+| Input | Why it is in the score |
+|---|---|
+| Peak backscatter | Bright returns are more likely vessels and less likely speckle |
+| Mean backscatter over the component | Separates a coherent hull from scattered noise |
+| Component area and compactness | A vessel has a plausible footprint |
+| SNR relative to local clutter | A return that stands above its surroundings is more likely a target |
+| Detector version | A change in algorithm invalidates comparison with older records |
+
+What **must not** contribute, and why:
+
+| Excluded | Reason |
+|---|---|
+| Wake evidence | Validated as geometry, not as a classifier. See below. |
+| AIS association | Would make the SAR confidence depend on a different sensor, and a missing AIS feed would silently lower confidence in a correct detection |
+| Polarization | Integrated as an evidence channel only; no validated production rule exists |
+| Multipass | Not present at scan time |
+| Wake **absence** | Absence of wake evidence is not negative evidence. A stationary hull, a wake beyond the chip, a low sea state and a head-on aspect all produce no detectable wake while the vessel is real and moving. Scoring its absence would penalise correct detections for conditions the sensor cannot resolve. |
+
+The scoring model is versioned. `SCORING_MODEL_VERSION` is currently
+**`sar-scoring/v2`**. v1 included a wake term; v2 removed it. Stored records carry
+the version they were computed under, because a confidence from v1 and a
+confidence from v2 are not the same quantity and must not be compared or averaged
+without saying which produced them.
+
+### Why wake was removed rather than weighted
+
+`wake` reached into the confidence and orientation logic through a brightness
+threshold on the hull axis with hardcoded limits. It was never validated against
+labelled data, it returned `true` for bright hulls with no wake at all, and it
+returned `true` for **0 of 84** stored targets — so it was an authority that had
+never once changed an outcome, while carrying the power to change any of them.
+
+Substituting a different unvalidated signal would have swapped one unvalidated
+authority for another, so the capability was **deleted** rather than reweighted.
+Wake now runs, is persisted, and is visible as evidence — but it influences no
+score, no association, no heading tolerance and no classification. Wake returns
+below as a separate structured channel.
+
+Wake's own product status is **EVIDENCE-ONLY, NOT CALIBRATED**, and it stays that
+way until a labelled Sentinel-1 corpus has been reviewed. Absence of a calibration
+corpus does not justify pretending the detector is authoritative; it justifies
+saying plainly that it is not yet.
+
+### Evidence channels are not fused
+
+Wake, polarization, AIS and multipass each produce their own structured channel.
+They are deliberately **not** compressed into one number. A fused score is
+comfortable to read and impossible to interrogate: when it looks wrong, there is no
+way to ask which input was wrong. A separate fused field (e.g.
+`vesselEvidenceScore`) may be added later, on its own name, with its own
+validation — but it will not be smuggled in under the existing `sarConf`.
 
 ## Cache
 

@@ -13,9 +13,12 @@ wake / wakeHdg
     presence of wakeAnalysis.
 
 wakeAnalysis
-    The real detector, nalyse_wake: a 360-degree ray sweep, an arm profile and
+    The real detector, analyse_wake: a 360-degree ray sweep, an arm profile and
     a symmetric-pair search, reporting its measured contrast, arm geometry,
-    apparent length and method. Evidence only.
+    apparent length and method. Evidence only. It is called through
+    analyse_wake_guarded, so a detector failure becomes a reported FAILED state
+    instead of a scan that dies with it -- a wake must never cost the scene its
+    other detections.
 
 Keeping them apart is deliberate. Replacing the legacy verdict outright shifts six
 SAR confidences by exactly the +-0.08 the confidence model grants a wake, and on
@@ -32,7 +35,7 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import label
 
-from .wake import R_END_PX, analyse_wake
+from .wake import R_END_PX, WAKE_METHOD, WakeAnalysis, analyse_wake
 
 CHIP = 24
 HALF_CHIP = CHIP // 2
@@ -42,6 +45,43 @@ HALF_CHIP = CHIP // 2
 #: spatial moments and is smaller; passing it produced a chip the ray search could
 #: not fit inside. One pixel of margin keeps the outermost sample in bounds.
 WAKE_HALF_CHIP = int(R_END_PX) + 1
+
+
+def analyse_wake_guarded(
+    db: np.ndarray,
+    cy: float,
+    cx: float,
+    orient: float,
+    pixel_spacing_m: float,
+) -> WakeAnalysis:
+    """Run the wake detector, converting any failure into a reported state.
+
+    WHY THIS EXISTS
+
+    Wake is a secondary evidence channel. The primary product of this module is
+    the component -- its centroid, its moments, its dB statistics -- and none of
+    that depends on a wake measurement. So when the detector raised, the exception
+    unwound out of the extraction loop and aborted the whole scan: every OTHER
+    detection in the scene lost its AIS correlation and its classification,
+    because an optional channel crashed. A secondary channel must not be able to
+    destroy the primary result.
+
+    So the failure is caught here and reported as `WakeAnalysisState.FAILED`
+    carrying the exception type and message. A FAILED result is field-for-field
+    identical to an absent one -- no heading, no length, no arm angle, no
+    confidence -- so the quarantine in `correlation.match` holds without any new
+    logic there: nothing that reads the wake result can distinguish "not
+    measured" from "not there", and neither is negative evidence.
+
+    The bare `except Exception` is the point rather than a shortcut. The
+    contract is that NO detector failure may abort a scan, which includes the
+    ones nobody has thought of yet. Catching `Exception` and not `BaseException`
+    keeps `KeyboardInterrupt` and `SystemExit` working.
+    """
+    try:
+        return analyse_wake(db, cy, cx, round(orient), pixel_spacing_m, half_chip=WAKE_HALF_CHIP)
+    except Exception as exc:  # noqa: BLE001 - the contract above requires it
+        return WakeAnalysis.failed(exc, WAKE_METHOD)
 
 
 def extract_components(
@@ -108,9 +148,11 @@ def extract_components(
         # association, heading tolerance or classification. See
         # `SCORING_MODEL_VERSION` in darkfleet.correlation.match and
         # docs/WAKE_SCORING_DELTA.md for the measurements behind that decision.
-        wake_analysis = analyse_wake(
-            db, cy, cx, round(orient), pixel_spacing_m, half_chip=WAKE_HALF_CHIP
-        )
+        #
+        # Guarded: a detector failure becomes a FAILED state on this component
+        # rather than an exception that unwinds the loop and takes the scan --
+        # and with it every other detection's correlation -- down with it.
+        wake_analysis = analyse_wake_guarded(db, cy, cx, orient, pixel_spacing_m)
         out.append(
             {
                 "cx": cx,

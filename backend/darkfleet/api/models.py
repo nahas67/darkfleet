@@ -25,7 +25,14 @@ from pathlib import Path
 from typing import Annotated, Any, Final, Literal
 
 import numpy as np
-from pydantic import AfterValidator, AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from darkfleet.jobs.models import ScanStage
 
@@ -409,6 +416,141 @@ class HealthResponse(BaseModel):
     runtime_mode: str
     probe: str = Field(default="live", description="Always 'live': statuses come from real requests.")
     providers: list[ProviderHealthEntry] = Field(default_factory=list)
+
+
+# =====================================================================
+# TARGET SUMMARY (DF-X7V section 42)
+#
+# `/targets/{id}/summary` returned `dict[str, Any]`. A route with no response
+# model generates no OpenAPI schema, no TypeScript type and no validator keys, so
+# the frontend could not have detected a change in this response even if it wanted
+# to. These models exist so that route has a checkable contract.
+#
+# The envelope is strict (`extra="forbid"`) because its shape is entirely ours.
+# `evidence` is the shared evidence document and is deliberately open; see the
+# module note in the checkpoint report for what that does and does not buy.
+# =====================================================================
+
+
+class NarrativeModelIdentity(BaseModel):
+    """Which writer produced the narrative. Never omitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str
+    provider: str
+    template_version: str
+
+
+class NarrativeProvenance(BaseModel):
+    """Whether the narrative required network calls.
+
+    `network_calls` is asserted rather than trusted: a deterministic template
+    writer must report zero, and a payload claiming otherwise is stating that a
+    network dependency exists in the path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    writer: str
+    network_calls: int = Field(ge=0)
+
+
+class NarrativeDocument(BaseModel):
+    """A validated narrative. Present only when `status` is OK."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str
+    observed: list[str]
+    hypotheses: list[str]
+    unknowns: list[str]
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    summary: str
+    model: NarrativeModelIdentity
+    provenance: NarrativeProvenance
+
+
+class NarrativeEnvelope(BaseModel):
+    """Either a narrative or an explicit refusal.
+
+    The refusal is a first-class variant, not an error string. A caller must be
+    able to render the deterministic evidence either way, which means it must be
+    able to tell the two apart without reading prose.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["OK", "AI_UNAVAILABLE"]
+    document: NarrativeDocument | None = None
+    #: Why no narrative was produced. Populated when status is AI_UNAVAILABLE.
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _variant_is_coherent(self) -> NarrativeEnvelope:
+        """A refusal must carry a reason, and a success must carry a document.
+
+        Without this, `AI_UNAVAILABLE` with no reason and `OK` with no document are
+        both representable, and a consumer has no way to tell a truncated payload
+        from an intentional one.
+        """
+        if self.status == "OK" and self.document is None:
+            raise ValueError("status OK requires a document")
+        if self.status == "AI_UNAVAILABLE":
+            if not self.reason:
+                raise ValueError("status AI_UNAVAILABLE requires a reason")
+            if self.document is not None:
+                raise ValueError("status AI_UNAVAILABLE must not carry a document")
+        return self
+
+
+class TargetSummaryEvidence(BaseModel):
+    """The deterministic evidence document, as served on this route.
+
+    Open by design, because this is the same document `/targets/{id}` and
+    `/evidence/{id}` serve, and it carries deeply nested blocks (marine region,
+    vertical datum, score decomposition, multipass) that are still untyped. The
+    keys declared here are the ones a caller branches on.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    target_id: str
+    classification: str
+    #: Human-facing designation, e.g. ``GHOST VESSEL``. Null when the target is
+    #: neither a Ghost Vessel nor a named-vessel match.
+    designation: str | None = None
+    #: Present for Ghost Vessels; carries the semantic warning and the analytical
+    #: classification separately, because the two are not the same claim.
+    ghost_vessel: dict[str, Any] | None = None
+    observed: dict[str, Any] = Field(default_factory=dict)
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+    association: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+    tags: list[str] = Field(default_factory=list)
+    hypotheses: list[dict[str, Any]] = Field(default_factory=list)
+    unknowns: list[dict[str, Any]] = Field(default_factory=list)
+    sar_chip: dict[str, Any] | None = None
+
+
+class TargetSummaryResponse(BaseModel):
+    """``GET /api/targets/{id}/summary``: evidence plus optional narrative.
+
+    `classification` is nullable because a stored target may predate the field; it
+    is not nullable to hide a missing classification, and `evidence.classification`
+    carries the authoritative value when this is null.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    scan_id: str
+    target_id: str
+    classification: str | None = None
+    ambiguous: bool = Field(
+        description="True when this target id exists in more than one stored scan."
+    )
+    evidence: TargetSummaryEvidence
+    narrative: NarrativeEnvelope
 
 
 class TargetEvidenceResponse(BaseModel):

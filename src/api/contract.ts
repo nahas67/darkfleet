@@ -37,6 +37,17 @@ export interface ScoreDecomposition {
   readonly timeDeltaSeconds: number;
 }
 
+export interface TargetSummaryResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly target_id: string;
+  readonly classification?: string | null;
+  /** True when this target id exists in more than one stored scan. */
+  readonly ambiguous: boolean;
+  readonly evidence: TargetSummaryEvidence;
+  readonly narrative: NarrativeEnvelope;
+}
+
 export interface ProbeResponse {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly scan_id: string;
@@ -118,6 +129,8 @@ export interface VesselTarget {
   readonly geoCentreOffset?: number | null;
   /** Measured wake evidence; null when the detector never ran for this target. */
   readonly wakeAnalysis?: WakeEvidence | null;
+  /** Polarization channel output; null when the channel never ran. Evidence only: it does not modify sar_conf, AIS association or classification. */
+  readonly polarizationEvidence?: PolarizationEvidence | null;
   readonly sarConf: number;
   readonly aisConf: number;
   readonly lenM: number;
@@ -386,6 +399,28 @@ export interface ScanCreateRequest {
   readonly cfar_config?: CfarConfig | null;
 }
 
+export interface NarrativeEnvelope {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: "OK" | "AI_UNAVAILABLE";
+  readonly document?: NarrativeDocument | null;
+  readonly reason?: string | null;
+}
+
+export interface TargetSummaryEvidence {
+  readonly target_id: string;
+  readonly classification: string;
+  readonly designation?: string | null;
+  readonly ghost_vessel?: Record<string, unknown> | null;
+  readonly observed?: Record<string, unknown>;
+  readonly uncertainty?: Record<string, unknown>;
+  readonly association?: Record<string, unknown>;
+  readonly summary?: string;
+  readonly tags?: string[];
+  readonly hypotheses?: Record<string, unknown>[];
+  readonly unknowns?: Record<string, unknown>[];
+  readonly sar_chip?: Record<string, unknown> | null;
+}
+
 export interface ProbeGeoreferencing {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly type: "AFFINE_GEOREFERENCED" | "GCP_GEOREFERENCED" | "UNREFERENCED";
@@ -503,10 +538,27 @@ export interface RejectedCandidate {
   readonly shortfall: number;
 }
 
+export interface PolarizationEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: "FEATURES" | "NOT_AVAILABLE" | "FAILED";
+  readonly available?: string[];
+  readonly requested?: string[];
+  readonly single_pol?: boolean;
+  readonly per_pol?: Record<string, Record<string, number | string>>;
+  readonly vh_over_vv_db?: number | null;
+  readonly dual_pol_flags?: Record<string, unknown>;
+  readonly calibration_domain?: string;
+  readonly reason?: string | null;
+  readonly notes?: string[];
+}
+
 export interface WakeEvidence {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly state?: "ANALYSED" | "NOT_ANALYSED" | "NOT_AVAILABLE" | "FAILED";
   readonly detected: boolean;
   readonly confidence: number;
+  readonly error_type?: string | null;
+  readonly error_message?: string | null;
   readonly heading_deg?: number | null;
   readonly wake_direction_deg?: number | null;
   readonly apparent_length_m?: number | null;
@@ -557,6 +609,18 @@ export interface CfarConfig {
   readonly coastlineBufferMeters?: number | null;
 }
 
+export interface NarrativeDocument {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly target_id: string;
+  readonly observed: string[];
+  readonly hypotheses: string[];
+  readonly unknowns: string[];
+  readonly confidence?: number | null;
+  readonly summary: string;
+  readonly model: NarrativeModelIdentity;
+  readonly provenance: NarrativeProvenance;
+}
+
 export interface TrackGapOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly seconds: number;
@@ -578,6 +642,19 @@ export interface TrackPointOut {
   readonly length_unc_m: number;
 }
 
+export interface NarrativeModelIdentity {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly model_id: string;
+  readonly provider: string;
+  readonly template_version: string;
+}
+
+export interface NarrativeProvenance {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly writer: string;
+  readonly network_calls: number;
+}
+
 /**
  * Schemas reachable as a request body. Discovered from the OpenAPI paths,
  * not maintained by hand, so a new route's body is emitted automatically.
@@ -590,6 +667,7 @@ export type ContractRequestSchemaName =
 /** Schemas emitted into this file. */
 export type ContractSchemaName =
   | 'ScoreDecomposition'
+  | 'TargetSummaryResponse'
   | 'ProbeResponse'
   | 'RevisitPlanOut'
   | 'TracksOut'
@@ -618,6 +696,8 @@ export type ContractSchemaName =
   | 'VesselTrackResponse'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'NarrativeEnvelope'
+  | 'TargetSummaryEvidence'
   | 'ProbeGeoreferencing'
   | 'ProbePixel'
   | 'ProbeProvenance'
@@ -629,14 +709,18 @@ export type ContractSchemaName =
   | 'PatternOut'
   | 'DetectorCardOut'
   | 'RejectedCandidate'
+  | 'PolarizationEvidence'
   | 'WakeEvidence'
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'
   | 'AisCoverageState'
   | 'CfarConfig'
+  | 'NarrativeDocument'
   | 'TrackGapOut'
   | 'TrackPointOut'
+  | 'NarrativeModelIdentity'
+  | 'NarrativeProvenance'
 ;
 
 /**
@@ -654,6 +738,21 @@ export const SCOREDECOMPOSITION_FIELDS = [
   'matchRadiusMeters',
   'distanceOffsetMeters',
   'timeDeltaSeconds',
+] as const;
+
+/**
+ * Property names of {@link TargetSummaryResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETSUMMARYRESPONSE_FIELDS = [
+  'scan_id',
+  'target_id',
+  'classification',
+  'ambiguous',
+  'evidence',
+  'narrative',
 ] as const;
 
 /**
@@ -766,6 +865,7 @@ export const VESSELTARGET_FIELDS = [
   'geoPixelCentroid',
   'geoCentreOffset',
   'wakeAnalysis',
+  'polarizationEvidence',
   'sarConf',
   'aisConf',
   'lenM',
@@ -1135,6 +1235,39 @@ export const SCANCREATEREQUEST_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link NarrativeEnvelope} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const NARRATIVEENVELOPE_FIELDS = [
+  'status',
+  'document',
+  'reason',
+] as const;
+
+/**
+ * Property names of {@link TargetSummaryEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETSUMMARYEVIDENCE_FIELDS = [
+  'target_id',
+  'classification',
+  'designation',
+  'ghost_vessel',
+  'observed',
+  'uncertainty',
+  'association',
+  'summary',
+  'tags',
+  'hypotheses',
+  'unknowns',
+  'sar_chip',
+] as const;
+
+/**
  * Property names of {@link ProbeGeoreferencing} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1303,14 +1436,36 @@ export const REJECTEDCANDIDATE_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link PolarizationEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const POLARIZATIONEVIDENCE_FIELDS = [
+  'status',
+  'available',
+  'requested',
+  'single_pol',
+  'per_pol',
+  'vh_over_vv_db',
+  'dual_pol_flags',
+  'calibration_domain',
+  'reason',
+  'notes',
+] as const;
+
+/**
  * Property names of {@link WakeEvidence} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
  * so the permitted keys cannot drift from the contract they enforce.
  */
 export const WAKEEVIDENCE_FIELDS = [
+  'state',
   'detected',
   'confidence',
+  'error_type',
+  'error_message',
   'heading_deg',
   'wake_direction_deg',
   'apparent_length_m',
@@ -1357,6 +1512,23 @@ export const CFARCONFIG_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link NarrativeDocument} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const NARRATIVEDOCUMENT_FIELDS = [
+  'target_id',
+  'observed',
+  'hypotheses',
+  'unknowns',
+  'confidence',
+  'summary',
+  'model',
+  'provenance',
+] as const;
+
+/**
  * Property names of {@link TrackGapOut} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1385,6 +1557,29 @@ export const TRACKPOINTOUT_FIELDS = [
   'classification',
   'apparent_length_m',
   'length_unc_m',
+] as const;
+
+/**
+ * Property names of {@link NarrativeModelIdentity} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const NARRATIVEMODELIDENTITY_FIELDS = [
+  'model_id',
+  'provider',
+  'template_version',
+] as const;
+
+/**
+ * Property names of {@link NarrativeProvenance} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const NARRATIVEPROVENANCE_FIELDS = [
+  'writer',
+  'network_calls',
 ] as const;
 
 /**

@@ -81,13 +81,29 @@ def _stats(arr: np.ndarray, mask: np.ndarray | None) -> Stats:
     }
 
 
-def pol_ratio_db(numerator: np.ndarray, denominator: np.ndarray) -> float | None:
-    """dB ratio of two co-registered polarizations over the same pixels.
+def pol_ratio_db(
+    numerator: np.ndarray,
+    denominator: np.ndarray,
+    mask: np.ndarray | None = None,
+) -> float | None:
+    """dB ratio of two co-registered polarizations over the SAME pixels.
 
     Pixels where the denominator is not meaningfully bright are excluded: their
     ratio is an artefact of dividing by noise, not a measurement.
+
+    `mask` selects the target the ratio is about. It is a parameter rather than an
+    internal detail because omitting it is a real failure mode: a ratio taken over
+    an entire scene is dominated by open water and reads as though it described one
+    vessel. On a 400x400 window that is a statistic about the sea, wearing a
+    vessel's name. Callers measuring a target must pass that target's mask.
     """
     num, den = numerator, denominator
+    if mask is not None:
+        if mask.shape != num.shape or mask.shape != den.shape:
+            return None
+        num, den = num[mask], den[mask]
+        if num.size == 0:
+            return None
     finite = np.isfinite(num) & np.isfinite(den)
     if not finite.any():
         return None
@@ -114,9 +130,21 @@ def extract_features(
     nothing is imputed.
     """
     available = tuple(p for p in ("VV", "VH", "HH", "HV") if p in pols)
+    # A channel that is entirely non-finite yields no statistic worth the name.
+    # Reporting FEATURES for it would tell a consumer that holds a measurement
+    # while every field it reads is a NOT_AVAILABLE marker.
+    measurable = tuple(
+        p for p in available if bool(np.isfinite(pols[p]).any())
+    )
     wanted = tuple(p for p in requested if p not in available)
     notes: list[str] = []
+    if available and not measurable:
+        notes.append("every polarization present is entirely non-finite")
+        measurable = ()
     reasons = {p: "not present in this acquisition" for p in wanted}
+    reasons.update(
+        {p: "present but entirely non-finite" for p in set(available) - set(measurable)}
+    )
 
     per_pol: dict[str, Stats] = {p: _stats(pols[p], mask) for p in available}
     if not available:
@@ -127,7 +155,10 @@ def extract_features(
     flags: dict[str, Any] = {}
 
     if "VV" in available and "VH" in available:
-        vh_over_vv = pol_ratio_db(pols["VH"], pols["VV"])
+        # The mask is applied to the ratio as well as to the per-pol statistics.
+        # Applying it to only one of the two would make the pair describe different
+        # areas of the scene, which is worse than applying it to neither.
+        vh_over_vv = pol_ratio_db(pols["VH"], pols["VV"], mask)
     else:
         notes.append("VH/VV requires dual-pol; reported NOT_AVAILABLE")
         flags["vh_over_vv"] = NOT_AVAILABLE

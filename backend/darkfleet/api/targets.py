@@ -43,7 +43,7 @@ Honesty constraints encoded in the types themselves:
 from __future__ import annotations
 
 import math
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -246,13 +246,39 @@ class WakeEvidence(BaseModel):
     ``notes``
         Never empty. "Not analysed" and "analysed, found nothing" must stay
         distinguishable, and a caller cannot separate them if the reason is blank.
+
+    ``state``
+        The governing field. Read it FIRST: every measurement below is only
+        meaningful when the detector actually ran.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
+    #: Which of the four states this analysis is in. A caller MUST branch on this
+    #: before reading any measurement: `detected` and `confidence` are only
+    #: meaningful when the state is ANALYSED.
+    #:
+    #: ``ANALYSED``
+    #:     The detector ran. `detected` is a real answer either way.
+    #: ``NOT_ANALYSED``
+    #:     It was never run for this observation.
+    #: ``NOT_AVAILABLE``
+    #:     It could not run -- no usable pixels, or nothing to measure.
+    #: ``FAILED``
+    #:     It raised. `error_type` and `error_message` say what. The target's
+    #:     classification, confidence and AIS association are unaffected: wake is
+    #:     secondary evidence and never fails a scan.
+    #:
+    #: Without this field a FAILED analysis is indistinguishable from a clean
+    #: non-detection, because both present `detected: false, confidence: 0.0`.
+    state: Literal["ANALYSED", "NOT_ANALYSED", "NOT_AVAILABLE", "FAILED"] = "ANALYSED"
     detected: bool
     #: Evidence strength in 0..1. NOT a probability of a wake.
     confidence: float = Field(ge=0.0, le=1.0)
+    #: Populated only when `state` is FAILED. Named exception type, so a caller can
+    #: distinguish a bad input from a numerical failure without parsing prose.
+    error_type: str | None = None
+    error_message: str | None = None
     heading_deg: float | None = None
     wake_direction_deg: float | None = None
     #: Apparent wake length in METRES. Null unless detected.
@@ -280,6 +306,60 @@ class WakeEvidence(BaseModel):
     method: str
     #: Why this result, in the detector's own words. Never empty.
     notes: str
+
+
+class PolarizationEvidence(BaseModel):
+    """What the polarization channel could measure for one target.
+
+    A SEPARATE evidence channel, structurally the peer of wake evidence. It is not
+    folded into `sar_conf`, and it must not be: one opaque number cannot be
+    interrogated, and a reader who wants to know what the radar actually saw should
+    not have to trust a fused score.
+
+    `status` is the field a surface branches on:
+
+    ``FEATURES``
+        Something was measured. Per-polarization statistics are real.
+    ``NOT_AVAILABLE``
+        Nothing was measured, and `reason` says why in words. This is the normal
+        production state today, because the pipeline reads a single polarization.
+    ``FAILED``
+        Extraction raised. The SAR detection, AIS correlation and classification are
+        all unaffected -- polarization is secondary evidence and never fails a scan.
+
+    On `single_pol`: when only one polarization was read there is no second
+    co-registered array, so every dual-pol quantity is NOT_AVAILABLE. Nothing is
+    imputed and no substitute channel is synthesised, because a VH/VV ratio built
+    from arrays that do not describe the same Earth location looks like a
+    measurement of this vessel and is a ratio of unrelated things.
+
+    `calibration_domain` is preserved rather than normalised: sigma0 (GRD) and
+    gamma0 (RTC) differ by an incidence-angle term, so a value carries no
+    comparable meaning without it.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    #: FEATURES | NOT_AVAILABLE | FAILED
+    status: Literal["FEATURES", "NOT_AVAILABLE", "FAILED"]
+    #: Polarizations actually read for THIS target.
+    available: list[str] = Field(default_factory=list)
+    #: Polarizations the channel asked for. A name here that is not in `available`
+    #: was wanted and not obtained.
+    requested: list[str] = Field(default_factory=list)
+    single_pol: bool = False
+    #: Per-polarization mean/max/P95 in dB. Values are NOT_AVAILABLE sentinels, not
+    #: numbers, wherever a statistic could not be computed.
+    per_pol: dict[str, dict[str, float | str]] = Field(default_factory=dict)
+    #: VH/VV in dB. Null when unavailable -- never 0.0, which would read as a
+    #: measured ratio of equal channels.
+    vh_over_vv_db: float | None = None
+    dual_pol_flags: dict[str, Any] = Field(default_factory=dict)
+    #: sigma0 | gamma0 | unknown
+    calibration_domain: str = "unknown"
+    #: Why nothing was measured, in words. Present whenever status is not FEATURES.
+    reason: str | None = None
+    notes: list[str] = Field(default_factory=list)
 
 
 class VesselTarget(BaseModel):
@@ -345,6 +425,17 @@ class VesselTarget(BaseModel):
         validation_alias=AliasChoices("wakeAnalysis", "wake_analysis"),
         serialization_alias="wakeAnalysis",
         description="Measured wake evidence; null when the detector never ran for this target.",
+    )
+
+    polarization_evidence: PolarizationEvidence | None = Field(
+        default=None,
+        validation_alias=AliasChoices("polarizationEvidence", "polarization_evidence"),
+        serialization_alias="polarizationEvidence",
+        description=(
+            "Polarization channel output; null when the channel never ran. "
+            "Evidence only: it does not modify sar_conf, AIS association or "
+            "classification."
+        ),
     )
 
     #: SAR detection confidence, 0..1. Never None: the detector always produced a

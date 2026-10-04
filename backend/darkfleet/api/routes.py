@@ -87,6 +87,7 @@ from darkfleet.api.models import (
     SceneSummary,
     StageEventOut,
     TargetEvidenceResponse,
+    TargetSummaryResponse,
     jsonable,
 )
 from darkfleet.api.targets import ScanScene
@@ -2555,18 +2556,23 @@ def list_detectors() -> DetectorsOut:
     )
 
 
-@router.get("/targets/{target_id}/summary")
+@router.get("/targets/{target_id}/summary", response_model=TargetSummaryResponse)
 def summarise_target(
     target_id: str,
     state: State,
     scan_id: str | None = Query(default=None),
     model_id: str | None = Query(default=None),
-) -> dict[str, Any]:
+) -> TargetSummaryResponse:
     """Optional narrative over an existing evidence document (ADV-011/012).
 
     The evidence document is always returned. The narrative is additive: when it
     is unavailable the caller still has every deterministic observation, and the
     response says so explicitly instead of substituting prose.
+
+    Typed rather than returning `dict[str, Any]` (DF-X7V section 42). An
+    untyped response generates no OpenAPI schema, no TypeScript type and no
+    validator keys, so a change to this payload could not be detected by any
+    consumer -- the contract existed only as a convention nobody could check.
     """
     owners = _locate_target(state, target_id, scan_id)
     owner = owners[0]
@@ -2576,14 +2582,16 @@ def summarise_target(
         owner["target"].get("sar_chip"),
     )
     narrative = summarise(evidence, model_id=model_id)
-    return {
-        "scan_id": str(owner["record"].get("scan_id", "")),
-        "target_id": target_id,
-        "classification": owner["target"].get("cls"),
-        "ambiguous": len(owners) > 1,
-        "evidence": jsonable(evidence),
-        "narrative": narrative,
-    }
+    return TargetSummaryResponse.model_validate(
+        {
+            "scan_id": str(owner["record"].get("scan_id", "")),
+            "target_id": target_id,
+            "classification": owner["target"].get("cls"),
+            "ambiguous": len(owners) > 1,
+            "evidence": jsonable(evidence),
+            "narrative": narrative,
+        }
+    )
 
 # =====================================================================
 # AIS DELIVERY (GREEN-3)

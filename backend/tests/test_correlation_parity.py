@@ -60,6 +60,50 @@ def test_associations_and_classifications_exact() -> None:
         assert abs(g["lat"] - w["lat"]) < 2e-6 and abs(g["lon"] - w["lon"]) < 2e-6
         assert g["corr"]["mmsi"] == (w["corr"]["mmsi"])
         assert g["sarConf"] == w["sarConf"], (g["id"], g["sarConf"], w["sarConf"])
+        # `tags` was originally left unasserted here, and that omission had a
+        # consequence: six Ghost Vessels carried `WAKE_EVIDENCE_PRESENT` in the live
+        # output while the golden omitted it, and every test still passed. `tags` is
+        # where wake evidence surfaces on a target, so asserting classification
+        # without it left the wake channel's only target-level output unchecked.
+        # Asserting it here is what makes the fixture's tag drift impossible to
+        # reintroduce silently.
+        assert g["tags"] == w["tags"], (g["id"], g["tags"], w["tags"])
+
+
+def test_wake_evidence_tag_is_present_only_where_wake_was_detected() -> None:
+    """The tag must be DERIVED from wake analysis, not attached by hand.
+
+    This is the section 23 check applied to the tag: the tag is the only place the
+    wake channel is visible on a target, so if it stopped being derived the wake
+    detector would be back to having no production-visible effect while every
+    other assertion stayed green.
+    """
+    out = _run()
+    detected = {
+        bool((c.get("wakeAnalysis") or {}).get("detected")) for c in GOLDEN["components"]
+    }
+    # Both states must be present, or the test cannot tell a live derivation from a
+    # blanket "tag everything".
+    assert detected == {True, False}, (
+        f"fixture needs both detected and not-detected components, has {detected}"
+    )
+    tagged = {
+        t["id"] for t in out["targets"] if "WAKE_EVIDENCE_PRESENT" in (t.get("tags") or [])
+    }
+    assert tagged, "no target carries WAKE_EVIDENCE_PRESENT; the tag derivation is dead"
+    # The tag must carry information the Ghost Vessel flag does not. 8 of 12
+    # components have a detection, so the tagged set is strictly smaller than "all
+    # Ghost Vessels": a wake is not visible on every hull, and a tag that tracked
+    # Ghost Vessel status exactly would be a restatement of it.
+    ghosts = {t["id"] for t in out["targets"] if t["cls"] == "SAR_UNMATCHED"}
+    assert tagged != ghosts, (
+        "the tag is now identical to the Ghost Vessel set, so it carries no "
+        "independent information"
+    )
+    assert len(tagged) < len(ghosts), (
+        "expected some Ghost Vessels without a detected wake, so the tag is "
+        "distinguishable from Ghost Vessel status"
+    )
 
 
 def test_scores_within_geod_upgrade_band() -> None:

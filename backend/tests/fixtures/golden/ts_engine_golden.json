@@ -539,7 +539,8 @@
       "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     },
     {
@@ -761,7 +762,8 @@
       "assessment": "Unmatched surface radar return (~17m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     },
     {
@@ -792,7 +794,8 @@
       "assessment": "Unmatched surface radar return (~23m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     },
     {
@@ -823,7 +826,8 @@
       "assessment": "Unmatched surface radar return (~16m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     },
     {
@@ -854,7 +858,8 @@
       "assessment": "Unmatched surface radar return (~20m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     },
     {
@@ -885,7 +890,8 @@
       "assessment": "Unmatched surface radar return (~19m). No sufficiently confident AIS association in the available observations.",
       "tags": [
         "SAR_UNMATCHED",
-        "AIS_UNASSOCIATED"
+        "AIS_UNASSOCIATED",
+        "WAKE_EVIDENCE_PRESENT"
       ]
     }
   ]
