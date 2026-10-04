@@ -1,8 +1,27 @@
 """Connected components + spatial moments + SAR chips, ported from the legacy.
 
 Label order matches scan order (like the legacy BFS), so DF-00k IDs are stable.
-Wake sampler is the legacy threshold sampler, kept for parity; Gate CP15
-replaces it with real Radon image analysis (ADV-004/005).
+
+TWO WAKE FIELDS, AND WHY
+
+wake / wakeHdg
+    The legacy _kelvin_sampler: six points on the hull axis against absolute dB
+    thresholds. It cannot detect a Kelvin wake -- a bright hull satisfies it, and a
+    real arm lies about 19.5 degrees off the axis -- and it measured False for all
+    84 stored targets. Correlation still reads these, so every SAR confidence,
+    classification, heading tolerance and assessment narrative is unchanged by the
+    presence of wakeAnalysis.
+
+wakeAnalysis
+    The real detector, nalyse_wake: a 360-degree ray sweep, an arm profile and
+    a symmetric-pair search, reporting its measured contrast, arm geometry,
+    apparent length and method. Evidence only.
+
+Keeping them apart is deliberate. Replacing the legacy verdict outright shifts six
+SAR confidences by exactly the +-0.08 the confidence model grants a wake, and on
+the legacy parity fixture it reassigns two vessels between matched and unmatched.
+That is a decision about whether a detected wake should move detection confidence
+at all, and it should not be made as a side effect of adding a readout.
 """
 
 from __future__ import annotations
@@ -13,8 +32,16 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import label
 
+from .wake import R_END_PX, analyse_wake
+
 CHIP = 24
 HALF_CHIP = CHIP // 2
+
+#: Chip half-width the wake DETECTOR needs. It measures rays out to R_END_PX, so
+#: its chip must contain that reach. HALF_CHIP is the footprint crop used for the
+#: spatial moments and is smaller; passing it produced a chip the ray search could
+#: not fit inside. One pixel of margin keeps the outermost sample in bounds.
+WAKE_HALF_CHIP = int(R_END_PX) + 1
 
 
 def _kelvin_sampler(
@@ -42,6 +69,7 @@ def extract_components(
     db: np.ndarray,
     min_pixels: int = 3,
     max_pixels: int = 1000,
+    pixel_spacing_m: float = 1.0,
 ) -> list[dict[str, Any]]:
     height, width = mask.shape
     labeled, n = label(mask, structure=np.ones((3, 3), dtype=int))
@@ -88,6 +116,23 @@ def extract_components(
         clutter_mean = round(float(clutter_vals.mean()), 1)
 
         wake, wake_hdg = _kelvin_sampler(db, cx, cy, round(orient), width, height)
+
+        # The real detector runs here and is recorded in full, under a name
+        # correlation never reads. `wake` above is still the legacy sampler's
+        # verdict and still drives SAR confidence, classification, heading
+        # tolerance and the assessment narrative -- so routing the measured
+        # detector into those would move six confidences by +-0.08 and reassign two
+        # vessels on the legacy parity fixture. That is an analytical decision
+        # about whether a detected wake should move detection confidence at all,
+        # and it is not one to make as a side effect of adding a readout.
+        #
+        # What this buys immediately, and is the point: the wake EVIDENCE an
+        # investigator needs is real and measured -- method, contrast, arm
+        # geometry, apparent length -- instead of a bare boolean that read False
+        # for all 84 stored targets because nothing ever ran.
+        wake_analysis = analyse_wake(
+            db, cy, cx, round(orient), pixel_spacing_m, half_chip=WAKE_HALF_CHIP
+        )
         out.append(
             {
                 "cx": cx,
@@ -100,6 +145,10 @@ def extract_components(
                 "meanDb": mean_db,
                 "wake": wake,
                 "wakeHdg": wake_hdg,
+                # Measured wake evidence. Named so that no existing consumer of
+                # `wake` can pick these up by accident -- correlation must not
+                # change because a readout was added.
+                "wakeAnalysis": wake_analysis.to_dict(),
                 "bbox": {
                     "minX": xs.min().item(),
                     "minY": ys.min().item(),

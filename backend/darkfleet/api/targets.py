@@ -227,6 +227,44 @@ class AisAssociation(BaseModel):
         return value
 
 
+class WakeEvidence(BaseModel):
+    """What the wake detector measured, and how strongly.
+
+    A wake result is EVIDENCE, not a finding. Every field here is a measurement or
+    a statement about the measurement, and the epistemics are deliberate:
+
+    ``confidence``
+        Bounded evidence strength, never P(wake). It saturates because a stronger
+        arm does not make the geometry more certain, only the contrast evidence
+        stronger. It must never be rendered as a probability.
+
+    ``heading_deg`` / ``wake_direction_deg``
+        Populated ONLY by a detection. A non-detection leaves them null so no
+        surface can draw a wake axis the detector did not observe -- a centroid
+        and a heading are different quantities and neither implies the other.
+
+    ``notes``
+        Never empty. "Not analysed" and "analysed, found nothing" must stay
+        distinguishable, and a caller cannot separate them if the reason is blank.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    detected: bool
+    #: Evidence strength in 0..1. NOT a probability of a wake.
+    confidence: float = Field(ge=0.0, le=1.0)
+    heading_deg: float | None = None
+    wake_direction_deg: float | None = None
+    #: Apparent wake length in METRES. Null unless detected.
+    apparent_length_m: float | None = None
+    #: Measured angle between the arm pair and the hull axis, in degrees.
+    arm_angle_deg: float | None = None
+    #: The analysis method, so a reader knows what was actually run.
+    method: str
+    #: Why this result, in the detector's own words. Never empty.
+    notes: str
+
+
 class VesselTarget(BaseModel):
     """One SAR detection, correlated or not."""
 
@@ -272,6 +310,24 @@ class VesselTarget(BaseModel):
         validation_alias=AliasChoices("geo_centre_offset", "geoCentreOffset"),
         serialization_alias="geoCentreOffset",
         description="Pixel-centre offset applied by the geolocation authority.",
+    )
+
+    #: MEASURED wake evidence from ``sar.wake.analyse_wake``.
+    #:
+    #: Deliberately separate from the legacy ``wake`` boolean. ``wake`` is the
+    #: six-point hull-axis threshold sampler and is what correlation reads, so no
+    #: classification, association or confidence moves because this field exists.
+    #: This is the real detector: a 360-degree ray sweep with a symmetric arm-pair
+    #: search, reporting what it measured and why.
+    #:
+    #: Nullable because a scan run before the detector was wired has none. That is
+    #: "not analysed", which is a different statement from "analysed, found
+    #: nothing", and a surface has to be able to tell them apart.
+    wake_analysis: WakeEvidence | None = Field(
+        default=None,
+        validation_alias=AliasChoices("wakeAnalysis", "wake_analysis"),
+        serialization_alias="wakeAnalysis",
+        description="Measured wake evidence; null when the detector never ran for this target.",
     )
 
     #: SAR detection confidence, 0..1. Never None: the detector always produced a

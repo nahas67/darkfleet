@@ -244,8 +244,16 @@ def run_scan(
     comps = extract_components(
         det["mask"], filtered,
         min_pixels=cfar_config["min_pixels"], max_pixels=cfar_config["max_pixels"],
+        # Wake apparent lengths are reported in METRES, so the detector needs the
+        # ground sample distance. The default of 1.0 would silently report pixels.
+        pixel_spacing_m=float(raster_meta["resolution_m"] or 1.0),
     )
-    log_stage("CFAR", f"{len(comps)} components")
+    _an = sum(1 for c in comps if (c.get("wakeAnalysis") or {}).get("detected"))
+    log_stage(
+        "CFAR",
+        f"{len(comps)} components"
+        + (f"; wake measured on all, {_an} with an arm pair" if comps else ""),
+    )
 
     # ---- GEOLOCATE --------------------------------------------------------
     # GEO-CORR: components carry PIXEL centroids here. They must be turned into

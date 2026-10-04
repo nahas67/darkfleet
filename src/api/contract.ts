@@ -116,6 +116,8 @@ export interface VesselTarget {
   readonly geoPixelCentroid?: number[] | null;
   /** Pixel-centre offset applied by the geolocation authority. */
   readonly geoCentreOffset?: number | null;
+  /** Measured wake evidence; null when the detector never ran for this target. */
+  readonly wakeAnalysis?: WakeEvidence | null;
   readonly sarConf: number;
   readonly aisConf: number;
   readonly lenM: number;
@@ -501,6 +503,18 @@ export interface RejectedCandidate {
   readonly shortfall: number;
 }
 
+export interface WakeEvidence {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly detected: boolean;
+  readonly confidence: number;
+  readonly heading_deg?: number | null;
+  readonly wake_direction_deg?: number | null;
+  readonly apparent_length_m?: number | null;
+  readonly arm_angle_deg?: number | null;
+  readonly method: string;
+  readonly notes: string;
+}
+
 export interface ScanScene {
   readonly provider?: string;
   readonly collection?: string;
@@ -614,6 +628,7 @@ export type ContractSchemaName =
   | 'PatternOut'
   | 'DetectorCardOut'
   | 'RejectedCandidate'
+  | 'WakeEvidence'
   | 'ScanScene'
   | 'ProviderStatus'
   | 'ScanStage'
@@ -749,6 +764,7 @@ export const VESSELTARGET_FIELDS = [
   'lon',
   'geoPixelCentroid',
   'geoCentreOffset',
+  'wakeAnalysis',
   'sarConf',
   'aisConf',
   'lenM',
@@ -1283,6 +1299,23 @@ export const REJECTEDCANDIDATE_FIELDS = [
   'distanceMeters',
   'timeDeltaSeconds',
   'shortfall',
+] as const;
+
+/**
+ * Property names of {@link WakeEvidence} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const WAKEEVIDENCE_FIELDS = [
+  'detected',
+  'confidence',
+  'heading_deg',
+  'wake_direction_deg',
+  'apparent_length_m',
+  'arm_angle_deg',
+  'method',
+  'notes',
 ] as const;
 
 /**

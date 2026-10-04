@@ -342,6 +342,13 @@ def correlate(
                 "lenUncM": len_unc,
                 "hdg": comp["wakeHdg"] if comp["wake"] and comp["wakeHdg"] is not None else comp["orient"],
                 "wake": comp["wake"],
+            # The MEASURED wake evidence, carried separately from the legacy
+            # `wake` boolean above so that no correlation decision can change
+            # because a readout was added. A detector result belongs on the
+            # record: an investigator asking what the wake analysis found needs
+            # the method, the contrast, the measured arm geometry and the
+            # apparent length, not a bare False that meant "never ran".
+            "wakeAnalysis": comp.get("wakeAnalysis"),
                 "meanDb": comp["meanDb"],
                 "maxDb": comp["maxDb"],
                 "area": comp["area"],
