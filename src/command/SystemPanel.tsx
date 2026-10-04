@@ -12,6 +12,7 @@
  */
 
 import { loadProviders } from '../api/client';
+import { engine } from '../globe/engine';
 import { useStore } from '../state/store';
 import { healthColor, healthSeverity } from '../design/tokens';
 import { SHORTCUTS } from './useGlobalKeys';
@@ -74,6 +75,60 @@ function ArchiveCoverageSection() {
   );
 }
 
+/**
+ * Basemap source, live from the controller.
+ *
+ * Kept OUT of `state.providers`, which is the backend's archive-source health. Those
+ * are different axes and both need saying: the backend answers "can this deployment
+ * reach its SAR and AIS sources", this answers "which imagery is on the globe and is
+ * the preferred one still working".
+ *
+ * `SOURCE HEALTH` and `ACTIVE SOURCE` are deliberately separate rows. A provider can
+ * be UNAVAILABLE while a DIFFERENT provider is active, and a single merged label would
+ * make "which imagery am I looking at" unanswerable -- which is the confusion that
+ * makes a fallback look like a silent substitution.
+ */
+function BasemapSection() {
+  const status = engine.basemapStatus();
+
+  if (status === null) {
+    return (
+      <div data-df-basemap="absent">
+        <p className="df-label mb-1.5 text-[10px]">Basemap</p>
+        <p className="text-[11px] text-ink-dim">
+          The globe has not been created, so no basemap source is active.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3" data-df-basemap={status.activeId ?? 'none'}>
+      <p className="df-label mb-1.5 text-[10px]">Basemap</p>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="df-num text-[11px] text-ink">{status.activeLabel ?? NOT_ESTABLISHED}</span>
+        <span
+          className="df-label text-[10px]"
+          style={{ color: status.isFallback ? 'var(--df-amber)' : 'var(--df-green)' }}
+          data-df-basemap-fallback={status.isFallback ? 'true' : 'false'}
+        >
+          {status.isFallback ? 'Fallback active' : 'Active'}
+        </span>
+      </div>
+      {status.notice !== null ? (
+        <p className="pt-1 text-[11px] leading-relaxed text-ink-2" data-df-basemap-notice>
+          {status.notice}
+        </p>
+      ) : null}
+      <p className="pt-1 text-[10px] leading-relaxed text-ink-dim">
+        Reference basemap, not analytical source evidence. It provides geographic context
+        beneath SAR targets and is never an input to detection, correlation or
+        classification.
+      </p>
+    </div>
+  );
+}
+
 export function SystemPanel() {
   const state = useStore();
 
@@ -94,6 +149,7 @@ export function SystemPanel() {
 
       <div className="p-3">
         <ArchiveCoverageSection />
+        <BasemapSection />
 
         <p className="df-label mb-1.5 mt-3 text-[10px]">Source health</p>
         {state.providers.length === 0 ? (

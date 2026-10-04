@@ -260,17 +260,55 @@ body {
 /* Cesium's own chrome is disabled in code; these rules neutralise the residue
    that its widgets stylesheet still lays down, so no control from the library
    appears over the tactical world. */
-.cesium-widget-credits,
 .cesium-viewer-bottom {
   display: none !important;
 }
 
-/* Attribution is never removed. It is restyled to fit the console. */
-.cesium-credit-textContainer,
-.cesium-credit-expand-link {
-  display: none !important;
+/* ---------------------------------------------------------------- attribution
+   DF-X8.3. This block previously hid attribution outright, in three places:
+
+     creditContainer: undefined   in cesiumViewer.ts  -- suppressed the credit
+     .cesium-widget-credits      display: none        -- hid where it rendered
+     .cesium-credit-textContainer display: none       -- hid the text itself
+
+   The comment above it claimed "attribution is never removed" while the rules did
+   precisely that. OpenStreetMap data is ODbL and the credit is a licence obligation,
+   so this was a compliance failure, not a styling choice.
+
+   Attribution is now rendered by DarkFleet in its own visible element and is never
+   hidden at any viewport width. Cesium's inner expand-link chrome stays hidden
+   because it is a control, not a credit -- the credit itself is the text above it. */
+.df-map-credit {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.125rem;
+  max-width: min(22rem, 60vw);
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--df-structural);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--df-void) 82%, transparent);
+  font-family: var(--df-font-mono);
+  font-size: 9px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  color: var(--df-text-dim);
+  text-align: right;
+  pointer-events: none;
 }
 
+/* Hidden by default only when there is genuinely nothing to attribute; `hidden` on
+   the element itself is what removes it, so a real credit can never be styled away. */
+.df-map-credit-item[hidden] {
+  display: none;
+}
+
+/* Cesium's own credit chrome: an expandable control, not the credit text. */
+.cesium-credit-expand-link,
 .cesium-credit-lightbox-overlay {
   display: none !important;
 }

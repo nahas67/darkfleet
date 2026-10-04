@@ -36,8 +36,9 @@ import {
   type Viewer,
 } from 'cesium';
 
-import { initializeCesiumViewer } from './cesiumViewer';
+import { initializeCesiumViewer, type BasemapHandle } from './cesiumViewer';
 import { defaultLayerState, getLayer, type LayerId } from './layerRegistry';
+import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
 import { toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
 
@@ -100,6 +101,10 @@ export class TacticalEngine {
   #aisEntities: Array<unknown> = [];
   #handler: ScreenSpaceEventHandler | null = null;
   #hovered: string | null = null;
+  /** Live basemap ownership, or null before init. */
+  #basemap: BasemapHandle | null = null;
+  /** Recovery-probe interval. Cleared on dispose. */
+  #basemapTimer: number | null = null;
 
   get initialised(): boolean {
     return this.#viewer !== null;
@@ -126,17 +131,74 @@ export class TacticalEngine {
     }
     this.#container = container;
     this.#callbacks = callbacks;
-    Ion.defaultAccessToken = '';
 
-    const viewer = initializeCesiumViewer({ container });
+    /*
+     * The ion token is read from the environment rather than hardcoded to ''.
+     *
+     * This line used to be `Ion.defaultAccessToken = ''`, unconditionally, immediately
+     * before creating the viewer -- which made the `ionToken` parameter of
+     * `initializeCesiumViewer` dead code. Any configured Cesium ion account was
+     * silently ignored.
+     *
+     * Absent a token the keyless OpenStreetMap source is used and the globe opens
+     * normally: no credential is required to start (§27).
+     */
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+    const ionToken = env?.VITE_CESIUM_ION_TOKEN;
+
+    const viewer = initializeCesiumViewer({ container, ionToken });
     viewer.scene.globe.depthTestAgainstTerrain = false;
     this.#viewer = viewer;
+    this.#basemap = viewer.basemap ?? null;
+
+    /*
+     * Recovery probe.
+     *
+     * A provider that failed is retried only after the controller's cooldown, so a
+     * flapping source cannot swap the basemap repeatedly. The interval is shorter than
+     * the cooldown, which means the probe simply finds itself not yet eligible -- the
+     * controller owns the timing, this only provides the tick.
+     */
+    this.#basemapTimer = window.setInterval(() => {
+      if (!this.#basemap) return;
+      const before = this.#basemap.status().activeId;
+      const after = this.#basemap.controller.maybeRecover();
+      if (after.activeId !== before) {
+        this.#applyBasemapSource();
+        this.#basemap.syncCredit();
+      }
+    }, 15_000);
 
     this.#handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     this.#installPicking();
     this.#installCameraTelemetry(viewer);
 
     return viewer;
+  }
+
+  /**
+   * Push the controller's active source onto the globe.
+   *
+   * Delegates to the basemap handle, which owns the imagery layer bookkeeping -- the
+   * listener detach, the old layer removal and the new layer addition all live in one
+   * place. Duplicating that here is how a second basemap layer accumulates.
+   *
+   * The camera, selection, overlays, timeline and workspace are untouched: only
+   * `imageryLayers` changes, which is why fallback cannot disturb analytical geometry.
+   */
+  #applyBasemapSource(): void {
+    this.#basemap?.applyActive();
+  }
+
+  /**
+   * The live basemap status, for the system panel.
+   *
+   * Source HEALTH and the ACTIVE source are separate facts and are reported as
+   * separate fields. A provider can be UNAVAILABLE while a DIFFERENT one is active,
+   * and collapsing those into one label is exactly the confusion §26 forbids.
+   */
+  basemapStatus(): MapSourceStatus | null {
+    return this.#basemap?.status() ?? null;
   }
 
   /* ----------------------------------------------------------- lifecycle */
@@ -153,7 +215,20 @@ export class TacticalEngine {
     this.#targetEntities.clear();
     this.#trackEntities = [];
     this.#linkEntities = [];
+    this.#uncertaintyEntities = [];
     this.#rasterProvider = null;
+    this.#rasterLayer = null;
+
+    // The recovery probe must stop, or it keeps calling into a disposed controller.
+    if (this.#basemapTimer !== null) {
+      window.clearInterval(this.#basemapTimer);
+      this.#basemapTimer = null;
+    }
+    // Detaches the provider error listener and removes the basemap imagery layer
+    // before the viewer goes away.
+    this.#basemap?.dispose();
+    this.#basemap = null;
+
     this.#viewer = null;
   }
 
