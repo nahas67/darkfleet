@@ -281,7 +281,16 @@ body {
 .df-map-credit {
   position: absolute;
   right: 0.5rem;
-  bottom: 0.5rem;
+  /*
+   * Sits ABOVE Cesium's own credit bar rather than inside it.
+   *
+   * When this element was passed as Cesium's `creditContainer`, Cesium injected its own
+   * markup -- including the ion logo -- into it, and the logo overlapped the
+   * attribution until the credit was unreadable. Cesium keeps its default container and
+   * this one is offset clear of it. Attribution that is present but illegible is not
+   * compliance either.
+   */
+  bottom: 1.9rem;
   z-index: 20;
   display: flex;
   flex-direction: column;

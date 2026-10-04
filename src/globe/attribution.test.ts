@@ -50,8 +50,18 @@ describe('the viewer is not configured to suppress attribution', () => {
     expect(source).not.toMatch(/creditContainer\s*:\s*(undefined|void 0|null)/);
   });
 
-  it('passes a real credit element to Cesium', () => {
-    expect(source).toMatch(/creditContainer\s*:\s*credit\.root/);
+  it('does not hand Cesium our credit element', () => {
+    /*
+     * Passing our own element as `creditContainer` made Cesium inject its own markup --
+     * including the ion logo -- INSIDE our styled box, where it overlapped the
+     * attribution until the credit was unreadable. Cesium keeps its default container
+     * and ours is offset clear of it.
+     *
+     * So the assertion is the opposite of what the first version of this test wanted:
+     * `creditContainer: undefined` suppresses the credit and is forbidden, while
+     * passing our element corrupts its layout. The key must simply be ABSENT.
+     */
+    expect(source).not.toMatch(/creditContainer\s*:/);
   });
 
   it('creates a visible credit element with per-source slots', () => {

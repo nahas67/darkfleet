@@ -166,6 +166,23 @@ export function initializeCesiumViewer({
    * `undefined` here would suppress it, which is the defect this whole arrangement
    * exists to reverse.
    */
+  /*
+   * `creditContainer` is deliberately NOT set.
+   *
+   * Passing our own element made Cesium inject its OWN credit markup -- including the
+   * Cesium ion logo -- inside our styled box. The ion logo then overlapped the
+   * attribution text and rendered it unreadable, which defeats the purpose of
+   * restoring the credit at all. Attribution that is present but illegible is not
+   * compliance.
+   *
+   * Cesium therefore builds its default credit container, and our attribution is a
+   * SEPARATE element positioned above it (see `.df-map-credit` bottom offset in
+   * `tokens.css`). Neither covers the other, and both remain visible.
+   *
+   * Passing `creditContainer: undefined` is still forbidden and still guarded by a
+   * test -- that suppresses the credit entirely. Omitting the key lets Cesium place its
+   * own, which is the different thing we want.
+   */
   const viewerOptions: Record<string, unknown> = {
     baseLayer: false,
     baseLayerPicker: false,
@@ -179,7 +196,6 @@ export function initializeCesiumViewer({
     navigationHelpButton: false,
     fullscreenButton: false,
     vrButton: false,
-    creditContainer: credit.root,
   };
 
   const viewer = new Viewer(container, viewerOptions) as Viewer & {
