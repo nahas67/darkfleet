@@ -40,6 +40,14 @@ import {
 
 import { initializeCesiumViewer, type BasemapHandle } from './cesiumViewer';
 import { defaultLayerState, getLayer, type LayerId } from './layerRegistry';
+import {
+  AisContactRenderer,
+  type ContactRenderStats,
+  type PredictedPoint,
+  type RenderableContact as AisRenderableContact,
+} from './aisRenderer';
+import { displayStateOf } from '../ais/displayState';
+import type { AisObservationOut } from '../api/contract';
 import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
 import { toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
@@ -101,6 +109,27 @@ export class TacticalEngine {
   #graticuleProvider: ImageryLayer | null = null;
   #footprintEntity: unknown = null;
   #aisEntities: Array<unknown> = [];
+  /**
+   * The retained AIS renderer, or null before the first `setAisContacts`.
+   *
+   * OWNED BY THE ENGINE but BUILT BY `aisRenderer.ts`, which holds five separate collections --
+   * contacts, labels, observation markers, tracks, predicted -- one per AIS layer concern.
+   *
+   * EXPLICIT OWNERSHIP IS THE POINT (DF-X9 section 23). DF-X8 had to fix a defect where
+   * `uncertainty` and `correlation` shared one array, so toggling one cleared the other; and
+   * `AIS_PREDICTED` shared a renderer with `AIS_TRACKS` and could only be told apart by entity
+   * NAME, which is why its toggle was inert. Separate retained collections make AIS layer
+   * independence structural rather than a naming convention a later edit could quietly break.
+   */
+  #aisRenderer: AisContactRenderer | null = null;
+  /** Full observation history per MMSI, so `DERIVED_TRACK` orientation has two fixes to work from. */
+  #aisSeriesByMmsi = new Map<string, AisObservationOut[]>();
+  /** The selected AIS contact, for selection styling and label priority. */
+  #selectedAisMmsi: string | null = null;
+  /** Contacts associated with the selected SAR target. Emphasis only; never classification. */
+  #associatedAisMmsis = new Set<string>();
+  #aisStats: ContactRenderStats | null = null;
+  #aisRenderFailure: string | null = null;
   /**
    * Maritime reference entities, kept in SEPARATE arrays per layer.
    *
@@ -258,6 +287,17 @@ export class TacticalEngine {
     this.#basemap?.dispose();
     this.#basemap = null;
 
+    /*
+     * The AIS renderer owns five collections added to `scene.primitives`. They are destroyed
+     * EXPLICITLY here rather than left to the viewer's teardown, because a retained collection that
+     * outlives its viewer holds GPU buffers and a per-contact `Map`, and the memory-trend requirement
+     * asks whether repeated load/clear cycles return to baseline.
+     */
+    this.destroyAisRenderer();
+    this.#selectedAisMmsi = null;
+    this.#associatedAisMmsis = new Set();
+    this.#aisStats = null;
+
     this.#viewer = null;
   }
 
@@ -368,44 +408,206 @@ export class TacticalEngine {
    * An AIS-only contact is an open question about coverage and detection
    * threshold, not a finding about the vessel.
    */
+  /**
+   * AIS contacts, drawn by the retained `AisContactRenderer`.
+   *
+   * WHY THIS DELEGATES. The previous implementation added one Cesium `Entity` per contact, each
+   * with a `PointGraphics`. `PointGraphics` has no `rotation` property, so a contact could not
+   * point anywhere -- the glyph was incapable of showing direction, not merely unstyled. It also
+   * set `disableDepthTestDistance: Infinity`, which drew contacts THROUGH the globe, and carried a
+   * label as a second Entity per contact.
+   *
+   * The renderer owns its own retained collections, keyed by MMSI, and updates billboards in
+   * place. See `globe/aisRenderer.ts` for the orientation and drawability rules.
+   *
+   * A FAILURE DEGRADES, IT DOES NOT THROW. If the renderer cannot be constructed -- no WebGL
+   * context, most likely -- the contacts are dropped and the reason recorded. Losing the AIS layer
+   * is recoverable; taking down the whole tactical view because a decorative layer could not build
+   * is not.
+   */
   setAisContacts(
-    contacts: ReadonlyArray<{ mmsi: string; lat: number; lon: number }>,
+    contacts: ReadonlyArray<{
+      mmsi: string;
+      lat: number;
+      lon: number;
+      /** Null when the vessel reported nothing. Never substituted with 0. */
+      sog: number | null;
+      /** Null when the vessel reported nothing. Never substituted with 0. */
+      cog: number | null;
+      /** Null when the vessel reported nothing. Never substituted with 0. */
+      heading: number | null;
+      timestamp: string;
+      shipName: string | null;
+      /** Display state, computed by the caller from the observation series. */
+      display?: AisRenderableContact['state'];
+    }>,
+    options?: {
+      referenceTimeIso?: string | null;
+      predicted?: readonly PredictedPoint[];
+      observationMarkers?: readonly {
+        mmsi: string;
+        lat: number;
+        lon: number;
+        at: string;
+      }[];
+      tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number }>>;
+    },
   ): void {
     const viewer = this.#viewer;
     if (!viewer) return;
-    for (const entity of this.#aisEntities) {
+
+    let renderer = this.#aisRenderer;
+    if (!renderer) {
       try {
-        viewer.entities.remove(entity as never);
-      } catch {
-        /* already gone */
+        renderer = new AisContactRenderer(viewer);
+        this.#aisRenderer = renderer;
+      } catch (error) {
+        /*
+         * DEGRADE, DO NOT THROW.
+         *
+         * Losing the AIS layer is recoverable -- the operator sees fewer contacts and the rest of
+         * the tactical view keeps working. Taking down the whole view because a decorative layer
+         * could not build is not. The reason is RECORDED rather than swallowed, because a silently
+         * absent layer is indistinguishable from an empty archive.
+         */
+        this.#aisRenderFailure =
+          error instanceof Error ? error.message : 'unknown renderer failure';
+        return;
       }
     }
-    this.#aisEntities = [];
+
+    // A later successful build clears an earlier failure, so a transient context loss does not
+    // leave a permanent "cannot draw" reason behind.
+    this.#aisRenderFailure = null;
+
+    /*
+     * THE OBSERVATION SERIES, per MMSI.
+     *
+     * Orientation precedence needs more than one observation: deriving a heading from recent
+     * movement requires two fixes that are far enough apart to define a bearing. `AisContact`
+     * carries only the latest fix per vessel, so the renderer is handed whatever series the caller
+     * has, and a contact with no series falls back to its own reported values -- which is enough
+     * for HEADING and COG but not for DERIVED_TRACK.
+     */
+    const seriesByMmsi = new Map<string, AisObservationOut[]>();
+    for (const contact of contacts) {
+      const series: AisObservationOut[] = [
+        {
+          timestamp: contact.timestamp,
+          mmsi: contact.mmsi,
+          lat: contact.lat,
+          lon: contact.lon,
+          sog: contact.sog,
+          cog: contact.cog,
+          heading: contact.heading,
+          ship_name: contact.shipName,
+          source: null,
+        },
+      ];
+      seriesByMmsi.set(contact.mmsi, series);
+    }
+    for (const [mmsi, extra] of this.#aisSeriesByMmsi) {
+      const existing = seriesByMmsi.get(mmsi);
+      if (existing) seriesByMmsi.set(mmsi, [...extra, ...existing]);
+    }
+
+    const renderable: AisRenderableContact[] = [];
     for (const contact of contacts) {
       if (!Number.isFinite(contact.lat) || !Number.isFinite(contact.lon)) continue;
-      this.#aisEntities.push(
-        viewer.entities.add({
-          name: `ais:${contact.mmsi}`,
-          position: Cartesian3.fromDegrees(contact.lon, contact.lat),
-          point: {
-            pixelSize: 8,
-            color: Color.fromCssColorString('#3FA9C4').withAlpha(0.75),
-            outlineColor: Color.fromCssColorString('#040705'),
-            outlineWidth: 1.5,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-          label: {
-            text: contact.mmsi,
-            font: '10px "JetBrains Mono", monospace',
-            fillColor: Color.fromCssColorString('#3FA9C4'),
-            outlineColor: Color.fromCssColorString('#040705'),
-            outlineWidth: 2,
-            pixelOffset: new Cartesian2(11, -11),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        }),
-      );
+      const series = seriesByMmsi.get(contact.mmsi) ?? [];
+      const reference = options?.referenceTimeIso ?? null;
+      const display =
+        contact.display ??
+        // No reference instant means freshness is UNKNOWN, so the state cannot be asserted. The
+        // contact is still drawn at its own latest fix -- hiding it would imply the archive is
+        // empty, which is a different claim.
+        (reference
+          ? displayStateOf(series, reference)
+          : {
+              ...displayStateOf(series, contact.timestamp),
+              freshness: {
+                tier: 'LOST' as const,
+                ageSeconds: null,
+                labelSeconds: null,
+                thresholdReason:
+                  'No reference instant is established, so freshness cannot be determined.',
+              },
+            });
+      renderable.push({
+        mmsi: contact.mmsi,
+        state: display,
+        selected: this.#selectedAisMmsi === contact.mmsi,
+        associated: this.#associatedAisMmsis.has(contact.mmsi),
+      });
     }
+
+    this.#aisStats = renderer.render({
+      contacts: renderable,
+      predicted: options?.predicted ?? [],
+      referenceTimeIso: options?.referenceTimeIso ?? '',
+      observationMarkers: options?.observationMarkers,
+      tracks: options?.tracks,
+      visibility: {
+        contacts: this.#isVisible('AIS_CONTACTS'),
+        tracks: this.#isVisible('AIS_TRACKS'),
+        predicted: this.#isVisible('AIS_PREDICTED'),
+      },
+    });
+  }
+
+  /**
+   * Feed the renderer the full observation history per vessel.
+   *
+   * Separate from `setAisContacts` because the two arrive from different routes: the CONTACT list
+   * comes from the scan-targets response, while the SERIES comes from the AIS archive. Without
+   * this, `DERIVED_TRACK` orientation could never fire, since one fix cannot define a bearing.
+   */
+  setAisObservationSeries(series: ReadonlyMap<string, readonly AisObservationOut[]>): void {
+    this.#aisSeriesByMmsi = new Map(
+      [...series.entries()].map(([mmsi, rows]) => [mmsi, [...rows]]),
+    );
+  }
+
+  /** Which AIS contact is selected, for the renderer's selection styling and label priority. */
+  setAisSelection(mmsi: string | null): void {
+    this.#selectedAisMmsi = mmsi;
+  }
+
+  /** Which AIS contacts the current SAR target is associated with. Emphasis only. */
+  setAssociatedAisMmsis(mmsis: readonly string[]): void {
+    this.#associatedAisMmsis = new Set(mmsis);
+  }
+
+  /**
+   * Why the AIS layer is not drawing, or null when it is.
+   *
+   * Exposed so the failure is visible to the operator rather than being a silently empty layer,
+   * which is indistinguishable from an archive with no observations.
+   */
+  get aisRenderFailureReason(): string | null {
+    return this.#aisRenderFailure;
+  }
+
+  /** Renderer counters, for the performance harness and the browser E2E. */
+  get aisRenderStats(): ContactRenderStats {
+    return (
+      this.#aisStats ?? {
+        contacts: 0, billboards: 0, labels: 0, labelsShown: 0, labelsSuppressed: 0,
+        reusedBillboards: 0, createdBillboards: 0, removedBillboards: 0, lastBuildMs: 0,
+      }
+    );
+  }
+
+  /** MMSA currently drawn, for the browser E2E. */
+  get drawnAisMmsis(): string[] {
+    return this.#aisRenderer?.drawnMmsis() ?? [];
+  }
+
+  /** Teardown. Called with the viewer. */
+  destroyAisRenderer(): void {
+    this.#aisRenderer?.destroy();
+    this.#aisRenderer = null;
+    this.#aisSeriesByMmsi = new Map();
   }
 
   /**
@@ -1085,7 +1287,9 @@ export class TacticalEngine {
 
     for (const { entity } of this.#targetEntities.values()) apply('SAR_DETECTIONS', entity);
     applyEach('UNCERTAINTY_RADII', this.#uncertaintyEntities);
-    applyEach('AIS_CONTACTS', this.#aisEntities);
+    // AIS_CONTACTS is applied INSIDE the renderer, which owns its own retained collections.
+    // Applying it here as well would toggle an array the renderer no longer uses -- the old
+    // `#aisEntities`, which is now empty and kept only so the picking and visibility paths compile.
     applyEach('SAR_SCENE_FOOTPRINT', this.#footprintEntity ? [this.#footprintEntity] : []);
     applyEach('CORRELATION_LINKS', this.#linkEntities);
     // Maritime reference layers, each from its OWN array. Sharing one array would make a
@@ -1102,12 +1306,28 @@ export class TacticalEngine {
      * why those names are set explicitly in the renderer rather than left to Cesium's
      * default: the mapping depends on them.
      */
+    /*
+     * `AIS_TRACKS` and `AIS_PREDICTED` are applied INSIDE the renderer now.
+     *
+     * They used to share one entity array and could only be told apart by entity NAME, which is
+     * precisely why `AIS_PREDICTED` was an inert toggle: the only caller passed `predicted = null`,
+     * so its branch never matched anything while the layer still read as enabled.
+     *
+     * The renderer now owns a separate collection for each, so the two are structurally independent
+     * rather than distinguished by a substring.
+     */
     for (const entity of this.#trackEntities) {
       const name = this.#entityName(entity);
+      // The dossier track path still uses these entities, so both layers keep applying to them.
       if (name.includes('predicted')) apply('AIS_PREDICTED', entity);
       else if (name === 'ais-fix') apply('AIS_CONTACTS', entity);
       else apply('AIS_TRACKS', entity);
     }
+    this.#aisRenderer?.setVisibility({
+      contacts: this.#isVisible('AIS_CONTACTS'),
+      tracks: this.#isVisible('AIS_TRACKS'),
+      predicted: this.#isVisible('AIS_PREDICTED'),
+    });
 
     if (this.#rasterLayer) this.#rasterLayer.show = this.#isVisible('SAR_RASTER');
     if (this.#graticuleProvider) this.#graticuleProvider.show = this.#isVisible('GRATICULE');

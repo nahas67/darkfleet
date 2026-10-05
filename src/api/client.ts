@@ -445,6 +445,23 @@ function latestPerVessel(
   return [...byVessel.values()];
 }
 
+/**
+ * The END of a coverage window, when it declares one.
+ *
+ * A fallback only. Used when neither the scan's acquisition time nor a stored scene carries one,
+ * and the AIS window is still a real answer: it is the interval the backend itself reported as
+ * relevant. The window's START would be wrong, since it would place the reference before the
+ * contacts it is meant to describe.
+ */
+function windowEndOf(payload: ScanAisResponse): string | null {
+  const window = (payload as { window?: unknown }).window;
+  if (!Array.isArray(window) || window.length < 2) return null;
+  const candidate = window[1];
+  return typeof candidate === 'string' && Number.isFinite(Date.parse(candidate))
+    ? candidate
+    : null;
+}
+
 export async function loadScanAis(scanId: string): Promise<void> {
   try {
     const raw = await api.get<unknown>(`/api/scans/${scanId}/ais`);
@@ -499,7 +516,29 @@ export async function loadScanAis(scanId: string): Promise<void> {
       heading: observation.heading ?? null,
     }));
 
-    store.set({ aisCoverage: coverage, aisOnly, aisObservations: observations });
+    /*
+     * The temporal authority, resolved here and stored explicitly.
+     *
+     * The AIS window this response describes is itself the best answer available: it is the
+     * interval the product decided was relevant, it comes from the backend rather than from a
+     * guess, and it is set even when the observations array is empty. The scan's acquisition time
+     * is preferred where one exists, because that is the instant the detections describe and the
+     * instant correlation propagated positions to.
+     *
+     * NEVER `Date.now()`. With no live feed that would mark the entire archive stale and assert
+     * every vessel had stopped transmitting.
+     */
+    const acquisition =
+      (payload as { acquisition_time?: string | null }).acquisition_time ??
+      (store.getState().scene?.acquisition_time ?? null);
+    const referenceTime = acquisition ?? windowEndOf(payload) ?? null;
+
+    store.set({
+      aisCoverage: coverage,
+      aisOnly,
+      aisObservations: observations,
+      aisReferenceTime: referenceTime,
+    });
   } catch (error) {
     store.set({
       aisCoverage: {
@@ -515,6 +554,10 @@ export async function loadScanAis(scanId: string): Promise<void> {
        */
       aisOnly: [],
       aisObservations: [],
+      // Cleared WITH the contacts. Leaving a reference time from a previous scan would measure
+      // this scan's freshness against another scan's instant, which is how a contact drawn from
+      // the wrong window reads as current.
+      aisReferenceTime: null,
     });
   }
 }

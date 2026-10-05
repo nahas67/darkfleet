@@ -19,6 +19,64 @@ import { isLayerId, type LayerId } from '../globe/layerRegistry';
 import { isWebGLAvailable } from '../globe/cesiumViewer';
 import { store, useStore } from '../state/store';
 import { fmt, fmtLatLon } from '../design/format';
+import type { PredictedPoint } from '../globe/aisRenderer';
+import type { AisObservationOut, VesselTarget } from '../api/contract';
+
+/**
+ * Observed track polylines, one per MMSI.
+ *
+ * Built from the ARCHIVE observations rather than the contact projection: a contact carries only
+ * the latest fix, and one point is not a track. A vessel with fewer than two observations
+ * contributes no entry, and the renderer drops it again -- stated in both places, because "one
+ * point is a track" is exactly the claim DF-X9 section 50 forbids.
+ *
+ * NOT segmented against the interpolation interval here. Gap-aware segmentation belongs to
+ * DF-X9.4's track engine, and doing half of it now would put a break rule in one layer and not in
+ * the other.
+ */
+function buildTrackGeometries(
+  observations: readonly AisObservationOut[],
+): Map<string, Array<{ lat: number; lon: number }>> {
+  const byMmsi = new Map<string, Array<{ lat: number; lon: number }>>();
+  for (const observation of [...observations].sort(
+    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+  )) {
+    const fixes = byMmsi.get(observation.mmsi) ?? [];
+    fixes.push({ lat: observation.lat, lon: observation.lon });
+    byMmsi.set(observation.mmsi, fixes);
+  }
+  for (const [mmsi, fixes] of [...byMmsi]) {
+    if (fixes.length < 2) byMmsi.delete(mmsi);
+  }
+  return byMmsi;
+}
+
+/**
+ * The analytical PREDICTED positions, read from the scan record.
+ *
+ * `corr.predictedLat` / `predictedLon` are computed by the BACKEND during the scan and persisted
+ * with the target. They are read here and nowhere else derived: a client-side projection would be a
+ * second prediction competing with the analytical one, and the operator could not tell which they
+ * were looking at.
+ *
+ * This is what finally gives `AIS_PREDICTED` something to draw. The toggle declared
+ * `defaultVisibility: true` while its only caller passed `null`, so it read as enabled and rendered
+ * nothing -- an inert control, which is the DF-X8 defect class.
+ */
+function collectPredictedPoints(targets: readonly VesselTarget[]): PredictedPoint[] {
+  const points: PredictedPoint[] = [];
+  for (const target of targets) {
+    const corr = target.corr;
+    const lat = corr?.predictedLat;
+    const lon = corr?.predictedLon;
+    const mmsi = corr?.mmsi;
+    if (typeof lat !== 'number' || typeof lon !== 'number') continue;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (typeof mmsi !== 'string' || mmsi === '') continue;
+    points.push({ mmsi, lat, lon, atSarTime: '' });
+  }
+  return points;
+}
 
 export type TacticalWorldProps = {
   /** Rendered when WebGL is unavailable, so the failure is legible. */
@@ -35,6 +93,39 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   const targets = state.targets;
   const selection = state.selection;
   const rasterBounds = engine.rasterBounds;
+
+  /*
+   * The AIS observation history, handed to the renderer so orientation can use more than one fix.
+   * `AisContact` carries only the latest fix per vessel, and DERIVED_TRACK orientation needs two
+   * fixes far enough apart to define a bearing.
+   */
+  useEffect(() => {
+    if (!webgl || initError !== null) return;
+    const series = new Map<string, AisObservationOut[]>();
+    for (const observation of state.aisObservations) {
+      const rows = series.get(observation.mmsi) ?? [];
+      rows.push(observation);
+      series.set(observation.mmsi, rows);
+    }
+    engine.setAisObservationSeries(series);
+  }, [state.aisObservations, webgl, initError]);
+
+  /*
+   * Selection and association, forwarded to the renderer.
+   *
+   * The renderer needs to know these to style the selected contact and to give its label top
+   * arbitration priority. Association is EMPHASIS ONLY: a linked AIS vessel is drawn and labelled
+   * more prominently, and that is the entire effect. Correlation acceptance is backend-authoritative
+   * and is not recomputed here.
+   */
+  useEffect(() => {
+    if (!webgl || initError !== null) return;
+    engine.setAisSelection(selection.kind === 'mmsi' ? selection.mmsi : null);
+    const associated = (state.targetDetail ?? [])
+      .map((t) => t.corr?.mmsi)
+      .filter((mmsi): mmsi is string => typeof mmsi === 'string' && mmsi !== '');
+    engine.setAssociatedAisMmsis(associated);
+  }, [selection, state.targetDetail, webgl, initError]);
 
   useEffect(() => {
     // Camera telemetry is written to the store so the navigation HUD stays
@@ -92,9 +183,39 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
           radiusM: t.geolocationUncertaintyM as number,
         })),
     );
-    // AIS-only contacts, from real delivered state.
+    /*
+     * AIS CONTACTS, from the archive-derived projection.
+     *
+     * Every field is passed through. `sog`, `cog` and `heading` used to be dropped here and forced
+     * to `null`, which was the reason no contact could be oriented: the types were present and the
+     * values were thrown away at the projection boundary, making a vessel that reported nothing
+     * indistinguishable from one whose kinematics were never read.
+     *
+     * The reference instant is the store's explicit temporal authority. It is null when none has
+     * been established, which the renderer treats as UNKNOWN freshness rather than as current.
+     */
     engine.setAisContacts(
-      state.aisOnly.map((contact) => ({ mmsi: contact.mmsi, lat: contact.lat, lon: contact.lon })),
+      state.aisOnly.map((contact) => ({
+        mmsi: contact.mmsi,
+        lat: contact.lat,
+        lon: contact.lon,
+        sog: contact.sog,
+        cog: contact.cog,
+        heading: contact.heading,
+        timestamp: contact.timestamp,
+        shipName: contact.shipName,
+      })),
+      {
+        referenceTimeIso: state.aisReferenceTime,
+        observationMarkers: state.aisObservations.map((o) => ({
+          mmsi: o.mmsi,
+          lat: o.lat,
+          lon: o.lon,
+          at: o.timestamp,
+        })),
+        tracks: buildTrackGeometries(state.aisObservations),
+        predicted: collectPredictedPoints(state.targetDetail),
+      },
     );
     // The setters above CLEAR and re-add their entities, and Cesium gives every new
     // entity `show = true`. Without this the layer toggles would be authoritative only

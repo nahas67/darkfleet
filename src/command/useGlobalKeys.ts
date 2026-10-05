@@ -74,7 +74,6 @@ export function useGlobalKeys(): void {
         case 'H':
           event.preventDefault();
           engine.resetCamera();
-          store.set({ followingMmsi: null });
           break;
         case 'l':
         case 'L':

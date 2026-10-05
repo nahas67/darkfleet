@@ -602,6 +602,23 @@ export class AisContactRenderer {
     if (visibility.predicted !== undefined) this.#predicted.show = visibility.predicted;
   }
 
+  /**
+   * Apply layer visibility alone, with no render.
+   *
+   * SEPARATE FROM `render` ON PURPOSE. A layer toggle must not rebuild geometry: it changes one
+   * boolean per collection, and nothing else. Routing a toggle through `render` would re-project
+   * every label, re-upload any glyph whose image changed, and re-add every polyline -- which is
+   * exactly the churn DF-X9 section 57 forbids for a time tick and would be worse for a toggle the
+   * operator may flick rapidly.
+   */
+  setVisibility(visibility: {
+    contacts?: boolean;
+    tracks?: boolean;
+    predicted?: boolean;
+  }): void {
+    this.#applyVisibility(visibility);
+  }
+
   /** Exposed for the browser E2E and the performance harness. */
   get stats(): ContactRenderStats {
     return { ...this.#lastStats, billboards: this.#contacts.length, labels: this.#labels.length };

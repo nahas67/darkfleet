@@ -211,8 +211,25 @@ export type State = {
   savedAois: Array<{ name: string; bbox: BBox }>;
   cursor: { lat: number; lon: number } | null;
   viewMode: ViewMode;
-  /** A target the camera should keep on, or null for free navigation. */
-  followingMmsi: string | null;
+  /**
+   * AIS camera-follow mode. DEFERRED TO DF-X9.6, AND NO CONTROL SETS IT.
+   *
+   * This field previously existed as `followingMmsi` and was written from two places --
+   * `select()` set it on every AIS selection, and the `H` key cleared it -- while NO code ever
+   * READ it. The camera did not follow anything.
+   *
+   * Two ways to remove a dead write were available: wire it fully, or make the absence visible.
+   * Full follow needs chase and oblique camera modes, manual-release semantics and a temporal
+   * tick driving it, which is DF-X9.6's whole scope and explicitly deferred from DF-X9.3. So the
+   * field is RENAMED to describe what it now is -- a declared intent with no consumer -- and both
+   * writes are removed rather than left doing nothing.
+   *
+   * A rename is chosen over deletion because a future implementer needs somewhere to land, and a
+   * comment saying "there is no control for this" is discoverable in a way that an absent field is
+   * not. No UI element writes it: there is no shipped operator control that appears to do
+   * something and does nothing, which is what DF-X9.3 section 66 forbids.
+   */
+  aisFollowMode: 'OFF' | 'CENTER' | 'FOLLOW' | 'CHASE';
   /** Camera altitude in metres, metres; null until the camera reports one. */
   cameraAltitude: number | null;
 
@@ -265,6 +282,21 @@ export type State = {
   track: VesselTrack | null;
   trackLoading: boolean;
   aisCoverage: Coverage | null;
+  /**
+   * The EXPLICIT instant the product is analysing, as an ISO string.
+   *
+   * This is the temporal authority for every freshness and interpolation decision, and it is
+   * deliberately NOT a wall clock. The deployment has no live AIS feed -- `/api/scans/{id}/events`
+   * carries scan-stage lifecycle only, and `GET /api/ais/coverage` reports `NOT_CONFIGURED` -- so
+   * measuring freshness against `Date.now()` would mark every archived contact stale and assert
+   * that every vessel stopped transmitting. That is a confident false claim about a machine that
+   * has never claimed live tracking.
+   *
+   * It resolves, in order: an operator-chosen timeline position, then the scan's acquisition time,
+   * then null. A null reference time means freshness is UNKNOWN rather than CURRENT, because a
+   * contact cannot be shown to be current against an instant nobody has established.
+   */
+  aisReferenceTime: string | null;
 
   /* --- catalogue --- */
   scenes: SceneSummary[];
@@ -337,7 +369,7 @@ const initialState: State = {
   savedAois: [],
   cursor: null,
   viewMode: 'OBLIQUE',
-  followingMmsi: null,
+  aisFollowMode: 'OFF',
   cameraAltitude: null,
 
   scanId: null,
@@ -358,6 +390,7 @@ const initialState: State = {
   track: null,
   trackLoading: false,
   aisCoverage: null,
+  aisReferenceTime: null,
 
   scenes: [],
   scenesLoading: false,
@@ -454,7 +487,16 @@ class Store {
       if ('sceneId' in current && 'sceneId' in selection && current.sceneId === selection.sceneId) return;
       if (current.kind === 'none') return;
     }
-    this.set({ selection, followingMmsi: selection.kind === 'mmsi' ? selection.mmsi : null });
+    /*
+     * Selecting a contact does NOT move the camera, and selection must not imply follow.
+     *
+     * This used to write `followingMmsi` here, on the reasoning that selecting a vessel should
+     * start following it. Nothing ever read it, so selecting a contact appeared to arm a follow
+     * mode that did not exist -- an operator-visible implication with no behaviour behind it.
+     * Camera follow is DF-X9.6, and it will be driven by an explicit operator control rather than
+     * as a side effect of selecting something.
+     */
+    this.set({ selection });
   };
 }
 
