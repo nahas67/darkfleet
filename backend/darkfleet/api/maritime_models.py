@@ -67,6 +67,17 @@ class SourceRef(StrictModel):
     #: Publisher release date or data currency, when the source declares one. For the
     #: World Port Index this is 2019-08-31, which is the whole reason it is shown.
     release_date: str | None = None
+    #: When a SERVICE SNAPSHOT was taken, ISO-8601 UTC.
+    #:
+    #: The version-like fact a live service carries when it publishes no version string.
+    #: The Marine Regions WFS is exactly that case -- its layers have no version and its
+    #: metadata documents are unauthenticated -- so this timestamp is the only thing that
+    #: distinguishes one snapshot from another. Without it the UI would have to print
+    #: either a version it cannot prove or nothing at all about when the data was read.
+    #:
+    #: Null for a static download, where ``release_date`` is the meaningful fact and a
+    #: retrieval time would be noise.
+    retrieved_at: str | None = None
     terms_notes: str = ""
     limitations: tuple[str, ...] = ()
     coverage_note: str = ""

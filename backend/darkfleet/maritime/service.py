@@ -104,6 +104,14 @@ def _provenance_to_ref(
     provenance: DatasetProvenance | None, install_status: InstallStatus, dataset_id: str,
     data_dir: Path,
 ) -> SourceRef | None:
+    """Build a :class:`SourceRef` from what is on disk.
+
+    ``retrieved_at`` comes from the manifest rather than being stamped here. That is the
+    whole point: for a service snapshot the retrieval time is the only version-like fact
+    the publisher gave us, and it must be the time the snapshot was actually taken -- not
+    the time this response happened to be rendered, which would change on every read and
+    silently imply the data was refreshed.
+    """
     if provenance is None:
         return source_ref(None, dataset_id)
     installed = status_of(data_dir, dataset_id)
@@ -116,6 +124,7 @@ def _provenance_to_ref(
         attribution=provenance.attribution,
         identifier=provenance.identifier,
         release_date=manifest.release_date,
+        retrieved_at=installed.retrieved_at,
         terms_notes=provenance.terms_notes,
         limitations=provenance.limitations,
         coverage_note=provenance.coverage_note,

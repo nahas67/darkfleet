@@ -112,6 +112,13 @@ export type BasemapHandle = {
    */
   syncCredit: () => void;
   /**
+   * Set the maritime attribution, shown in its own slot and hidden when empty.
+   *
+   * Separate from `syncCredit` so CC BY Marine Regions attribution is never merged into the
+   * basemap's ODbL credit, where neither could be read.
+   */
+  syncMaritimeCredit: (attribution: string) => void;
+  /**
    * Install whichever source the controller now considers active.
    *
    * Idempotent, and it is the ONLY thing that changes the basemap. Both the failure
@@ -313,15 +320,37 @@ export function initializeCesiumViewer({
     credit.basemap.textContent = spec?.attribution ?? '';
   }
 
+  /**
+   * Show or clear the maritime attribution.
+   *
+   * A SEPARATE SLOT, NOT A CONCATENATION
+   * ------------------------------------
+   * Appending Marine Regions to the basemap string would make it unreadable and would
+   * obscure which licence covers which imagery. They are separate elements precisely so an
+   * operator -- or a screenshot -- can tell ODbL basemap data from CC BY Marine Regions
+   * data. Marine Regions is CC BY 4.0, so this is a licence obligation rather than a
+   * courtesy, and an uncredited drawing of CC BY geometry is non-compliant.
+   *
+   * Hidden when the text is empty, so the slot does not leave a bare separator on a
+   * deployment with no maritime data loaded.
+   */
+  function syncMaritimeCredit(attribution: string): void {
+    const text = attribution.trim();
+    credit.maritime.textContent = text;
+    credit.maritime.hidden = text.length === 0;
+  }
+
   controller.start();
   installActiveSource();
   syncCredit();
+  syncMaritimeCredit('');
 
   viewer.basemap = {
     controller,
     credit,
     status: () => controller.status(),
     syncCredit,
+    syncMaritimeCredit,
     applyActive: () => {
       installActiveSource();
       syncCredit();

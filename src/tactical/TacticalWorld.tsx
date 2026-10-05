@@ -12,6 +12,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { useCoastlineGeometry, useZoneGeometry } from '../globe/maritimeGeometry';
+
 import { engine, type TargetHandle } from '../globe/engine';
 import { isLayerId } from '../globe/layerRegistry';
 import { isWebGLAvailable } from '../globe/cesiumViewer';
@@ -125,6 +127,66 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       engine.setLayerVisibility(id, layer.visible);
     }
   }, [layerState, webgl, initError]);
+
+  /*
+   * MARITIME REFERENCE GEOMETRY (DF-X8.5)
+   *
+   * The toggle and the fetch are deliberately separate concerns, and the ORDER matters:
+   *
+   *   1. the geometry hook fetches ONLY when the operator has switched the layer on, so a
+   *      default-off reference layer costs no request on load -- 4,133 coastline entities
+   *      and 285 EEZ polygons are not free to create;
+   *   2. the renderer is called only when geometry actually arrives, because Cesium gives
+   *      a new entity `show = true` by default and an unconditional call on every render
+   *      would switch a hidden layer back on;
+   *   3. `setLayerVisibility` has already run, so the newly created entities inherit the
+   *      operator's choice rather than the registry default.
+   *
+   * The attribution is passed to the renderer so the credit element can show Marine
+   * Regions whenever its geometry is on screen. CC BY is a licence obligation, not a
+   * courtesy, and an uncredited drawing of a CC BY dataset is a licence failure.
+   */
+  const coastlineVisible = layerState.REFERENCE_COASTLINE?.visible === true;
+  const coastline = useCoastlineGeometry(coastlineVisible);
+  useEffect(() => {
+    if (coastline.status !== 'ready') return;
+    engine.setCoastline(
+      coastline.lines.map((line) => ({ coordinates: line.coordinates })),
+      coastline.provenance?.attribution,
+    );
+  }, [coastline]);
+
+  const eezVisible = layerState.EEZ_BOUNDARIES?.visible === true;
+  const eez = useZoneGeometry('EEZ_BOUNDARIES', eezVisible);
+  useEffect(() => {
+    if (eez.status !== 'ready') return;
+    engine.setZoneBoundaries(
+      eez.polygons.map((polygon) => ({
+        parts: polygon.parts.map((part) => ({ coordinates: part.coordinates })),
+        holes: (polygon.holes ?? []).map((hole) => ({ coordinates: hole.coordinates })),
+        disputed: polygon.disputed === true,
+        geoname: polygon.geoname ?? null,
+        pol_type: polygon.pol_type ?? null,
+      })),
+      'EEZ_BOUNDARIES',
+      eez.provenance?.attribution,
+    );
+  }, [eez]);
+
+  const highSeasVisible = layerState.HIGH_SEAS?.visible === true;
+  const highSeas = useZoneGeometry('HIGH_SEAS', highSeasVisible);
+  useEffect(() => {
+    if (highSeas.status !== 'ready') return;
+    engine.setZoneBoundaries(
+      highSeas.polygons.map((polygon) => ({
+        parts: polygon.parts.map((part) => ({ coordinates: part.coordinates })),
+        disputed: false,
+        geoname: polygon.geoname ?? null,
+      })),
+      'HIGH_SEAS',
+      highSeas.provenance?.attribution,
+    );
+  }, [highSeas]);
 
   if (!webgl || initError !== null) {
     return (

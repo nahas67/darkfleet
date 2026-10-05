@@ -349,7 +349,7 @@ export interface ScanAisResponse {
   readonly scan_id: string;
   readonly coverage: AisCoverageOut;
   readonly window?: ScanAisWindow | null;
-  readonly bbox?: unknown[] | null;
+  readonly bbox?: readonly [number, number, number, number] | null;
   readonly observations?: AisObservationOut[];
   readonly note: string;
 }
@@ -386,6 +386,7 @@ export interface SourceRef {
   readonly attribution: string;
   readonly identifier?: string;
   readonly release_date?: string | null;
+  readonly retrieved_at?: string | null;
   readonly terms_notes?: string;
   readonly limitations?: string[];
   readonly coverage_note?: string;
@@ -462,6 +463,100 @@ export interface TargetMaritimeContextResponse {
   readonly bathymetry: BathymetryContext;
   readonly generated_at: string;
   readonly context_version?: number;
+}
+
+export interface DisplayGeometryMeta {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly tolerance_deg: number;
+  readonly source_vertex_count: number;
+  readonly vertex_count: number;
+  readonly part_count: number;
+  readonly hole_count: number;
+  readonly viewport_filtered?: boolean;
+  readonly notice?: string;
+}
+
+export interface DisplayLine {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly coordinates: readonly [number, number][];
+}
+
+export interface DisplayPolygon {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly zone?: MaritimeZone | null;
+  readonly pol_type?: string | null;
+  readonly geoname?: string | null;
+  readonly sovereign_names?: string[];
+  readonly territory_names?: string[];
+  readonly dispute_note?: string | null;
+  readonly disputed?: boolean;
+  readonly parts: DisplayLine[];
+  readonly holes?: DisplayLine[];
+}
+
+export interface CoastlineGeometryResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly layer: string;
+  readonly status: string;
+  readonly detail?: string;
+  readonly evidentiary?: string;
+  readonly provenance?: SourceRef | null;
+  readonly lines?: DisplayLine[];
+  readonly meta: DisplayGeometryMeta;
+  readonly bbox?: readonly [number, number, number, number];
+}
+
+export interface ZoneGeometryResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly layer: string;
+  readonly status: string;
+  readonly detail?: string;
+  readonly evidentiary?: string;
+  readonly provenance?: SourceRef | null;
+  readonly polygons?: DisplayPolygon[];
+  readonly meta: DisplayGeometryMeta;
+  readonly bbox?: readonly [number, number, number, number];
+  readonly total_feature_count?: number;
+  readonly filtered_feature_count?: number;
+}
+
+export interface DatasetHealthEntry {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly label: string;
+  readonly install_status: string;
+  readonly usable: boolean;
+  readonly blocker_reason?: string | null;
+  readonly optional?: boolean;
+  readonly provider: string;
+  readonly dataset: string;
+  readonly version: string;
+  readonly version_established?: boolean;
+  readonly release_date?: string | null;
+  readonly retrieved_at?: string | null;
+  readonly license: string;
+  readonly attribution: string;
+  readonly identifier?: string | null;
+  readonly source_mechanism?: string;
+  readonly source_service?: string | null;
+  readonly source_layer?: string | null;
+  readonly source_feature_count?: number | null;
+  readonly installed_at?: string | null;
+  readonly computed_sha256?: string | null;
+  readonly expected_sha256?: string | null;
+  readonly coverage_note?: string;
+  readonly terms_notes?: string;
+  readonly limitations?: string[];
+  readonly detail?: string;
+}
+
+export interface DatasetHealthResponse {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly datasets: DatasetHealthEntry[];
+  readonly generated_at: string;
+  readonly usable_count: number;
+  readonly verified_count: number;
 }
 
 export interface ProbeRequest {
@@ -1065,6 +1160,13 @@ export type ContractSchemaName =
   | 'PortContext'
   | 'BathymetryContext'
   | 'TargetMaritimeContextResponse'
+  | 'DisplayGeometryMeta'
+  | 'DisplayLine'
+  | 'DisplayPolygon'
+  | 'CoastlineGeometryResponse'
+  | 'ZoneGeometryResponse'
+  | 'DatasetHealthEntry'
+  | 'DatasetHealthResponse'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
   | 'EvidenceDocument'
@@ -1624,6 +1726,7 @@ export const SOURCEREF_FIELDS = [
   'attribution',
   'identifier',
   'release_date',
+  'retrieved_at',
   'terms_notes',
   'limitations',
   'coverage_note',
@@ -1730,6 +1833,135 @@ export const TARGETMARITIMECONTEXTRESPONSE_FIELDS = [
   'bathymetry',
   'generated_at',
   'context_version',
+] as const;
+
+/**
+ * Property names of {@link DisplayGeometryMeta} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DISPLAYGEOMETRYMETA_FIELDS = [
+  'tolerance_deg',
+  'source_vertex_count',
+  'vertex_count',
+  'part_count',
+  'hole_count',
+  'viewport_filtered',
+  'notice',
+] as const;
+
+/**
+ * Property names of {@link DisplayLine} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DISPLAYLINE_FIELDS = [
+  'coordinates',
+] as const;
+
+/**
+ * Property names of {@link DisplayPolygon} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DISPLAYPOLYGON_FIELDS = [
+  'id',
+  'zone',
+  'pol_type',
+  'geoname',
+  'sovereign_names',
+  'territory_names',
+  'dispute_note',
+  'disputed',
+  'parts',
+  'holes',
+] as const;
+
+/**
+ * Property names of {@link CoastlineGeometryResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const COASTLINEGEOMETRYRESPONSE_FIELDS = [
+  'layer',
+  'status',
+  'detail',
+  'evidentiary',
+  'provenance',
+  'lines',
+  'meta',
+  'bbox',
+] as const;
+
+/**
+ * Property names of {@link ZoneGeometryResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ZONEGEOMETRYRESPONSE_FIELDS = [
+  'layer',
+  'status',
+  'detail',
+  'evidentiary',
+  'provenance',
+  'polygons',
+  'meta',
+  'bbox',
+  'total_feature_count',
+  'filtered_feature_count',
+] as const;
+
+/**
+ * Property names of {@link DatasetHealthEntry} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DATASETHEALTHENTRY_FIELDS = [
+  'id',
+  'label',
+  'install_status',
+  'usable',
+  'blocker_reason',
+  'optional',
+  'provider',
+  'dataset',
+  'version',
+  'version_established',
+  'release_date',
+  'retrieved_at',
+  'license',
+  'attribution',
+  'identifier',
+  'source_mechanism',
+  'source_service',
+  'source_layer',
+  'source_feature_count',
+  'installed_at',
+  'computed_sha256',
+  'expected_sha256',
+  'coverage_note',
+  'terms_notes',
+  'limitations',
+  'detail',
+] as const;
+
+/**
+ * Property names of {@link DatasetHealthResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const DATASETHEALTHRESPONSE_FIELDS = [
+  'datasets',
+  'generated_at',
+  'usable_count',
+  'verified_count',
 ] as const;
 
 /**

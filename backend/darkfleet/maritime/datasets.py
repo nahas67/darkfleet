@@ -178,6 +178,20 @@ class InstalledDataset(StrictModel):
     #: Directory the dataset was resolved from. Absent when NOT_INSTALLED.
     path: str | None = None
     installed_at: str | None = None
+    #: When the data was RETRIEVED FROM THE PUBLISHER, which is not the same question as
+    #: when it was placed on disk.
+    #:
+    #: Distinct because a service snapshot's only version-like fact is its retrieval time.
+    #: The Marine Regions WFS publishes no per-layer version, so `CURRENT-SERVICE-SNAPSHOT`
+    #: with no timestamp would be two different datasets sharing one label -- and nothing in
+    #: the product could tell an operator which they were looking at. A future `update`
+    #: changes this value and leaves `installed_at` alone, which is precisely the difference
+    #: worth recording.
+    #:
+    #: None when unknown. Never back-filled from `installed_at` silently: a coast snapshotted
+    #: from a publisher cache at some past date is not a retrieval that happened when the
+    #: file was written.
+    retrieved_at: str | None = None
     #: Checksum of the primary payload, computed at install or verify time.
     computed_sha256: str | None = None
     #: Why this status, in words. A status without a reason is unreadable in a panel.

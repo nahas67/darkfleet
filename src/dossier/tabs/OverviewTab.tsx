@@ -11,7 +11,7 @@
  * derived, rescored or inferred in this component.
  */
 
-import type { ScanScene, VesselTarget } from '../../api/contract';
+import type { ScanScene, TargetMaritimeContextResponse, VesselTarget } from '../../api/contract';
 import { isGhostVessel, measurement, readPolarization, readWake, text } from '../format';
 import {
   AbsentText,
@@ -25,13 +25,30 @@ import {
 } from '../primitives';
 import { POLARIZATION_STATUS_BANNER, WAKE_STATUS_BANNER } from '../format';
 import { POLARIZATION_UNAVAILABLE_NOTE } from './polarizationNote';
+import { MaritimeContextSection } from './MaritimeContextSection';
 
 export function OverviewTab({
   target,
   scene,
+  maritime,
 }: {
   target: VesselTarget;
   scene: ScanScene | null;
+  /**
+   * Maritime context, when it has loaded.
+   *
+   * OPTIONAL AND DELIBERATELY SO. This tab is otherwise served entirely from the
+   * already-loaded target object, with no request of its own -- the operator's first
+   * question is "what am I looking at", and making them wait on a round trip for the
+   * classification would be the wrong trade. Maritime context is the one field here that
+   * needs the backend, because the position alone cannot answer "which EEZ".
+   *
+   * So it renders nothing rather than a spinner when absent or still loading: the rest of
+   * OVERVIEW is complete without it, and a placeholder that says "loading maritime
+   * context" next to a classification the operator can already read would suggest the two
+   * are related. The block appears when it is real.
+   */
+  maritime?: TargetMaritimeContextResponse | null;
 }) {
   const ghost = isGhostVessel(target.classification);
   const wake = readWake(target.wakeAnalysis ?? null);
@@ -157,6 +174,16 @@ export function OverviewTab({
       <SubTitle>Mandatory product status</SubTitle>
       <StatusBanner lines={WAKE_STATUS_BANNER} />
       <StatusBanner lines={POLARIZATION_STATUS_BANNER} />
+
+      {/*
+        MARITIME CONTEXT IS ITS OWN BLOCK, BELOW TARGET EVIDENCE
+        -------------------------------------------------------
+        It sits after the evidence sections and outside them, never interleaved into
+        DETECTION or SECONDARY CHANNELS. A reader scanning this tab must not be able to
+        read "inside Malaysia's EEZ" as one more attribute of the detection. It is where
+        the water is; the detection is what the radar saw.
+      */}
+      {maritime ? <MaritimeContextSection context={maritime} /> : null}
 
       {ghost ? (
         <>

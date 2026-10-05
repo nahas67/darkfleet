@@ -68,6 +68,72 @@ export type LayerDefinition = {
   /** Required when a layer has no live renderer, so it is not a silent no-op. */
   readonly notImplemented?: string;
   readonly provenance?: LayerProvenance;
+  /**
+   * Backend path the layer's geometry comes from.
+   *
+   * Declared here so the registry is the one place a layer's DATA SOURCE is named. The
+   * layer console uses it to report why a layer is unavailable, and the geometry hook uses
+   * it to fetch -- so a layer can never be wired to a dataset the console does not know
+   * about.
+   */
+  readonly sourcePath?: string;
+};
+
+/*
+ * Maritime provenance, declared ONCE.
+ *
+ * `version` is `CURRENT-SERVICE-SNAPSHOT` rather than "v12" for the Marine Regions layers,
+ * and that is not a placeholder. The WFS publishes no per-layer version string: the
+ * Title and Abstract are empty in both capabilities documents, GeoServer's REST API
+ * requires authentication, and no metadata document is advertised. The only "12" in the
+ * document belongs to a DIFFERENT layer (`eez_12nm`), and reading it onto `eez` would be
+ * an inference from a website headline rather than a fact about this data.
+ *
+ * The bulk release "World EEZ v12, 2023-10-25" is real and separately recorded -- it is a
+ * different product from a different URL, behind a registration form, and it is not what
+ * is installed here.
+ *
+ * Natural Earth is public domain. Source identification is kept anyway: an operator who
+ * sees a coastline and wants to know which one has to be able to find out without leaving
+ * the product.
+ */
+const COASTLINE_PROVENANCE: LayerProvenance = {
+  provider: 'Natural Earth',
+  dataset: 'ne_10m_coastline',
+  version: '4.1.0',
+  license: 'PUBLIC_DOMAIN',
+  attribution: 'Natural Earth — public domain',
+  identifier: 'https://www.naturalearthdata.com/downloads/10m-physical-vectors/',
+  limitations: ['DISPLAY GEOMETRY — simplified for rendering; not the analytical authority.'],
+};
+
+const EEZ_PROVENANCE: LayerProvenance = {
+  provider: 'VLIZ / Marine Regions',
+  dataset: 'Marine Regions WFS — MarineRegions:eez',
+  version: 'CURRENT-SERVICE-SNAPSHOT',
+  license: 'CC_BY',
+  attribution: 'VLIZ / Marine Regions — CC BY 4.0',
+  identifier: 'https://www.marineregions.org/',
+  limitations: [
+    'VERSION NOT ESTABLISHED FROM WFS METADATA — the service publishes no per-layer version for this layer.',
+    'Boundaries are DISPUTED, OVERLAPPING and PROVISIONAL, derived from treaties and from CALCULATED MEDIAN LINES where treaties are unavailable.',
+    'Marine Regions does not determine sovereignty. This is the dataset\'s representation, not a legal finding.',
+    'DISPLAY GEOMETRY — simplified for rendering; not the analytical authority.',
+  ],
+};
+
+const HIGH_SEAS_PROVENANCE: LayerProvenance = {
+  provider: 'VLIZ / Marine Regions',
+  dataset: 'Marine Regions WFS — MarineRegions:high_seas',
+  version: 'CURRENT-SERVICE-SNAPSHOT',
+  license: 'CC_BY',
+  attribution: 'VLIZ / Marine Regions — CC BY 4.0',
+  identifier: 'https://marineregions.org/eezmethodology.php',
+  limitations: [
+    'VERSION NOT ESTABLISHED FROM WFS METADATA.',
+    'Used ONLY to answer HIGH_SEAS positively. Absence of a match here is never read as high seas.',
+    'DISPLAY GEOMETRY — simplified for rendering; not the analytical authority.',
+  ],
 };
 
 /**
@@ -79,6 +145,38 @@ export type LayerDefinition = {
  * `readonly LayerDefinition[]` would widen every id to `string` and quietly delete
  * the drift protection this file exists to provide (§31, §46).
  */
+/*
+ * MARITIME LAYERS, AND WHY PORTS / BATHYMETRY ARE NOT HERE
+ *
+ * Three layers are added because they have a real renderer AND real installed data. Two
+ * are deliberately absent:
+ *
+ *   PORTS        no WPI snapshot -- the publisher's service will not complete a trusted
+ *                TLS handshake. There is nothing to draw, so a toggle would be inert.
+ *   BATHYMETRY   no GEBCO grid, and deliberately not installed. Same reason.
+ *
+ * A declared-but-empty layer is worse than an absent one: it is a control that looks
+ * operational and does nothing, which is the exact defect this registry was built to
+ * eliminate (§46). Their honest state is shown in the SYSTEM panel's dataset health
+ * section, where it is actionable -- with the reason -- rather than as a dead toggle.
+ *
+ * HIGH_SEAS IS RENDERED SEPARATELY ON PURPOSE
+ *
+ * The zone rule refuses to infer HIGH_SEAS from the absence of an EEZ match. Drawing the
+ * publisher's explicit high-seas polygons as their own layer makes the distinction
+ * visible on the globe: an operator can see that high seas was MEASURED against geometry,
+ * not inferred from what was missing. Merging it into the EEZ layer would erase exactly
+ * the thing the rule exists to preserve.
+ *
+ * DISPLAY GEOMETRY ONLY
+ *
+ * `REFERENCE_COASTLINE` and `EEZ_BOUNDARIES` draw the SIMPLIFIED display payload. The
+ * backend's distance and zone authority reads the full installed geometry and is
+ * unaffected -- simplification here cannot move a number, because nothing measures against
+ * this. Provenance is the same dataset and version, which is the property that makes the
+ * simplification acceptable.
+ */
+
 export const LAYER_DEFINITIONS = [
   {
     id: 'SAR_RASTER', label: 'SAR raster', category: 'SENSOR', kind: 'IMAGERY',
@@ -134,6 +232,27 @@ export const LAYER_DEFINITIONS = [
     id: 'GRATICULE', label: 'Graticule', category: 'OPERATIONAL', kind: 'IMAGERY',
     renderer: 'setGraticule', defaultVisibility: false, supportsOpacity: true,
     supportsSelection: false, evidentiary: 'REFERENCE',
+  },
+  {
+    id: 'REFERENCE_COASTLINE', label: 'Reference coastline', category: 'MARITIME_REFERENCE',
+    kind: 'ENTITIES', renderer: 'setCoastline', defaultVisibility: false,
+    supportsOpacity: true, supportsSelection: false, evidentiary: 'REFERENCE',
+    provenance: COASTLINE_PROVENANCE,
+    sourcePath: '/api/maritime/layers/REFERENCE_COASTLINE',
+  },
+  {
+    id: 'EEZ_BOUNDARIES', label: 'EEZ boundaries', category: 'MARITIME_BOUNDARY',
+    kind: 'ENTITIES', renderer: 'setZoneBoundaries', defaultVisibility: false,
+    supportsOpacity: true, supportsSelection: false, evidentiary: 'REFERENCE',
+    provenance: EEZ_PROVENANCE,
+    sourcePath: '/api/maritime/layers/EEZ_BOUNDARIES',
+  },
+  {
+    id: 'HIGH_SEAS', label: 'High seas (explicit)', category: 'MARITIME_BOUNDARY',
+    kind: 'ENTITIES', renderer: 'setZoneBoundaries', defaultVisibility: false,
+    supportsOpacity: true, supportsSelection: false, evidentiary: 'REFERENCE',
+    provenance: HIGH_SEAS_PROVENANCE,
+    sourcePath: '/api/maritime/layers/HIGH_SEAS',
   },
 ] as const satisfies readonly LayerDefinition[];
 

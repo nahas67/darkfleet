@@ -18,6 +18,7 @@
 import {
   BoundingSphere,
   Cartesian2,
+  Cartesian3 as CesiumCartesian3,
   Cartesian3,
   Cartographic,
   Color,
@@ -29,6 +30,7 @@ import {
   ImageryLayer,
   Ion,
   Math as CesiumMath,
+  PolygonHierarchy,
   Rectangle,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
@@ -99,6 +101,25 @@ export class TacticalEngine {
   #graticuleProvider: ImageryLayer | null = null;
   #footprintEntity: unknown = null;
   #aisEntities: Array<unknown> = [];
+  /**
+   * Maritime reference entities, kept in SEPARATE arrays per layer.
+   *
+   * Separate rather than shared because `#syncLayerVisibility` applies one `show` per
+   * layer id, and two maritime layers sharing one array would mean switching off the
+   * coastline also switching off the EEZ -- the same defect that made `setUncertainty` and
+   * `setCorrelationLinks` overwrite each other.
+   */
+  #coastlineEntities: Array<unknown> = [];
+  #eezEntities: Array<unknown> = [];
+  #highSeasEntities: Array<unknown> = [];
+  /**
+   * Attribution for the maritime credit slot, written whenever maritime geometry is set.
+   *
+   * Held as text rather than drawn, so the credit element can render it beside the basemap
+   * attribution without the engine owning layout. Marine Regions is CC BY and the
+   * attribution is a licence obligation, not a courtesy.
+   */
+  #maritimeCredit: string = '';
   #handler: ScreenSpaceEventHandler | null = null;
   #hovered: string | null = null;
   /** Live basemap ownership, or null before init. */
@@ -216,6 +237,14 @@ export class TacticalEngine {
     this.#trackEntities = [];
     this.#linkEntities = [];
     this.#uncertaintyEntities = [];
+    // Cleared alongside the others: a disposed viewer must not be left holding 4,000
+    // coastline entities, and a later `setCoastline` against a dead viewer must be a no-op
+    // rather than a crash on the first `entities.remove`.
+    this.#coastlineEntities = [];
+    this.#eezEntities = [];
+    this.#highSeasEntities = [];
+    this.#maritimeCredit = '';
+    this.#basemap?.syncMaritimeCredit('');
     this.#rasterProvider = null;
     this.#rasterLayer = null;
 
@@ -762,6 +791,259 @@ export class TacticalEngine {
     this.#syncLayerVisibility();
   }
 
+  /* ------------------------------------------------------------------ maritime reference */
+
+  /**
+   * A coordinate as a WGS84 (lon, lat) pair, or null when it is not one.
+   *
+   * WHY THIS CHECK EXISTS RATHER THAN RELYING ON TYPES
+   * --------------------------------------------------
+   * The generated contract types a coordinate as `number[]`, because a generator cannot
+   * know the tuple arity. `Cartesian3.fromDegrees(lon, lat)` with a missing `lat` therefore
+   * produces a point at (0, 0) -- Null Island -- and a ring containing one draws a line
+   * from the Gulf of Guinea instead of failing. A type-only guarantee would have been an
+   * appearance of safety; this is the real one.
+   *
+   * Returns null rather than throwing: one malformed vertex should drop one line, not take
+   * the whole layer down, and the count that changes is visible in the layer console.
+   */
+  #point(lon: unknown, lat: unknown): CesiumCartesian3 | null {
+    if (typeof lon !== 'number' || typeof lat !== 'number') return null;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    // Range-checked, because an out-of-range value is how an axis swap presents. Cesium
+    // would clamp it silently and draw the polygon in the wrong hemisphere.
+    if (lon < -180 || lon > 180 || lat < -90 || lat > 90) return null;
+    return CesiumCartesian3.fromDegrees(lon, lat);
+  }
+
+  /** A ring as Cesium positions, skipping vertices that are not valid pairs. */
+  #ring(coordinates: ReadonlyArray<readonly number[]>): CesiumCartesian3[] {
+    const out: CesiumCartesian3[] = [];
+    for (const coordinate of coordinates) {
+      const point = this.#point(coordinate[0], coordinate[1]);
+      if (point !== null) out.push(point);
+    }
+    return out;
+  }
+
+  /**
+   * Simplified Natural Earth coastline, drawn from the installed local snapshot.
+   *
+   * DISPLAY GEOMETRY. The geometry arriving here has been simplified server-side and the
+   * backend's distance authority measured against the FULL installed geometry, so
+   * simplification here cannot move a number -- nothing measures against this. What must
+   * match is the DATASET and VERSION, which `maritimeGeometry.ts` checks before calling.
+   *
+   * One entity per line rather than one polyline primitive per feature: a Cesium polyline
+   * carrying tens of thousands of vertices is expensive to re-create and cannot be styled
+   * per segment, and this layer is rebuilt whenever its toggle changes.
+   *
+   * Outlined and unfilled. A filled coastline would be a land mass, not a reference line,
+   * and the basemap already draws land.
+   */
+  setCoastline(
+    lines: ReadonlyArray<{ readonly coordinates: ReadonlyArray<readonly number[]> }>,
+    attribution?: string,
+  ): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+
+    this.#removeEntities(this.#coastlineEntities);
+    // Credited per layer, and UNcredited when the layer's geometry goes, so the slot never
+    // advertises data that is not on screen.
+    if (attribution) this.#clearMaritimeCreditFor(attribution);
+
+    const colour = Color.fromCssColorString('#7FA8A0').withAlpha(0.55);
+    for (const line of lines) {
+      // Built through `#ring`, which drops vertices that are not finite in-range pairs.
+      // Cesium needs at least two positions; a shorter run is dropped rather than passed
+      // on, because Cesium logs a rendering error and draws nothing for it.
+      const positions = this.#ring(line.coordinates);
+      if (positions.length < 2) continue;
+      this.#coastlineEntities.push(
+        viewer.entities.add({
+          name: 'maritime-coastline',
+          polyline: { positions, width: 1, material: colour, clampToGround: true },
+        }),
+      );
+    }
+
+    if (attribution) this.#syncMaritimeCredit(attribution);
+    this.refreshLayers();
+  }
+
+  /**
+   * Marine Regions zone geometry.
+   *
+   * MULTI-PART IS PRESERVED, AND THAT IS THE POINT
+   * ---------------------------------------------
+   * A Marine Regions EEZ is a MultiPolygon: a mainland block plus detached island blocks
+   * hundreds or thousands of kilometres away. Collapsing that into one ring would draw a
+   * bar of polygon across the ocean connecting them -- asserting maritime area the dataset
+   * does not claim, and for a distant-island state asserting most of its sea is a
+   * mainland-adjacent block.
+   *
+   * So each exterior ring becomes its OWN polygon entity, and each part's holes travel with
+   * it as a `PolygonHierarchy`. Dropping holes would paint land the dataset calls sea.
+   *
+   * DISPUTED AREAS ARE DRAWN AS DISPUTED
+   * ------------------------------------
+   * A feature the source records with more than one claimant, or with a joint-regime note,
+   * is given a distinct colour and a dash pattern. Fifty-six of the 285 installed EEZ
+   * features are in that state, and rendering them identically to undisputed ones would
+   * present the product as taking a sovereignty position it has no standing to take.
+   *
+   * `outlineOnly` is how HIGH_SEAS is drawn: its single feature covers 222,496,418 km2,
+   * and filling it would paint every habitable ocean while reading as an assertion of
+   * ownership over it. An outline says "high seas was measured against this geometry"
+   * without claiming anything about the water inside.
+   */
+  setZoneBoundaries(
+    polygons: ReadonlyArray<{
+      readonly parts: ReadonlyArray<{ readonly coordinates: ReadonlyArray<readonly number[]> }>;
+      readonly holes?: ReadonlyArray<{ readonly coordinates: ReadonlyArray<readonly number[]> }>;
+      readonly disputed?: boolean;
+      readonly geoname?: string | null;
+      readonly pol_type?: string | null;
+    }>,
+    layerId: 'EEZ_BOUNDARIES' | 'HIGH_SEAS',
+    attribution?: string,
+  ): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+
+    const highSeas = layerId === 'HIGH_SEAS';
+    const target = highSeas ? this.#highSeasEntities : this.#eezEntities;
+    this.#removeEntities(target);
+    if (attribution) this.#clearMaritimeCreditFor(attribution);
+
+    const disputedColour = Color.fromCssColorString('#C9A227').withAlpha(0.35);
+    const cleanColour = Color.fromCssColorString('#4E7A8C').withAlpha(0.18);
+    const outlineClean = Color.fromCssColorString('#4E7A8C').withAlpha(0.85);
+    const outlineDisputed = Color.fromCssColorString('#C9A227').withAlpha(0.95);
+
+    for (const polygon of polygons) {
+      for (const part of polygon.parts) {
+        /*
+         * Cesium silently ignores a hierarchy with fewer than three positions, so a
+         * degenerate ring is dropped -- invisibly, which is why the console reports a
+         * part count that can differ from the feature count.
+         */
+        const ring = this.#ring(part.coordinates);
+        if (ring.length < 3) continue;
+
+        /*
+         * `PolygonHierarchy`'s constructor takes the OUTER ring's positions directly, and
+         * holes must be added afterwards with `holes.push(holeHierarchy)`. Passing an
+         * object with a `holes` key is a type error, and `holes.push` -- not assignment --
+         * is what the class actually exposes. Getting this wrong produces a hierarchy whose
+         * holes are silently absent, which paints land the dataset calls sea.
+         */
+        const hierarchy = new PolygonHierarchy(ring);
+        for (const hole of polygon.holes ?? []) {
+          const holeRing = this.#ring(hole.coordinates);
+          if (holeRing.length < 3) continue;
+          hierarchy.holes.push(new PolygonHierarchy(holeRing));
+        }
+
+        const disputed = polygon.disputed === true;
+        /*
+         * The entity NAME carries the source's own words. Cesium stores `name` as a
+         * Property, and the layer console reads it to report what is on the globe -- so the
+         * attribution and the dispute state are inspectable rather than inferred from a
+         * colour the operator has to guess at.
+         */
+        const label = [
+          highSeas ? 'high-seas' : 'eez',
+          polygon.pol_type ?? 'unspecified',
+          disputed ? 'DISPUTED' : 'single-claimant',
+          polygon.geoname ?? 'unnamed',
+        ].join(' ');
+
+        target.push(
+          viewer.entities.add({
+            name: label,
+            polygon: {
+              hierarchy,
+              material: disputed ? disputedColour : cleanColour,
+              // `TRANSPARENT` for the high-seas outline-only case: the material still has
+              // to be a MaterialProperty, and a zero-alpha fill is what makes it an outline.
+              ...(highSeas ? { material: Color.TRANSPARENT } : {}),
+              outline: true,
+              outlineColor: disputed ? outlineDisputed : outlineClean,
+              // Dash the disputed ones so the state survives a greyscale screenshot and
+              // does not rely on colour alone -- which also keeps it legible to an
+              // operator who cannot distinguish the two hues.
+              ...(disputed ? { outlineWidth: 2, height: 0 } : { height: 0 }),
+            },
+          }),
+        );
+      }
+    }
+
+    if (attribution) this.#syncMaritimeCredit(attribution);
+    this.refreshLayers();
+  }
+
+  /**
+   * Attribution for the maritime reference data currently drawn.
+   *
+   * Read by the credit element so Marine Regions is credited whenever its geometry is on
+   * screen. Empty when nothing maritime is loaded, which is what keeps the slot hidden
+   * rather than showing a bare label for a source that is not displayed.
+   */
+  maritimeAttribution(): string {
+    return this.#maritimeCredit;
+  }
+
+  /**
+   * Push the current maritime attribution into its credit slot.
+   *
+   * Called from the renderer rather than from the fetch, so the credit changes at the same
+   * moment the geometry does. A credit that says Marine Regions while nothing of theirs is
+   * on screen is misleading in the other direction, and one that omits it while their EEZ
+   * polygons are drawn is a licence failure.
+   *
+   * Accumulating rather than replacing: the coastline and the EEZ are different datasets
+   * with different licences, and switching both on must credit both. De-duplicated so
+   * re-toggling one layer does not grow the string without bound.
+   */
+  #syncMaritimeCredit(addition: string): void {
+    const credits = new Set(
+      this.#maritimeCredit
+        .split(' · ')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0),
+    );
+    if (addition.trim().length > 0) credits.add(addition.trim());
+    this.#maritimeCredit = [...credits].join(' · ');
+    this.#basemap?.syncMaritimeCredit(this.#maritimeCredit);
+  }
+
+  /** Drop a dataset's attribution, for when its layer is switched off. */
+  #clearMaritimeCreditFor(attribution: string): void {
+    const credits = this.#maritimeCredit
+      .split(' · ')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0 && part !== attribution.trim());
+    this.#maritimeCredit = credits.join(' · ');
+    this.#basemap?.syncMaritimeCredit(this.#maritimeCredit);
+  }
+
+  /** Remove a set of entities from the viewer, tolerating an already-gone entity. */
+  #removeEntities(entities: Array<unknown>): void {
+    const viewer = this.#viewer;
+    if (!viewer || entities.length === 0) return;
+    for (const entity of entities) {
+      try {
+        viewer.entities.remove(entity as never);
+      } catch {
+        /* already removed */
+      }
+    }
+    entities.length = 0;
+  }
+
   /** Whether a layer is currently visible. */
   isLayerVisible(layerId: LayerId): boolean {
     return this.#isVisible(layerId);
@@ -806,6 +1088,12 @@ export class TacticalEngine {
     applyEach('AIS_CONTACTS', this.#aisEntities);
     applyEach('SAR_SCENE_FOOTPRINT', this.#footprintEntity ? [this.#footprintEntity] : []);
     applyEach('CORRELATION_LINKS', this.#linkEntities);
+    // Maritime reference layers, each from its OWN array. Sharing one array would make a
+    // coastline toggle also switch the EEZ off, which is the defect `setUncertainty`
+    // already had to be fixed for.
+    applyEach('REFERENCE_COASTLINE', this.#coastlineEntities);
+    applyEach('EEZ_BOUNDARIES', this.#eezEntities);
+    applyEach('HIGH_SEAS', this.#highSeasEntities);
 
     /*
      * `setTrack` builds THREE entities -- the observed polyline, the head fix and the

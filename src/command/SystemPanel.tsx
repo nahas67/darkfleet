@@ -18,6 +18,7 @@ import { healthColor, healthSeverity } from '../design/tokens';
 import { SHORTCUTS } from './useGlobalKeys';
 import { NOT_ESTABLISHED } from '../design/format';
 import { useArchiveCoverage } from '../ais/archiveCoverage';
+import { installStatusLabel, useDatasetHealth, versionLabel } from '../maritime/datasetHealth';
 
 /**
  * Deployment-level AIS archive state.
@@ -129,6 +130,129 @@ function BasemapSection() {
   );
 }
 
+/**
+ * LOCAL REFERENCE DATASETS, and why this is not "source health"
+ *
+ * `/api/providers/health` answers "can this deployment reach its remote sources" and has a
+ * live-uptime meaning. `/api/maritime/datasets` answers "which reference files are on this
+ * disk and can a query read them". They are separate sections on purpose: a healthy
+ * basemap must not imply healthy reference data, and a failed SAR provider must not imply
+ * the coastline is broken. Neither is a real dependency on the other.
+ *
+ * THREE WORDS THAT MUST NOT COLLAPSE INTO ONE
+ *
+ *   CHECKSUM_UNRECORDED   installed, answers correctly, but the publisher published no
+ *                         checksum to check against. A WEAKER guarantee, shown as itself.
+ *   NOT INSTALLED         nothing on disk. For an optional dataset this is normal and is
+ *                         not a fault.
+ *   BLOCKER REASON        wanted, and could not be obtained. For the World Port Index this
+ *                         is a real external blocker with a specific cause.
+ *
+ * Rendering the second and third identically would tell an operator nothing is wrong with
+ * the port data, which is not what happened -- the publisher's service will not complete a
+ * trusted TLS handshake, and TLS verification was not disabled to work around it.
+ */
+function DatasetHealthSection() {
+  const health = useDatasetHealth();
+
+  return (
+    <div className="mt-3" data-df-dataset-health={health.status}>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="df-label text-[10px]">Local reference data</span>
+        <button type="button" className="df-btn text-[10px]" onClick={health.reload}>
+          Re-check
+        </button>
+      </div>
+
+      {health.status === 'loading' ? (
+        <p className="text-[11px] text-ink-dim">Reading the local dataset store…</p>
+      ) : health.status === 'failed' ? (
+        <p className="text-[11px] text-fault" data-df-dataset-health-error>
+          The dataset store could not be read: {health.reason}. That is a connection
+          failure, not an absent dataset.
+        </p>
+      ) : (
+        <>
+          <p className="mb-1 text-[10px] leading-relaxed text-ink-dim">
+            Files on this machine, not remote services. {health.value.usable_count} of{' '}
+            {health.value.datasets.length} usable, {health.value.verified_count} with a
+            recorded checksum.
+          </p>
+          <ul className="space-y-1.5" data-df-dataset-list>
+            {health.value.datasets.map((entry) => (
+              <li
+                key={entry.id}
+                data-df-dataset={entry.id}
+                className="border-l-2 pl-2"
+                style={{
+                  borderColor: entry.usable
+                    ? entry.install_status === 'READY'
+                      ? 'var(--df-green)'
+                      : 'var(--df-amber)'
+                    : 'var(--df-text-dim)',
+                }}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="df-num text-[11px] text-ink">{entry.label}</span>
+                  <span
+                    className="df-label text-[10px]"
+                    style={{
+                      color: entry.usable
+                        ? entry.install_status === 'READY'
+                          ? 'var(--df-green)'
+                          : 'var(--df-amber)'
+                        : 'var(--df-text-dim)',
+                    }}
+                  >
+                    {installStatusLabel(entry)}
+                  </span>
+                </div>
+
+                {/*
+                  The version is shown ONLY when the source established one. A service
+                  snapshot whose publisher publishes no per-layer version shows its
+                  retrieval timestamp instead -- and must never inherit "v12" from the
+                  separate bulk release, which is a different product from a different URL.
+                */}
+                <p className="text-[10px] text-ink-2">
+                  {versionLabel(entry) ?? 'VERSION NOT ESTABLISHED'}
+                  {entry.retrieved_at ? ` · retrieved ${entry.retrieved_at}` : ''}
+                </p>
+                <p className="text-[10px] text-ink-dim">
+                  {/* `??` rather than a bare read: the generated contract marks fields with
+                      server defaults as optional, so an older backend answering this route
+                      without `source_mechanism` must render as an unknown mechanism rather
+                      than crash the whole panel. */}
+                  {(entry.source_mechanism ?? 'UNKNOWN').replace(/_/g, ' ')} ·{' '}
+                  {entry.license.replace(/_/g, ' ')}
+                </p>
+
+                {entry.blocker_reason ? (
+                  <p className="text-[10px] leading-relaxed text-warn" data-df-dataset-blocker>
+                    {entry.blocker_reason}
+                  </p>
+                ) : null}
+                {!entry.blocker_reason && !entry.usable && !entry.optional ? (
+                  <p className="text-[10px] leading-relaxed text-ink-dim">
+                    {entry.detail || 'Not installed. No dataset is present on this machine.'}
+                  </p>
+                ) : null}
+                {entry.usable && (entry.limitations?.length ?? 0) > 0 ? (
+                  <ul className="list-disc pl-3 text-[10px] leading-relaxed text-ink-dim">
+                    {(entry.limitations ?? []).slice(0, 2).map((limitation) => (
+                      <li key={limitation}>{limitation}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SystemPanel() {
   const state = useStore();
 
@@ -150,6 +274,9 @@ export function SystemPanel() {
       <div className="p-3">
         <ArchiveCoverageSection />
         <BasemapSection />
+        {/* Deliberately adjacent to, not inside, `Source health` below: those are remote
+            HTTP sources with a live-uptime meaning, these are files on this disk. */}
+        <DatasetHealthSection />
 
         <p className="df-label mb-1.5 mt-3 text-[10px]">Source health</p>
         {state.providers.length === 0 ? (

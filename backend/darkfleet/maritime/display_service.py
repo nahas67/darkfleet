@@ -94,10 +94,11 @@ def _source_ref(provenance: DatasetProvenance | None, install_status: InstallSta
         license=provenance.license,
         attribution=provenance.attribution,
         identifier=provenance.identifier,
-        # `DatasetProvenance` has no `release_date`: it is a property of the MANIFEST,
-        # not of the derived provenance. Left None here rather than invented; the dataset
-        # health route carries it from the manifest where it actually lives.
+        # `DatasetProvenance` carries neither `release_date` nor `retrieved_at`: both are
+        # properties of what is ON DISK, not of the derived provenance. The dataset-health
+        # route reads them from the manifest; here the caller supplies them.
         release_date=None,
+        retrieved_at=None,
         terms_notes=provenance.terms_notes,
         limitations=provenance.limitations,
         coverage_note=provenance.coverage_note,
@@ -108,16 +109,29 @@ def _source_ref(provenance: DatasetProvenance | None, install_status: InstallSta
 def _installed_ref(data_dir: Path, dataset_id: str) -> SourceRef | None:
     """A :class:`SourceRef` for a dataset whatever its install state.
 
-    Constructed from the MANIFEST plus the observed status, which is the only pair that
-    carries everything: the manifest holds the identity fields and ``release_date``,
-    while the status is what this machine actually has. Present even when NOT_INSTALLED,
-    so an absent dataset is named rather than anonymous.
+    Constructed from the MANIFEST plus the observed on-disk state, which is the only pair
+    that carries everything: the manifest holds the identity fields, and the observed state
+    holds ``release_date``-adjacent facts like ``retrieved_at`` that the derived provenance
+    does not. Present even when NOT_INSTALLED, so an absent dataset is named rather than
+    anonymous.
     """
     state = status_of(data_dir, dataset_id)
     provenance = InstalledDataset(
         manifest=state.manifest, status=state.status
     ).provenance()
-    return _source_ref(provenance, state.status)
+    ref = _source_ref(provenance, state.status)
+    if ref is None:
+        return None
+    # Filled from the manifest and the install record rather than left out. The Marine
+    # Regions layers are service snapshots with NO established version, so the retrieval
+    # timestamp is the only thing that tells one snapshot from another -- dropping it here
+    # would make the globe unable to say when the geometry it is drawing was read.
+    return ref.model_copy(
+        update={
+            "release_date": state.manifest.release_date,
+            "retrieved_at": state.retrieved_at,
+        }
+    )
 
 
 #: The notice carried on every display payload. Restated in the body, not only in the UI,
@@ -354,7 +368,11 @@ def dataset_health(data_dir: Path) -> DatasetHealthResponse:
                 version=manifest.version,
                 version_established=manifest.version_established,
                 release_date=manifest.release_date,
-                retrieved_at=manifest.retrieved_at,
+                # From the install record, not the manifest: the manifest carries no
+                # retrieval time because it is a property of one snapshot, not of the
+                # dataset. Reading the manifest here would always yield None for exactly
+                # the service snapshots that most need it.
+                retrieved_at=state.retrieved_at,
                 license=manifest.license.value,
                 attribution=manifest.attribution,
                 identifier=manifest.identifier,

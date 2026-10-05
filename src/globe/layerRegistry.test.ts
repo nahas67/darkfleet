@@ -43,6 +43,15 @@ import { store } from '../state/store';
  * asserted against `engine.ts` source text by the architecture test below, so it
  * cannot quietly fall out of step with the implementation.
  */
+/**
+ * The engine methods a registry entry may name.
+ *
+ * A HARD-CODED LIST, and that is the point: it is the independent statement of what the
+ * engine implements, so a registry entry naming a renderer that does not exist fails here.
+ * Deriving the list from the registry instead would make the check vacuous -- it would
+ * compare the registry against itself and always pass, which is how ten inert toggles
+ * survived in the first place (§46).
+ */
 const ENGINE_RENDERERS = [
   'setRaster',
   'setSceneFootprint',
@@ -53,6 +62,10 @@ const ENGINE_RENDERERS = [
   'setCorrelationLinks',
   'setGraticule',
   'setAoi',
+  // Maritime reference layers (DF-X8.5). Both draw entities; they differ in what they
+  // build, not in which Cesium primitive they use.
+  'setCoastline',
+  'setZoneBoundaries',
 ] as const;
 
 describe('registry shape', () => {
@@ -97,10 +110,66 @@ describe('registry shape', () => {
 
   it('lists by category, and empty categories simply return nothing', () => {
     expect(listByCategory('SENSOR').map((d) => d.id)).toContain('SAR_RASTER');
-    // Maritime categories are declared for future use but hold no layers yet. They must
-    // return empty rather than being padded with invented entries (§7).
-    expect(listByCategory('MARITIME_BOUNDARY')).toHaveLength(0);
+    // Maritime categories now hold real layers with real installed data (DF-X8.5).
+    expect(listByCategory('MARITIME_REFERENCE').map((d) => d.id)).toContain(
+      'REFERENCE_COASTLINE',
+    );
+    expect(listByCategory('MARITIME_BOUNDARY').map((d) => d.id)).toEqual(
+      expect.arrayContaining(['EEZ_BOUNDARIES', 'HIGH_SEAS']),
+    );
+    // SEABED is still empty: GEBCO is intentionally not installed, and a bathymetry
+    // toggle with nothing behind it is the inert control the registry exists to prevent.
+    // Its honest state is a disabled row in the console and a NOT_INSTALLED channel in
+    // the dossier -- not a layer.
     expect(listByCategory('SEABED')).toHaveLength(0);
+  });
+
+  /**
+   * PORTS AND BATHYMETRY MUST NOT BE LAYERS WHILE THEIR DATA IS ABSENT.
+   *
+   * §20 and §21 are explicit: a toggle for a dataset that does not exist is either omitted
+   * or disabled with a stated reason -- never an inert control that looks operational. This
+   * test is what makes that structural rather than a convention: adding either id would
+   * fail here, with a message saying why.
+   */
+  it('declares no PORTS or BATHYMETRY layer while the data is absent', () => {
+    const ids = layerIds() as readonly string[];
+    expect(ids).not.toContain('PORTS');
+    expect(ids).not.toContain('BATHYMETRY');
+    for (const id of ids) {
+      expect(id).not.toMatch(/^PORTS/);
+      expect(id).not.toMatch(/^BATHYMETRY/);
+    }
+  });
+
+  it('gives every maritime layer a source path and a reference provenance', () => {
+    for (const def of listLayers()) {
+      if (def.category !== 'MARITIME_BOUNDARY' && def.category !== 'MARITIME_REFERENCE') {
+        continue;
+      }
+      const wide = asDefinition(def);
+      expect(wide.sourcePath, `${def.id} declares no sourcePath`).toBeTruthy();
+      expect(wide.provenance, `${def.id} declares no provenance`).toBeTruthy();
+      // Reference context must never be styled as analytical evidence.
+      expect(wide.evidentiary).toBe('REFERENCE');
+    }
+  });
+
+  /**
+   * A SERVICE SNAPSHOT MUST NOT CARRY A VERSION IT NEVER PROVED.
+   *
+   * The Marine Regions WFS publishes no per-layer version: its titles and abstracts are
+   * empty, its REST API requires authentication, and the only "12" in the capabilities
+   * document belongs to a different layer (`eez_12nm`). Recording "v12" here because the
+   * bulk catalogue says v12 is current would be an inference from a website headline, and
+   * an operator reading the panel could not tell it from a proven version.
+   */
+  it('records the Marine Regions layers as unversioned service snapshots', () => {
+    const eez = asDefinition(getLayer('EEZ_BOUNDARIES'));
+    expect(eez.provenance?.version).toBe('CURRENT-SERVICE-SNAPSHOT');
+    expect(eez.provenance?.version).not.toMatch(/\d/);
+    const highSeas = asDefinition(getLayer('HIGH_SEAS'));
+    expect(highSeas.provenance?.version).toBe('CURRENT-SERVICE-SNAPSHOT');
   });
 });
 

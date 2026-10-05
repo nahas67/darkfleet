@@ -194,20 +194,26 @@ def status_of(data_dir: Path, dataset_id: str) -> InstalledDataset:
     directory = dataset_dir(data_dir, dataset_id, manifest.version)
     state, computed, detail = _status_for(directory, manifest)
     installed_at: str | None = None
+    retrieved_at: str | None = None
     recorded_path = directory / MANIFEST_FILE
     if recorded_path.is_file():
         try:
-            installed_at = json.loads(recorded_path.read_text(encoding="utf-8")).get(
-                "installed_at"
-            )
+            recorded = json.loads(recorded_path.read_text(encoding="utf-8"))
+            installed_at = recorded.get("installed_at")
+            # Absent for a store written before retrieval times were recorded. Left None
+            # rather than defaulted to `installed_at`: the two are different events, and a
+            # snapshot whose true retrieval moment is unknown should say so.
+            retrieved_at = recorded.get("retrieved_at")
         except (OSError, ValueError):
             installed_at = None
+            retrieved_at = None
 
     return InstalledDataset(
         manifest=manifest,
         status=state,
         path=str(directory) if directory.is_dir() else None,
         installed_at=installed_at,
+        retrieved_at=retrieved_at,
         computed_sha256=computed,
         detail=detail,
     )
@@ -272,6 +278,7 @@ def install(
     *,
     expected_sha256: str | None = None,
     recorded_at: str | None = None,
+    retrieved_at: str | None = None,
 ) -> InstalledDataset:
     """Write a PREPARED payload and its manifest.
 
@@ -282,6 +289,14 @@ def install(
 
     ``expected_sha256`` overrides the registry value. A checksum computed from a
     publisher-supplied sidecar belongs here rather than in source.
+
+    ``retrieved_at`` is WHEN THE PUBLISHER WAS READ, which is what a service snapshot's
+    provenance rests on when the service publishes no version of its own. It is recorded
+    separately from ``recorded_at`` (when the file was written here) because those two
+    diverge the moment a ``update`` refreshes data without rewriting the directory, and
+    because a snapshot restored from backup was retrieved at some earlier unknown moment.
+    A caller that genuinely does not know must pass None -- silently substituting the
+    install time would date the publisher's data to this machine's filesystem.
     """
     manifest = known_manifest(dataset_id)
     if manifest is None:
@@ -307,6 +322,7 @@ def install(
                 "id": manifest.id,
                 "version": manifest.version,
                 "installed_at": recorded_at or utc_now_iso(),
+                "retrieved_at": retrieved_at,
                 "computed_sha256": hashlib.sha256(body).hexdigest(),
                 # Recorded so verification compares against what was EXPECTED at
                 # install time rather than re-reading the registry default.

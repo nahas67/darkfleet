@@ -55,6 +55,9 @@ import { RevisitTab } from './tabs/RevisitTab';
 import { SarTab } from './tabs/SarTab';
 import { WakeTab } from './tabs/WakeTab';
 import { targetRefOf, type TargetRef } from '../intelligence/targetRef';
+import { loadMaritimeContext } from './api';
+import { useTabData } from './useTabData';
+import type { TargetMaritimeContextResponse } from '../api/contract';
 
 const TABS = [
   { id: 'OVERVIEW', label: 'OVERVIEW' },
@@ -97,6 +100,29 @@ export function DossierWorkspace() {
     if (ref === null) return null;
     return targets.find((t) => t.id === ref.targetId) ?? null;
   }, [targets, ref]);
+
+  /*
+   * MARITIME CONTEXT, scoped to the OVERVIEW tab.
+   *
+   * `enabled: tab === 'OVERVIEW'` matters for more than tidiness. Maritime context is the
+   * only field on OVERVIEW that needs a request -- the classification, position and
+   * confidences all come from the already-loaded target record. Fetching it on selection
+   * would spend a request on a tab the operator may never open; fetching it for every tab
+   * would spend eleven.
+   *
+   * `ref === null` also disables it, and the loader separately refuses a ref with no scan
+   * id, because the route is scan-scoped: `DF-002` exists in many scans, so a bare target
+   * id cannot address the right vessel.
+   */
+  const maritimeFetcher = useCallback(
+    (signal: AbortSignal) => loadMaritimeContext(ref as TargetRef)(signal),
+    [ref],
+  );
+  const maritime = useTabData<TargetMaritimeContextResponse>(
+    ref,
+    maritimeFetcher,
+    tab === 'OVERVIEW' && ref !== null && ref.scanId !== null,
+  );
 
   // A new target returns the operator to OVERVIEW. Carrying the previous tab across
   // a target change would silently re-ask the old question of the new vessel, which
@@ -222,7 +248,26 @@ export function DossierWorkspace() {
           Each branch gets `ref` and `target`. No tab re-derives identity, so a tab
           cannot disagree with the header about which vessel it is describing.
         */}
-        {tab === 'OVERVIEW' ? <OverviewTab target={target} scene={scene} /> : null}
+        {/*
+          OVERVIEW is the only tab that needs a maritime fetch, and it is fetched HERE
+          rather than inside the tab.
+
+          That placement is the reason: the tab itself stays a pure function of the target
+          object, and the one field that cannot be derived from state is the only one with a
+          request. It is also scoped to OVERVIEW deliberately -- eleven tabs each opening a
+          branch on selection would issue eleven requests an operator never asked for.
+        */}
+        {tab === 'OVERVIEW' ? (
+          <OverviewTab
+            target={target}
+            scene={scene}
+            // Narrowed from the Owned union rather than read as `.value`. A failed or
+            // still-loading fetch renders nothing, which is correct: OVERVIEW is complete
+            // without maritime context and a placeholder would imply the block is part of
+            // the detection rather than an additional, separately-fetched fact.
+            maritime={maritime.status === 'ready' ? maritime.value : null}
+          />
+        ) : null}
         {tab === 'SAR' ? <SarTab target={target} scene={scene} /> : null}
         {tab === 'AIS' ? <AisTab targetRef={ref} /> : null}
         {tab === 'CORRELATION' ? <CorrelationTab target={target} targetRef={ref} /> : null}

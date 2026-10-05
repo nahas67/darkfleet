@@ -108,6 +108,21 @@ SCHEMAS: tuple[str, ...] = (
     "PortContext",
     "BathymetryContext",
     "TargetMaritimeContextResponse",
+    # Display geometry + dataset health (DF-X8.5A). Same reason as the maritime
+    # context block above: the coastline/route-zone geometry and the per-dataset
+    # health entries are emitted by the installed manifest and the backend's own
+    # layer tables. A hand-written mirror in the frontend would duplicate the
+    # coordinate contract (DisplayLine/DisplayPolygon nesting) and the health
+    # status vocabulary, and nothing would flag the drift -- which is the exact
+    # failure this generator was added to prevent. DISPLAY_LAYERS is not listed
+    # because the literal is inlined by the frontend from the generated unions.
+    "DisplayGeometryMeta",
+    "DisplayLine",
+    "DisplayPolygon",
+    "CoastlineGeometryResponse",
+    "ZoneGeometryResponse",
+    "DatasetHealthEntry",
+    "DatasetHealthResponse",
 )
 
 HEADER = """// GENERATED FILE - DO NOT EDIT BY HAND.
@@ -167,6 +182,26 @@ def ts_type(schema: dict[str, Any], defs: dict[str, Any]) -> str:
     if kind == "null":
         return "null"
     if kind == "array":
+        # Pydantic renders a fixed-length tuple as `prefixItems`, and the generator
+        # ignored it -- so `tuple[tuple[float, float], ...]` came out as `unknown[][]`.
+        # Every consumer then had to re-narrow `unknown` before it could touch a
+        # coordinate, which pushed the arity check out to runtime with nothing to catch
+        # it: `Cartesian3.fromDegrees(lon)` with a missing latitude yields Null Island and
+        # a ring containing one draws a line from the Gulf of Guinea.
+        #
+        # Emitting the real tuple type means the compiler enforces the arity, so the
+        # runtime guard in the renderer becomes a defence in depth rather than the only
+        # thing standing between a malformed vertex and a wrong map.
+        prefix = schema.get("prefixItems")
+        if isinstance(prefix, list) and prefix:
+            parts = [ts_type(part, defs) for part in prefix]
+            rendered = "readonly [" + ", ".join(parts) + "]"
+            # `minItems == maxItems` is a true tuple; anything else is a variable-length
+            # array whose elements are still tuples, so the trailing `[]` belongs outside
+            # the brackets.
+            if schema.get("minItems") != schema.get("maxItems"):
+                return f"({rendered})[]"
+            return rendered
         return f"{ts_type(schema.get('items', {}), defs)}[]"
     if kind == "object" or "properties" in schema:
         # `dict[str, int]` arrives as additionalProperties:{type:integer}. Emitting

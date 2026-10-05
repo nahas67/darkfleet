@@ -31,6 +31,8 @@ import {
   type LayerEntry,
 } from '../globe/layerRegistry';
 import { groupColor } from '../design/tokens';
+import { useDatasetHealth } from '../maritime/datasetHealth';
+import type { DatasetHealthResponse } from '../api/contract';
 
 /**
  * What a layer needs before it has anything to draw.
@@ -39,7 +41,7 @@ import { groupColor } from '../design/tokens';
  * DISABLED WITH A REASON -- never shown as an enabled toggle that draws nothing,
  * and never silently dropped from the list.
  */
-type Requirement = 'scan' | 'ais' | 'raster';
+type Requirement = 'scan' | 'ais' | 'raster' | 'maritime';
 
 const REQUIREMENT: Partial<Record<LayerId, Requirement>> = {
   SAR_RASTER: 'raster',
@@ -50,6 +52,67 @@ const REQUIREMENT: Partial<Record<LayerId, Requirement>> = {
   AIS_TRACKS: 'ais',
   AIS_PREDICTED: 'ais',
   CORRELATION_LINKS: 'scan',
+  // Maritime reference layers are gated on the LOCAL DATASET STORE, not on a scan.
+  REFERENCE_COASTLINE: 'maritime',
+  EEZ_BOUNDARIES: 'maritime',
+  HIGH_SEAS: 'maritime',
+};
+
+/**
+ * Per-layer reasons a maritime reference layer cannot draw, keyed by layer id.
+ *
+ * DISTINGUISHING THE THREE FAILURES, because they need different actions
+ * ---------------------------------------------------------------------
+ *   not installed here    the operator may install it -- an actionable step
+ *   not installed, blocked  the operator CANNOT install it; retrying will not help
+ *   corrupt                something is wrong on disk and the payload digest did not match
+ *
+ * A single "reference data unavailable" string would be wrong in all three cases: it would
+ * invite an operator to keep retrying a download that cannot succeed, and it would hide a
+ * disk fault behind what looks like a missing optional dataset.
+ *
+ * The reason is read from the dataset-health response, which is the backend's own account
+ * of the store. It is not reconstructed from the layer id, so a dataset that becomes
+ * installed mid-session reports correctly without this file changing.
+ */
+export function maritimeLayerReason(
+  health: DatasetHealthResponse | null,
+  datasetId: string,
+): string | undefined {
+  if (health === null) {
+    // Null covers both "still loading" and "the probe failed", because neither case may
+    // enable a toggle for data whose presence is unknown. The console shows a disabled row
+    // either way, and the SYSTEM panel carries the specific reason.
+    return 'The local reference-data store has not been read yet.';
+  }
+  const entry = (health.datasets ?? []).find((candidate) => candidate.id === datasetId);
+  if (entry === undefined) {
+    return `${datasetId} is not a registered dataset.`;
+  }
+  if (entry.usable) return undefined;
+
+  if (entry.install_status === 'CHECKSUM_MISMATCH' || entry.install_status === 'INVALID') {
+    return (
+      `${entry.label} is present on disk but does not match its recorded checksum. ` +
+      'Re-install it; the local copy has been altered or truncated.'
+    );
+  }
+  if (entry.blocker_reason) {
+    // Not actionable by the operator. The full cause is rendered in the SYSTEM panel; here
+    // it is shortened so the console row stays one line.
+    return `${entry.label} — TRUSTED SOURCE UNAVAILABLE. See SYSTEM for the recorded reason.`;
+  }
+  if (entry.optional) {
+    return `${entry.label} is optional and not installed.`;
+  }
+  return `${entry.label} is not installed.`;
+}
+
+/** Which dataset each maritime layer draws from. Mirrors the registry's source paths. */
+const LAYER_DATASET: Partial<Record<LayerId, string>> = {
+  REFERENCE_COASTLINE: 'natural_earth_coastline',
+  EEZ_BOUNDARIES: 'marine_regions_eez_wfs',
+  HIGH_SEAS: 'marine_regions_high_seas_wfs',
 };
 
 /**
@@ -96,17 +159,29 @@ export type LayerRow = {
  * version computed it as `unavailableReason === undefined`, which is precisely why
  * toggles could not stick.
  */
-export function deriveLayers(state: ReturnType<typeof useStore>): LayerRow[] {
+export function deriveLayers(
+  state: ReturnType<typeof useStore>,
+  maritimeHealth: DatasetHealthResponse | null = null,
+): LayerRow[] {
   const hasScan = state.scanId !== null && state.targets.length > 0;
   // Both must hold: the artifact exists AND it is actually on the globe.
   const hasRaster = state.rasterLoaded && state.scanId !== null;
   const hasAis = state.aisOnly.length > 0 || state.track !== null;
-  const satisfied: Record<Requirement, boolean> = { scan: hasScan, ais: hasAis, raster: hasRaster };
+  // Maritime layers do NOT require a scan. A coastline is the same whether or not a vessel
+  // was detected in it, and gating reference context on a detection would mean the sea is
+  // invisible on an empty scan -- which is exactly when an operator wants to see it.
+  const satisfied: Record<Requirement, boolean> = {
+    scan: hasScan,
+    ais: hasAis,
+    raster: hasRaster,
+    maritime: true,
+  };
 
   const reasons: Record<Requirement, string> = {
     scan: 'No completed scan has produced detections.',
     ais: 'No AIS source has answered for the current selection.',
     raster: 'This scan has no rendered raster artifact.',
+    maritime: '',
   };
 
   return listLayers().map((entry: LayerEntry) => {
@@ -118,6 +193,14 @@ export function deriveLayers(state: ReturnType<typeof useStore>): LayerRow[] {
     let unavailableReason = blockedReason;
     if (!unavailableReason && required !== undefined && !satisfied[required]) {
       unavailableReason = reasons[required];
+    }
+
+    // Maritime availability is read per LAYER from the backend's dataset-health account,
+    // because the three maritime layers come from three different datasets and only one of
+    // them could be missing while the others draw.
+    const datasetId = LAYER_DATASET[id];
+    if (!unavailableReason && datasetId !== undefined) {
+      unavailableReason = maritimeLayerReason(maritimeHealth, datasetId);
     }
 
     return {
@@ -136,7 +219,21 @@ export function deriveLayers(state: ReturnType<typeof useStore>): LayerRow[] {
 
 export function LayerConsole() {
   const state = useStore();
-  const rows = deriveLayers(state);
+  /*
+   * ONE health fetch for the panel, not one per layer.
+   *
+   * The three maritime layers all read the same response. Fetching per layer would triple
+   * the requests for one fact and could show two layers enabled while the third was
+   * disabled, if the responses disagreed -- which they would, being separate snapshots of
+   * the same store.
+   *
+   * A FAILED probe leaves `null`, which disables the maritime rows with "the store has not
+   * been read yet" rather than enabling them optimistically. Offering a toggle for data
+   * whose presence is unknown is the inert-control failure in a new place.
+   */
+  const health = useDatasetHealth();
+  const healthValue = health.status === 'ready' ? health.value : null;
+  const rows = deriveLayers(state, healthValue);
 
   /**
    * Write one layer's choice to the store.
