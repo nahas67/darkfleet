@@ -25,3 +25,5 @@ backend/tests/_tmp_*/
 **/_tmp_contract_data/
 # Frontend
 # (package-lock.json is intentionally tracked once Gate 0B creates it)
+
+tsconfig.tsbuildinfo
