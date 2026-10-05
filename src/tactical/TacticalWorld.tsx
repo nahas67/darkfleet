@@ -36,13 +36,16 @@ import type { AisObservationOut, VesselTarget } from '../api/contract';
  */
 function buildTrackGeometries(
   observations: readonly AisObservationOut[],
-): Map<string, Array<{ lat: number; lon: number }>> {
-  const byMmsi = new Map<string, Array<{ lat: number; lon: number }>>();
+): Map<string, Array<{ lat: number; lon: number; at: string }>> {
+  const byMmsi = new Map<string, Array<{ lat: number; lon: number; at: string }>>();
   for (const observation of [...observations].sort(
     (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
   )) {
     const fixes = byMmsi.get(observation.mmsi) ?? [];
-    fixes.push({ lat: observation.lat, lon: observation.lon });
+    // `at` is carried because the renderer needs it to tell an observed interval from a reporting
+    // GAP. Without it the track is one polyline through everything, which is the defect
+    // `segmentTrack` exists to prevent.
+    fixes.push({ lat: observation.lat, lon: observation.lon, at: observation.timestamp });
     byMmsi.set(observation.mmsi, fixes);
   }
   for (const [mmsi, fixes] of [...byMmsi]) {
@@ -222,12 +225,59 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     // until the next target update, at which point every switched-off layer would
     // reappear. One call per batch keeps the store the single authority.
     engine.refreshLayers();
-  }, [targets, selection, state.aisOnly, webgl, initError]);
+  }, [
+    targets,
+    selection,
+    state.aisOnly,
+    /*
+     * THE THREE DEPENDENCIES THAT WERE MISSING, AND WHY EACH ONE MATTERS.
+     *
+     * This effect READS all three of these and originally declared NONE of them. React's dependency
+     * array is not documentation -- it is the list of values whose change re-runs the effect -- so a
+     * value read but not listed is read once and then never again when it actually changes.
+     *
+     *   aisReferenceTime   Set by `loadScanAis`, which is a SEPARATE async call from the one that
+     *                     populates `targets`. It arrives after this effect has already run, so
+     *                     without it here every contact's freshness was computed against a null
+     *                     reference and stayed UNKNOWN forever.
+     *
+     *   aisObservations    Same separate async path. Without it, the observation markers and the
+     *                     track polylines were never built at all: the effect ran once with an empty
+     *                     array and was not re-run when 27 rows arrived.
+     *
+     *   targetDetail       THE ONE THAT BROKE AIS_PREDICTED ENTIRELY. It is populated from the scan
+     *                     record's `corr.predictedLat/predictedLon`, on yet another async path, and
+     *                     it is RESET to `[]` at the start of a scan load. So the sequence was:
+     *                     selection or targets change -> effect runs -> targetDetail still in flight
+     *                     -> `collectPredictedPoints` returns [] -> nothing re-runs the effect ->
+     *                     the predicted layer can never draw. The layer toggle read as enabled and
+     *                     rendered nothing, which is the exact inert-toggle defect DF-X9.3D exists
+     *                     to close, re-created one level up in the component tree.
+     */
+    state.aisReferenceTime,
+    state.aisObservations,
+    state.targetDetail,
+    webgl,
+    initError,
+  ]);
 
   // The observed track, split so propagation is visibly a hypothesis.
   const track = state.track;
   useEffect(() => {
     if (!webgl || initError !== null) return;
+    /*
+     * The dossier's SINGLE-VESSEL track only.
+     *
+     * The globe-wide track is drawn by `AisContactRenderer`, from `state.aisObservations`, in the
+     * renderer's own `PolylineCollection`. Passing it here as well drew the SAME fixes twice -- a
+     * green 4 px entity from this path, bound to `AIS_CONTACTS`, and a white 7 px billboard from the
+     * renderer, bound to `AIS_TRACKS`. Two markers, two layers, one archive: switching off
+     * `AIS_CONTACTS` hid one and left the other behind.
+     *
+     * So this path exists only for the SELECTED vessel's dossier track, which the renderer does not
+     * draw, and `predicted` is still `null` because the analytical predicted geometry comes from
+     * the renderer's own collection off the scan record.
+     */
     const observed = (track?.observed ?? []).map((fix) => ({ lat: fix.lat, lon: fix.lon }));
     engine.setTrack(observed, null);
     engine.refreshLayers();

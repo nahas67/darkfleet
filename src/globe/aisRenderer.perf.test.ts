@@ -274,18 +274,23 @@ const SIZES = [100, 1000, 5000] as const;
 /*
  * Measured ONCE, at module scope, and shared by both describes.
  *
- * The reporting describe previously re-derived its own `measurements`, which meant the printed
- * table and the asserted table were two separate runs of the same code -- so the numbers in the
- * record were not the numbers the gates were decided on. One measurement, quoted by both.
+ * The reporting describe previously re-derived its own `measurements`, which meant the printed table
+ * and the asserted table were two separate runs of the same code -- so the numbers in the record
+ * were not the numbers the gates were decided on. One measurement, quoted by both.
  *
- * SIZES ARE MEASURED SMALLEST-FIRST, and that ordering is visible in the results: the 100-contact
- * row reports a HIGHER per-contact cost than the 5,000 row (225 us vs 25 us). That is JIT warm-up,
- * not an architecture that gets more efficient with load. `measure()` warms on five vessels before
- * timing, which is enough to compile the code path but not to fully tier it up.
+ * NO PINNED FIGURES APPEAR IN THIS FILE, AND THAT IS DELIBERATE.
  *
- * The scaling claim is therefore made on the WARM rows -- 1,000 against 5,000, which are both fully
- * compiled and show 31.9 us falling to 25.4 us. Reading the 100-contact row as evidence of
- * quadratic behaviour would be backwards: it is the cheapest-looking row that is least trustworthy.
+ * An earlier revision asserted against "31.9 us falling to 25.4 us" and excluded the 100-contact row
+ * on the grounds that it was the highest per-contact figure. A re-measurement then produced
+ * 21.23 -> 29.24 us for the same two rows -- the OPPOSITE direction. The figures were JIT- and
+ * machine-dependent, and writing them into the file turned one run into a permanent claim.
+ *
+ * So the gate is structural -- per-contact cost must not blow up -- and the numbers are PRINTED for
+ * the run that produced them. A reader who wants a specific figure re-runs the suite; a reader who
+ * wants a guaranteed figure is reading the wrong kind of assertion.
+ *
+ * SIZES ARE MEASURED SMALLEST-FIRST, so the 100-contact row absorbs the most JIT warm-up and is the
+ * least representative. That is why the scaling gate compares 1,000 against 5,000.
  */
 const measurements = SIZES.map((size) => ({ size, m: measure(size) }));
 
@@ -301,14 +306,13 @@ describe('AIS renderer performance', () => {
   });
 
   it('per-contact cost does not blow up with scale', () => {
-    // THE ARCHITECTURAL CLAIM, and the one worth measuring. Per-contact cost must stay broadly flat
-    // as the contact count grows 50x; if it rises steeply, some operation is quadratic and the
-    // architecture is wrong regardless of how the absolute numbers look.
+    // THE ARCHITECTURAL CLAIM. Per-contact cost must stay broadly flat as the contact count grows
+    // 50x; if it rises steeply, some operation is quadratic and the architecture is wrong regardless
+    // of how the absolute numbers look.
     //
-    // THE TWO WARM ROWS ARE COMPARED, not 100 against 5,000. See the note at the measurement site:
-    // the 100-contact row is dominated by JIT warm-up and reports the HIGHEST per-contact cost, so
-    // including it would make this test assert that a cold function looks expensive -- true, and
-    // unrelated to whether the renderer scales.
+    // The two WARM rows are compared. The 100-contact row absorbs the most JIT warm-up and is the
+    // least representative; gating on it would assert that a cold function looks expensive, which
+    // is true and says nothing about whether the renderer scales.
     const thousand = measurements.find((x) => x.size === 1000)!.m.usPerContact;
     const fiveThousand = measurements.find((x) => x.size === 5000)!.m.usPerContact;
     expect(fiveThousand).toBeLessThan(thousand * 2);
@@ -348,11 +352,12 @@ describe('AIS renderer performance', () => {
 
   it('the rebuild penalty GROWS with contact count, so it is not a fixed overhead', () => {
     // A constant overhead would be tolerable. A per-contact one scales with the fleet, which is why
-    // the retained architecture is the point.
+    // the retained architecture is the point. Both legs are measured, and neither is compared to a
+    // literal.
     const small = measureRebuiltUpdate(100);
     const large = measureRebuiltUpdate(5000);
     expect(large.allocations).toBeGreaterThan(small.allocations * 10);
-    // And in time too, allowing noise: the same 50x of work must not take the same time.
+    // And in time too: the same 50x of work must not take the same time.
     expect(large.ms).toBeGreaterThan(small.ms * 2);
   });
 

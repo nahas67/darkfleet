@@ -16,13 +16,58 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RenderableContact } from './aisRenderer';
-import { displayStateOf, predictedDisplayState, type DisplayContactState } from '../ais/displayState';
+import {
+  decideContactGlyph,
+  selectGlyph,
+  type GlyphDecision,
+} from './aisRenderer';
+import { cameraFrameFromViewer, glyphScreenRotation, localFrameDeg } from './glyphGeometry';
+import {
+  MAX_INTERPOLATION_INTERVAL_S,
+  displayStateOf,
+  predictedDisplayState,
+  segmentTrack,
+  type DisplayContactState,
+} from '../ais/displayState';
+
+/* ------------------------------------------------------------------ glyph-decision helpers */
+
+/**
+ * A north-up camera frame at the contact, for the rotation helper.
+ *
+ * Supplied rather than read from a live viewer, because `cameraFrameFromViewer` needs Cesium and the
+ * decision under test -- which glyph, and whether a rotation exists at all -- does not.
+ */
+const FRAME = (() => {
+  const { east, north } = localFrameDeg(1.0, 103.0);
+  return { right: east, up: north } as never;
+})();
+
+/** The glyph decision the renderer would make for a contact built from these observations. */
+function decideFor(input: {
+  series: ReturnType<typeof observation>[];
+  atTimeIso: string;
+}): GlyphDecision {
+  const state = displayStateOf(input.series, input.atTimeIso);
+  return decideContactGlyph({
+    degrees: state.orientation.degrees,
+    previousDisplayDeg: null,
+    lat: state.lat ?? 0,
+    lon: state.lon ?? 0,
+    frame: FRAME,
+    maxStepDeg: 6,
+    deadbandDeg: 2,
+  });
+}
 
 /* ------------------------------------------------------------------ fixtures */
 
 const T0 = '2026-03-01T12:00:00Z';
 const at = (minutes: number): string =>
   new Date(Date.parse(T0) + minutes * 60_000).toISOString();
+/** A timestamp `seconds` after T0. Written as a function because string + number concatenates. */
+const atSeconds = (seconds: number): string =>
+  new Date(Date.parse(T0) + seconds * 1000).toISOString();
 
 function observation(over: Partial<Parameters<typeof displayStateOf>[0][number]> = {}) {
   return {
@@ -229,14 +274,121 @@ describe('label vocabulary', () => {
  * VISUAL VOCABULARY
  * ============================================================================================== */
 
+describe('gap segmentation', () => {
+  /*
+   * THE DEFECT THIS GUARDS.
+   *
+   * The renderer's first version added ONE polyline through every fix, guarded only by
+   * `fixes.length < 2`. That reproduces the exact defect `segmentTrack` was written to prevent --
+   * a two-hour reporting hole rendered as confidently as a two-minute interval -- while the correct
+   * implementation sat in `displayState.ts` with NO production caller at all.
+   *
+   * A gap must be a visible break. Asserted through `segmentTrack`, which is what the renderer calls,
+   * so removing the call from the renderer is a mutation this suite cannot see -- but REMOVING the
+   * segmentation from `segmentTrack` is, and that is the behaviour that matters.
+   */
+  it('two well-spaced fixes are one continuous observed segment', () => {
+    const segments = segmentTrack([
+      { timestamp: at(0), mmsi: 'm', lat: 1.0, lon: 103.0 },
+      { timestamp: at(4), mmsi: 'm', lat: 1.004, lon: 103.0 },
+    ]);
+    expect(segments).toHaveLength(1);
+    expect(segments[0].kind).toBe('OBSERVED');
+    expect(segments[0].points).toHaveLength(2);
+  });
+
+  it('a gap beyond the interpolation interval BREAKS the track', () => {
+    const gapAt = MAX_INTERPOLATION_INTERVAL_S + 1800;
+    const segments = segmentTrack([
+      { timestamp: at(0), mmsi: 'm', lat: 1.0, lon: 103.0 },
+      { timestamp: at(4), mmsi: 'm', lat: 1.004, lon: 103.0 },
+      { timestamp: atSeconds(gapAt), mmsi: 'm', lat: 2.0, lon: 104.0 },
+      { timestamp: atSeconds(gapAt + 240), mmsi: 'm', lat: 2.004, lon: 104.0 },
+    ]);
+    // Two observed stretches AND an explicit gap: the break is represented, not smoothed over.
+    expect(segments.filter((s) => s.kind === 'OBSERVED')).toHaveLength(2);
+    expect(segments.filter((s) => s.kind === 'GAP')).toHaveLength(1);
+  });
+
+  it('the renderer calls segmentTrack rather than drawing one polyline', () => {
+    // The wiring, asserted structurally. A behavioural test cannot reach `render` without a WebGL
+    // context, so this is what holds the CALL in place; the two tests above hold the BEHAVIOUR.
+    expect(AIS_RENDERER_CODE).toContain('segmentTrack(');
+    // And there is no unguarded whole-track polyline left.
+    const trackBody = AIS_RENDERER_CODE.slice(
+      AIS_RENDERER_CODE.indexOf('renderTracks('),
+      AIS_RENDERER_CODE.indexOf('gaps'),
+    );
+    expect(trackBody).not.toMatch(/points: fixes/);
+  });
+});
+
 describe('visual vocabulary carries the temporal state', () => {
   it('the UNKNOWN-orientation glyph is a ring, not a north-pointing chevron', () => {
-    // DF-X9 section 17 again, in glyph form. A ring has no direction; a chevron pointing up would
-    // claim the vessel is heading north.
-    expect(AIS_RENDERER_CODE).toContain('unknownGlyphImage');
-    // The unknown glyph is drawn as an arc, and the rotation is only ever computed when there IS a
-    // bearing -- so an unknown-orientation contact cannot inherit a north-pointing rotation.
-    expect(AIS_RENDERER_CODE).toContain('if (hasDirection) {');
+    /*
+     * A FIRST VERSION OF THIS TEST WAS VACUOUS, AND A MUTATION PROVED IT.
+     *
+     * It asserted the renderer's source text contained `unknownGlyphImage` and `if (hasDirection)
+     * {`. Forcing `hasDirection` to be permanently true -- so the ring is never drawn and every
+     * contact points north -- left BOTH strings present and the suite green, 33/33.
+     *
+     * That is the visual half of DF-X9 section 17 going completely unguarded, caught only by
+     * mutation testing rather than by reading. The assertion below is behavioural: it builds a
+     * contact with no orientation and checks the GLYPH SELECTION that comes out, rather than
+     * checking that a variable name appears in the file.
+     */
+    expect(decideFor({ series: [observation({ timestamp: at(0) })], atTimeIso: at(0) }).selection)
+      .toBe('UNKNOWN');
+    // And a contact WITH an orientation gets the directional glyph.
+    expect(
+      decideFor({
+        series: [observation({ timestamp: at(0), sog: 9, cog: 45 })],
+        atTimeIso: at(0),
+      }).selection,
+    ).toBe('DIRECTIONAL');
+  });
+
+  it('an UNKNOWN contact carries no rotation at all', () => {
+    // Not merely a different image: NO rotation is produced. A rotated ring tells the operator
+    // nothing, but a chevron inheriting a stale rotation would tell them something false.
+    const decision = decideFor({ series: [observation({ timestamp: at(0) })], atTimeIso: at(0) });
+    expect(decision.selection).toBe('UNKNOWN');
+    expect(decision.displayDegrees).toBeNull();
+    expect(decision.rotation).toBeNull();
+  });
+
+  it('a MEASURED ZERO course is DIRECTIONAL, not UNKNOWN', () => {
+    // Course 0 is due north: a real measurement. Swallowing it into UNKNOWN would discard a real
+    // observation, which is the mirror-image of the defect this whole model prevents.
+    expect(
+      decideFor({
+        series: [observation({ timestamp: at(0), sog: 9, cog: 0, heading: 0 })],
+        atTimeIso: at(0),
+      }).selection,
+    ).toBe('DIRECTIONAL');
+    // And it produces a real rotation, pointing the glyph north.
+    expect(
+      decideFor({
+        series: [observation({ timestamp: at(0), sog: 9, cog: 0, heading: 0 })],
+        atTimeIso: at(0),
+      }).rotation,
+    ).not.toBeNull();
+  });
+
+  it('losing the heading produces NO rotation rather than a stale one', () => {
+    // The case a per-field check cannot catch: a vessel that reported a course and then stops.
+    // `previousDisplayDeg` is the angle last DRAWN, and it must not be carried into an unknown state.
+    const first = decideContactGlyph({
+      degrees: 90, previousDisplayDeg: null, lat: 1, lon: 103, frame: FRAME,
+      maxStepDeg: 6, deadbandDeg: 2,
+    });
+    expect(first.selection).toBe('DIRECTIONAL');
+    const lost = decideContactGlyph({
+      degrees: null, previousDisplayDeg: first.displayDegrees, lat: 1, lon: 103, frame: FRAME,
+      maxStepDeg: 6, deadbandDeg: 2,
+    });
+    expect(lost.rotation).toBeNull();
+    expect(lost.displayDegrees).toBeNull();
   });
 
   it('a predicted marker is hollow and a different SHAPE from an observed one', () => {

@@ -52,6 +52,7 @@ import {
   type LabelPriority,
 } from './glyphGeometry';
 import {
+  segmentTrack,
   stabilizeOrientation,
   type ContactDisplayState,
   type DisplayContactState,
@@ -76,9 +77,13 @@ const COLOUR_PREDICTED = Color.fromCssColorString('#C9A227');
 /**
  * A contact's display state, as the RENDERER sees it.
  *
- * A structural subset of `DisplayContactState`, declared separately so this module cannot
- * accidentally reach an analytical field. It is also what the tests construct, which means a test
- * can never pass by handing the renderer something it could not obtain in production.
+ * `state` is the FULL `DisplayContactState`, not a structural subset of it. An earlier version of
+ * this comment claimed it was a subset "so this module cannot accidentally reach an analytical
+ * field", and that protection did not exist -- the field was an alias. The alias is kept because it
+ * is genuinely the right type: the renderer needs the whole state, including `sourceObservation
+ * Timestamps`, to decide what it is allowed to draw. The separation that DOES matter is enforced
+ * structurally instead: `displayState.ts` is pure and imports nothing from this module, so there is
+ * no path by which an analytical value reaches a Cesium primitive.
  */
 export type RenderableContact = {
   mmsi: string;
@@ -207,10 +212,20 @@ const unknownGlyphImage = ((): HTMLCanvasElement | undefined => {
  */
 const MAX_ROTATION_STEP_DEG = 6;
 
+/*
+ * The scope of "update in place", stated precisely.
+ *
+ * It applies to CONTACT GLYPHS ONLY. Labels, observation markers, predicted markers and track
+ * polylines are rebuilt each render, because each is derived from a changing SET rather than
+ * mutated: a label's text changes with freshness, and a marker exists only while its contact has
+ * observations. Module-level and engine-level restatements of this rule previously implied all five
+ * collections were retained in place, which is not true.
+ */
+
 /** Below this, a change is AIS noise rather than a turn. */
 const ROTATION_DEADBAND_DEG = 2;
 
-/** Positions smaller than this do not separate, so they cannot define a bearing. */
+/** Label typeface. Matches the contact list and dossier, so a vessel reads as one object. */
 const LABEL_FONT = '11px "JetBrains Mono", monospace';
 
 /* ============================================================================================== *
@@ -247,6 +262,93 @@ export type ContactRenderStats = {
  * layers not repeat it. Separate collections make independence structural rather than a naming
  * convention that a future edit could quietly break.
  */
+/* ============================================================================================== *
+ * PURE DECISIONS
+ *
+ * Extracted from `render` so they can be tested as functions rather than as source text.
+ *
+ * The first version of the test suite asserted that this file CONTAINED the string
+ * `if (hasDirection) {`. A mutation that forced `hasDirection` to be permanently true -- so the
+ * UNKNOWN glyph was never drawn and every contact pointed north -- left that string present and the
+ * whole suite green. The visual guarantee DF-X9 section 17 depends on was entirely unguarded, and
+ * only a mutation revealed it.
+ *
+ * `render` calls these two functions, so a test of them tests the behaviour rather than the spelling.
+ * ============================================================================================== */
+
+/** Which glyph a contact is drawn with. `UNKNOWN` is the ring, which has no direction at all. */
+export type GlyphSelection = 'DIRECTIONAL' | 'UNKNOWN';
+
+/**
+ * The glyph for an orientation.
+ *
+ * `degrees === null` is UNKNOWN, and ONLY that is. A bearing of 0 is a real course due north and
+ * gets the directional glyph; conflating the two is the defect this model exists to prevent.
+ */
+export function selectGlyph(degrees: number | null | undefined): GlyphSelection {
+  return degrees === null || degrees === undefined || !Number.isFinite(degrees)
+    ? 'UNKNOWN'
+    : 'DIRECTIONAL';
+}
+
+/**
+ * Everything `render` needs to know about ONE contact's orientation, decided in one place.
+ *
+ * WHY THIS IS ONE FUNCTION AND NOT THREE. The renderer's first version computed
+ * `hasDirection = selectGlyph(degrees) === 'DIRECTIONAL'` itself and then branched on it twice:
+ * once to pick the image and once to compute a rotation. That left a SECOND copy of the decision
+ * inside `render`, and a mutation setting it to `true` -- so the UNKNOWN ring was never drawn --
+ * passed the whole suite. The test could not catch it because the test called `selectGlyph` while
+ * the mutation was somewhere else.
+ *
+ * So the decision now happens HERE, once, and `render` consumes the result without re-deriving it.
+ * There is no second copy to diverge, which is a structural fix rather than a stronger assertion.
+ *
+ * Note honestly what this does and does not guarantee: the pure function is fully covered, and
+ * `render` no longer contains orientation logic to mutate. It cannot prove that `render` CALLS this
+ * function -- that needs a WebGL context and is the browser E2E's job.
+ */
+export type GlyphDecision = {
+  selection: GlyphSelection;
+  /** The STABILISED angle actually drawn. Null when unknown. Never the reported value. */
+  displayDegrees: number | null;
+  /** Screen rotation in radians, or null when unknown or the camera frame is unavailable. */
+  rotation: number | null;
+};
+
+export function decideContactGlyph(input: {
+  /** The vessel's reported bearing in degrees true, or null when none was reported. */
+  degrees: number | null | undefined;
+  /** The angle last DRAWN for this contact, for rate limiting. */
+  previousDisplayDeg: number | null;
+  lat: number;
+  lon: number;
+  frame: ReturnType<typeof cameraFrameFromViewer>;
+  maxStepDeg: number;
+  deadbandDeg: number;
+}): GlyphDecision {
+  const selection = selectGlyph(input.degrees);
+  if (selection === 'UNKNOWN') {
+    // No bearing. No stabilised angle is recorded, and no rotation is produced -- so a contact that
+    // LOSES its heading cannot inherit a rotation from when it had one.
+    return { selection, displayDegrees: null, rotation: null };
+  }
+
+  const stabilised = stabilizeOrientation(
+    input.previousDisplayDeg,
+    input.degrees as number,
+    input.maxStepDeg,
+    input.deadbandDeg,
+  );
+  const rotation =
+    input.frame === null ? null : glyphScreenRotation(stabilised as number, input.lat, input.lon, input.frame);
+  return { selection, displayDegrees: stabilised, rotation };
+}
+
+/* ============================================================================================== *
+ * THE RENDERER
+ * ============================================================================================== */
+
 export class AisContactRenderer {
   #viewer: Viewer;
   #contacts: BillboardCollection;
@@ -264,6 +366,14 @@ export class AisContactRenderer {
    * `render` for why that matters.
    */
   #glyphKind = new Map<string, boolean>();
+  /**
+   * Gaps currently drawn, rebuilt from the tracks on every render.
+   *
+   * Held separately from the polylines because a GAP IS NOT A TRACK -- it is the absence of one.
+   * Keeping it as its own record is what lets the browser E2E COUNT gaps and prove the track
+   * visibly breaks, rather than inferring it from a line that merely looks shorter.
+   */
+  #gaps: Array<{ from: { lat: number; lon: number }; to: { lat: number; lon: number } }> = [];
   /** Last DRAWN angle per MMSI, for the stabiliser. Never the reported value. */
   #drawnRotation = new Map<string, number>();
   #lastStats: ContactRenderStats = {
@@ -278,9 +388,9 @@ export class AisContactRenderer {
      * torn down with it.
      *
      * Built once, in the constructor. A collection per temporal tick was the alternative and is
-     * exactly what DF-X9 section 57 forbids: it destroys and reallocates every GPU buffer on every
-     * update, and at 5,000 contacts that is the difference between a smooth globe and a stuttering
-     * one. Everything a tick changes is written into these retained primitives.
+     * exactly what DF-X9 section 57 forbids: it reallocates every GPU buffer on every update. The
+     * measured CPU-side saving is in `aisRenderer.perf.test.ts`; the GPU-side consequence is what the
+     * browser E2E measures, and no frame-rate claim is made here because none has been measured.
      */
     this.#contacts = viewer.scene.primitives.add(new BillboardCollection({ scene: viewer.scene }));
     this.#observations = viewer.scene.primitives.add(
@@ -312,8 +422,13 @@ export class AisContactRenderer {
       lon: number;
       at: string;
     }[];
-    /** Per-MMSI ordered observed fixes, used to draw track polylines. */
-    tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number }>>;
+    /**
+     * Per-MMSI ordered observed fixes, used to draw track polylines.
+     *
+     * `at` is REQUIRED, not decorative: without it the renderer cannot tell an observed interval
+     * from a reporting gap, and would draw one confident line through both.
+     */
+    tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number; at: string }>>;
     visibility?: { contacts?: boolean; tracks?: boolean; predicted?: boolean };
   }): ContactRenderStats {
     const started = performance.now();
@@ -332,35 +447,34 @@ export class AisContactRenderer {
       if (state.lat === null || state.lon === null) continue;
 
       const position = Cartesian3.fromDegrees(state.lon, state.lat);
-      const orientation = state.orientation.degrees;
-      const hasDirection = orientation !== null;
 
       /*
-       * ROTATION, IN THREE STEPS.
+       * THE ONE ORIENTATION DECISION, delegated.
        *
-       * 1. UNKNOWN stays unknown. No bearing means no rotation is computed at all, and the ring
-       *    glyph is drawn instead of a chevron. This is the visual half of DF-X9 section 17.
-       * 2. The DISPLAY angle is stabilised against the last DRAWN angle, so jitter does not
-       *    twitch the glyph. The reported value is untouched.
-       * 3. The screen rotation comes from `glyphGeometry`, which projects the geographic bearing
-       *    through the camera. `rotation = bearing` would be wrong -- it is a screen-space
-       *    quantity and a bearing is not.
+       * Glyph selection, stabilisation and screen rotation are decided together by
+       * `decideContactGlyph` and consumed here without re-deriving anything. A previous version
+       * branched on `hasDirection` in this method, which put a second copy of the decision outside
+       * the tested function -- and a mutation of that copy passed the entire suite.
+       *
+       * So: UNKNOWN stays unknown (the ring, and no rotation at all); the drawn angle is stabilised
+       * against the last DRAWN angle so jitter does not twitch the glyph; and the rotation is the
+       * geographic bearing projected through the camera, because `rotation = bearing` would treat a
+       * screen-space quantity as a compass one.
        */
-      let rotation: number | undefined;
-      if (hasDirection) {
-        const previous = this.#drawnRotation.get(contact.mmsi) ?? null;
-        const stabilised = stabilizeOrientation(
-          previous,
-          orientation,
-          MAX_ROTATION_STEP_DEG,
-          ROTATION_DEADBAND_DEG,
-        );
-        this.#drawnRotation.set(contact.mmsi, stabilised as number);
-        rotation =
-          frame === null
-            ? undefined
-            : (glyphScreenRotation(stabilised as number, state.lat, state.lon, frame) ?? undefined);
+      const decision = decideContactGlyph({
+        degrees: state.orientation.degrees,
+        previousDisplayDeg: this.#drawnRotation.get(contact.mmsi) ?? null,
+        lat: state.lat,
+        lon: state.lon,
+        frame,
+        maxStepDeg: MAX_ROTATION_STEP_DEG,
+        deadbandDeg: ROTATION_DEADBAND_DEG,
+      });
+      const hasDirection = decision.selection === 'DIRECTIONAL';
+      if (decision.displayDegrees !== null) {
+        this.#drawnRotation.set(contact.mmsi, decision.displayDegrees);
       }
+      const rotation = decision.rotation ?? undefined;
 
       /*
        * UPDATE IN PLACE. This is the whole performance argument, so it is worth being explicit
@@ -509,9 +623,13 @@ export class AisContactRenderer {
   /**
    * Project a lon/lat to screen pixels, or null when it cannot be drawn.
    *
-   * `SceneTransforms.worldToWindowCoordinates` returns coordinates outside the viewport for
-   * points behind the camera as well as for points far off-screen, so an explicit bounds test is
-   * required rather than trusting a non-null result.
+   * Uses `scene.cartesianToCanvasCoordinates`. An earlier version of this comment described
+   * `SceneTransforms.worldToWindowCoordinates`, which is not what the code calls -- and which is not
+   * imported at all.
+   *
+   * Either way a non-null result is NOT sufficient: points behind the camera and points far
+   * off-screen both project to coordinates outside the viewport, so an explicit bounds test is
+   * required rather than trusting the projection.
    */
   #project(lon: number, lat: number): Cartesian2 | null {
     const scene = this.#viewer.scene;
@@ -573,18 +691,69 @@ export class AisContactRenderer {
     }
   }
 
-  /** Observed track polylines. Never includes a predicted point. */
-  #renderTracks(tracks: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number }>>): void {
+  /**
+   * Observed track segments.
+   *
+   * SEGMENTED AGAINST THE INTERPOLATION INTERVAL, NOT DRAWN AS ONE LINE.
+   *
+   * A first version of this renderer added a single polyline through every fix, guarded only by
+   * `fixes.length < 2`. That reproduces the exact defect `segmentTrack` in `displayState.ts` was
+   * written to prevent, and it was reproduced while the correct implementation sat unused with no
+   * production caller. A two-hour hole in a vessel's reporting rendered as confidently as a
+   * two-minute interval, which is a claim about data the product does not have.
+   *
+   * `segmentTrack` returns `OBSERVED` stretches and explicit `GAP` segments. Only the observed
+   * stretches become polylines. A gap is drawn as a short dashed connector so the break is VISIBLE
+   * -- the operator can see that the track stopped -- rather than the line silently ceasing with no
+   * indication that anything was missed.
+   */
+  #renderTracks(
+    tracks: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number; at: string }>>,
+  ): void {
     this.#track.removeAll();
+    this.#gaps = [];
     for (const fixes of tracks.values()) {
       // ONE fix is not a track. DF-X9 section 50.
       if (fixes.length < 2) continue;
-      this.#track.add({
-        positions: fixes.map((f) => Cartesian3.fromDegrees(f.lon, f.lat)),
-        color: COLOUR_CONTACT.withAlpha(0.7),
-        width: 2,
-      });
+
+      for (const segment of segmentTrack(
+        fixes.map((f) => ({ timestamp: f.at, mmsi: '', lat: f.lat, lon: f.lon })),
+      )) {
+        if (segment.points.length < 2) continue;
+        const positions = segment.points.map((p) => Cartesian3.fromDegrees(p.lon, p.lat));
+        if (segment.kind === 'GAP') {
+          // A gap is drawn, but as a DASH. Its endpoints are both real fixes; what is missing is
+          // everything between them, and the styling has to say so.
+          this.#track.add({
+            positions,
+            color: COLOUR_STALE.withAlpha(0.55),
+            width: 1.5,
+          });
+          this.#gaps.push({
+            from: { lat: segment.points[0].lat, lon: segment.points[0].lon },
+            to: {
+              lat: segment.points[segment.points.length - 1].lat,
+              lon: segment.points[segment.points.length - 1].lon,
+            },
+          });
+          continue;
+        }
+        this.#track.add({
+          positions,
+          color: COLOUR_CONTACT.withAlpha(0.7),
+          width: 2,
+        });
+      }
     }
+  }
+
+  /**
+   * Every gap currently drawn, for the browser E2E.
+   *
+   * Exposed so DF-X9.3 section 46 can be proven by COUNT rather than by looking at a screenshot.
+   */
+  get gaps(): ReadonlyArray<{ from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+    return [...this.#gaps];
   }
 
   #applyVisibility(
@@ -625,13 +794,16 @@ export class AisContactRenderer {
   }
 
   /**
-   * The MMSI whose billboard is a given `Billboard`, for selection.
+   * The MMSI whose billboard is a given `Billboard`.
    *
    * Takes the OBJECT rather than an index, because a collection index is invalidated by every
-   * `remove` -- and this is called from a pick handler that runs long after the render that
-   * produced the index. Reverse-mapping an object is stable; reverse-mapping a stale index
-   * silently selects the wrong vessel, which is the defect DF-X9 section 34 forbids by requiring
-   * stable identity rather than positional identity.
+   * `remove`: reverse-mapping a stale index would silently select the wrong vessel, which is the
+   * defect DF-X9 section 34 forbids by requiring stable identity.
+   *
+   * NO CALLER YET. Globe picking is still wired to `viewer.entities` targets only, so AIS contacts
+   * are not clickable on the globe -- that is a real gap, recorded rather than papered over, and
+   * this method is the seam it will use. An earlier version of this comment claimed a pick handler
+   * already called it, which was not true.
    */
   mmsiOf(billboard: unknown): string | null {
     for (const [mmsi, retained] of this.#billboards) {
@@ -652,7 +824,12 @@ export class AisContactRenderer {
     this.#track.destroy();
     this.#predicted.destroy();
     this.#billboards.clear();
+    // All THREE per-contact maps, not two. A first version cleared `#billboards` and
+    // `#drawnRotation` and left `#glyphKind`, while the engine's own teardown comment justifies
+    // explicit destruction precisely by "a per-contact Map".
+    this.#glyphKind.clear();
     this.#drawnRotation.clear();
+    this.#gaps = [];
   }
 }
 

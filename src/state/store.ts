@@ -288,13 +288,24 @@ export type State = {
    * This is the temporal authority for every freshness and interpolation decision, and it is
    * deliberately NOT a wall clock. The deployment has no live AIS feed -- `/api/scans/{id}/events`
    * carries scan-stage lifecycle only, and `GET /api/ais/coverage` reports `NOT_CONFIGURED` -- so
-   * measuring freshness against `Date.now()` would mark every archived contact stale and assert
-   * that every vessel stopped transmitting. That is a confident false claim about a machine that
-   * has never claimed live tracking.
+   * measuring freshness against `Date.now()` would mark every archived contact stale and assert that
+   * every vessel stopped transmitting. That is a confident false claim about a machine that has
+   * never claimed live tracking.
    *
-   * It resolves, in order: an operator-chosen timeline position, then the scan's acquisition time,
-   * then null. A null reference time means freshness is UNKNOWN rather than CURRENT, because a
-   * contact cannot be shown to be current against an instant nobody has established.
+   * RESOLUTION, exactly as `loadScanAis` implements it:
+   *
+   *   1. the scan's acquisition time, from the AIS response or the loaded scene
+   *   2. the END of the AIS window the response itself declares
+   *   3. null
+   *
+   * There is NO operator-chosen timeline position. An earlier version of this comment claimed one
+   * existed; it does not, and adding a timeline cursor is DF-X9.4's temporal-playback work.
+   *
+   * The window END rather than its START: the start would place the reference before the contacts it
+   * is meant to describe, making every one of them read as from the future.
+   *
+   * A null reference time means freshness is UNKNOWN rather than CURRENT, because a contact cannot
+   * be shown to be current against an instant nobody has established.
    */
   aisReferenceTime: string | null;
 

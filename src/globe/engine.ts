@@ -108,7 +108,6 @@ export class TacticalEngine {
   #aoiEntity: unknown = null;
   #graticuleProvider: ImageryLayer | null = null;
   #footprintEntity: unknown = null;
-  #aisEntities: Array<unknown> = [];
   /**
    * The retained AIS renderer, or null before the first `setAisContacts`.
    *
@@ -450,7 +449,7 @@ export class TacticalEngine {
         lon: number;
         at: string;
       }[];
-      tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number }>>;
+      tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number; at: string }>>;
     },
   ): void {
     const viewer = this.#viewer;
@@ -562,9 +561,20 @@ export class TacticalEngine {
    * comes from the scan-targets response, while the SERIES comes from the AIS archive. Without
    * this, `DERIVED_TRACK` orientation could never fire, since one fix cannot define a bearing.
    */
-  setAisObservationSeries(series: ReadonlyMap<string, readonly AisObservationOut[]>): void {
+  setAisObservationSeries(
+    series: ReadonlyMap<string, readonly AisObservationOut[]>,
+  ): void {
+    // COPIED, not aliased. The caller hands over objects from the store, and the renderer's
+    // orientation logic must never be able to reach back and mutate an observation.
+    //
+    // The ARRAY is copied and the ROWS are shared. A first version aliased both, which left an
+    // untested aliasing boundary between the store and the renderer: safe today only because
+    // nothing mutates a row, and "nothing does today" is not a property a reader can verify.
     this.#aisSeriesByMmsi = new Map(
-      [...series.entries()].map(([mmsi, rows]) => [mmsi, [...rows]]),
+      [...series.entries()].map(([mmsi, rows]) => [
+        mmsi,
+        rows.map((row) => ({ ...row })),
+      ]),
     );
   }
 
@@ -581,8 +591,10 @@ export class TacticalEngine {
   /**
    * Why the AIS layer is not drawing, or null when it is.
    *
-   * Exposed so the failure is visible to the operator rather than being a silently empty layer,
-   * which is indistinguishable from an archive with no observations.
+   * RECORDED, AND NOT YET SURFACED TO THE OPERATOR. An earlier version of this comment claimed that
+   * exposing it made the failure visible; nothing renders this value, so the layer is still silently
+   * empty when the renderer fails to build. Surfacing it is owed, and the honest state of that debt
+   * is recorded here rather than implied by the word "exposed".
    */
   get aisRenderFailureReason(): string | null {
     return this.#aisRenderFailure;
@@ -1287,9 +1299,6 @@ export class TacticalEngine {
 
     for (const { entity } of this.#targetEntities.values()) apply('SAR_DETECTIONS', entity);
     applyEach('UNCERTAINTY_RADII', this.#uncertaintyEntities);
-    // AIS_CONTACTS is applied INSIDE the renderer, which owns its own retained collections.
-    // Applying it here as well would toggle an array the renderer no longer uses -- the old
-    // `#aisEntities`, which is now empty and kept only so the picking and visibility paths compile.
     applyEach('SAR_SCENE_FOOTPRINT', this.#footprintEntity ? [this.#footprintEntity] : []);
     applyEach('CORRELATION_LINKS', this.#linkEntities);
     // Maritime reference layers, each from its OWN array. Sharing one array would make a
@@ -1307,22 +1316,22 @@ export class TacticalEngine {
      * default: the mapping depends on them.
      */
     /*
-     * `AIS_TRACKS` and `AIS_PREDICTED` are applied INSIDE the renderer now.
+     * THE NAME-BASED PREDICTED BRANCH IS GONE.
      *
-     * They used to share one entity array and could only be told apart by entity NAME, which is
-     * precisely why `AIS_PREDICTED` was an inert toggle: the only caller passed `predicted = null`,
-     * so its branch never matched anything while the layer still read as enabled.
+     * The comment above describes the arrangement this commit replaced: `AIS_TRACKS` and
+     * `AIS_PREDICTED` shared one entity array and were separated only by a substring of the entity
+     * NAME. That is precisely why the predicted layer was inert -- the only caller passed
+     * `predicted = null`, so no entity ever matched, while the toggle still read as enabled.
      *
-     * The renderer now owns a separate collection for each, so the two are structurally independent
-     * rather than distinguished by a substring.
+     * Leaving the branch in place would have kept a permanently-unreachable predicate next to a
+     * comment diagnosing why it is unreachable. Both layers are now applied inside the renderer,
+     * which owns a separate collection for each, so independence is structural rather than a
+     * substring a future edit could break.
+     *
+     * `#trackEntities` remains, because the DOSSIER's single-vessel track still draws through it,
+     * and those entities belong to `AIS_TRACKS`.
      */
-    for (const entity of this.#trackEntities) {
-      const name = this.#entityName(entity);
-      // The dossier track path still uses these entities, so both layers keep applying to them.
-      if (name.includes('predicted')) apply('AIS_PREDICTED', entity);
-      else if (name === 'ais-fix') apply('AIS_CONTACTS', entity);
-      else apply('AIS_TRACKS', entity);
-    }
+    for (const entity of this.#trackEntities) apply('AIS_TRACKS', entity);
     this.#aisRenderer?.setVisibility({
       contacts: this.#isVisible('AIS_CONTACTS'),
       tracks: this.#isVisible('AIS_TRACKS'),
