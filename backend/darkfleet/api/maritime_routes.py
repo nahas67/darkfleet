@@ -29,12 +29,20 @@ that did resolve.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from collections.abc import Callable
+
+from fastapi import APIRouter, Query, Request
 from fastapi import status as http_status
 
+from darkfleet.api.maritime_geometry_models import (
+    CoastlineGeometryResponse,
+    DatasetHealthResponse,
+    ZoneGeometryResponse,
+)
 from darkfleet.api.maritime_models import TargetMaritimeContextResponse
 from darkfleet.api.routes import State, api_error
 from darkfleet.jobs.models import is_terminal
+from darkfleet.maritime.display_service import coastline_layer, dataset_health, zone_layer
 from darkfleet.maritime.service import build_context
 
 #: The ``/api`` prefix matches the core router. Without it the route registers at the
@@ -128,3 +136,102 @@ def target_maritime_context(
         latitude=float(latitude),
         longitude=float(longitude),
     )
+
+
+# ===========================================================================
+# Display geometry and dataset health
+# ===========================================================================
+#
+# NOT scan-scoped, and deliberately so: these describe the WORLD, not a target. A
+# coastline is the same whether or not a vessel was detected in it, and making the globe
+# wait for a scan before it can draw the sea would be backwards.
+#
+# They carry no target identity because they have none, and adding one would imply they
+# were computed for a vessel when they were not.
+
+
+@router.get("/maritime/datasets", response_model=DatasetHealthResponse)
+def maritime_datasets(request: Request) -> DatasetHealthResponse:
+    """Local reference-dataset state (DF-X8.5).
+
+    Separate from `/api/providers/health` on purpose: those are remote HTTP sources with a
+    live-uptime meaning, these are files on this disk. Merging them would let a healthy
+    basemap imply healthy reference data.
+    """
+    state: State = request.app.state.darkfleet_state
+    return dataset_health(state.data_dir)
+
+
+@router.get(
+    "/maritime/layers/REFERENCE_COASTLINE",
+    response_model=CoastlineGeometryResponse,
+    tags=["maritime"],
+)
+def maritime_coastline_layer(
+    request: Request,
+    tolerance_deg: float = Query(
+        default=0.02, ge=0.001, le=1.0,
+        description="Simplification tolerance in degrees. Non-zero means the drawing is "
+                    "not the data; the backend's analytical authority is unaffected.",
+    ),
+) -> CoastlineGeometryResponse:
+    """Simplified Natural Earth coastline for the globe (DF-X8.5).
+
+    LITERAL PATH SEGMENT, NOT A PATH PARAMETER
+    -------------------------------------------
+    `/maritime/layers/{layer}` with one response model would force a union: a coastline
+    request returns ``lines`` and an EEZ request returns ``polygons``, and the generated
+    TypeScript would then have to model "either shape or neither". Three literal paths
+    give each layer its OWN strict model, so the generated contract cannot describe a
+    response that mixes the two -- and a wrong layer name is a 404 naming the right path
+    instead of a confusing shape mismatch in the client.
+    """
+    state: State = request.app.state.darkfleet_state
+    return coastline_layer(state.data_dir, tolerance_deg=tolerance_deg)
+
+
+def _zone_route(layer: str, doc: str) -> Callable[..., ZoneGeometryResponse]:
+    """Build one zone-layer route with its own strict response model.
+
+    A factory rather than two hand-written near-identical functions, because the two
+    routes differ only in the layer name and the documentation -- and a hand-copied pair
+    is exactly where the second one drifts.
+    """
+
+    @router.get(
+        f"/maritime/layers/{layer}",
+        response_model=ZoneGeometryResponse,
+        tags=["maritime"],
+        name=f"maritime_{layer.lower()}_layer",
+    )
+    def handler(
+        request: Request,
+        tolerance_deg: float = Query(default=0.02, ge=0.001, le=1.0),
+    ) -> ZoneGeometryResponse:
+        state: State = request.app.state.darkfleet_state
+        return zone_layer(state.data_dir, layer, tolerance_deg=tolerance_deg)
+
+    handler.__doc__ = doc
+    return handler
+
+
+#: EEZ boundaries: DISPUTED and overlapping claims are rendered as the dataset records
+#: them. Fifty-six of the 285 installed features carry multiple sovereigns or territories.
+_register_eez_layer = _zone_route(
+    "EEZ_BOUNDARIES",
+    "Simplified Marine Regions EEZ boundaries for the globe (DF-X8.5).\n\n"
+    "Multi-part features keep every part and interior rings are preserved, because "
+    "flattening a MultiPolygon would drop detached island blocks and dropping a hole "
+    "would draw land the dataset calls sea.",
+)
+
+#: Explicit high-seas geometry. Rendered separately from the EEZ so an operator can see
+#: that HIGH_SEAS was MEASURED against a polygon rather than inferred from an absent
+#: EEZ -- which is the distinction the whole zone rule exists to protect.
+_register_high_seas_layer = _zone_route(
+    "HIGH_SEAS",
+    "Simplified Marine Regions high-seas geometry for the globe (DF-X8.5).\n\n"
+    "This layer exists because of a rule. DarkFleet refuses to infer HIGH_SEAS from the "
+    "absence of an EEZ match, so the publisher's explicit high-seas polygons are what "
+    "make the question answerable by measurement.",
+)
