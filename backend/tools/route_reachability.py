@@ -293,10 +293,66 @@ def product_reachable(callers: list[Caller], entry: Path | None) -> set[str]:
 
 # ------------------------------------------------------------------ reporting
 
+#: Routes with NO frontend caller, and why that is correct rather than unfinished.
+#:
+#: DF-X8.5B §40 keeps these two deliberately classified rather than chasing 100% reachability.
+#: Both were re-examined during DF-X8.5 and left alone:
+#:
+#: INTERNAL
+#:   ``/api/scans/{scan_id}`` -- the raw scan record. The frontend reads the typed branches
+#:   (``/targets``, ``/ais``, ``/evidence``) rather than the record, because the record's
+#:   shape is a persistence detail and a client coupled to it would break on any store
+#:   change. Deliberately not called from the product.
+#:
+#: REDUNDANT
+#:   ``/api/scans/{scan_id}/raster`` -- superseded by ``/raster/{layer}``, which is what
+#:   renders. The single-layer form has no caller because the product has no use for
+#:   "the default raster"; it kept a shape the product does not need.
+#:
+#: Anything NOT in this table is an unexplained orphan and fails ``--strict``.
+INTENTIONAL_ORPHANS: dict[str, str] = {
+    "/api/scans/{scan_id}": (
+        "INTERNAL - the raw scan record. The frontend reads typed branches instead, because "
+        "the record's shape is a persistence detail a client must not couple to."
+    ),
+    "/api/scans/{scan_id}/raster": (
+        "REDUNDANT - superseded by /raster/{layer}, which is what renders. No product use "
+        "for 'the default raster'."
+    ),
+}
+
+
+def orphan_reason(route: Route) -> str | None:
+    """Why this route has no caller, or None if it is an unexplained orphan."""
+    return INTENTIONAL_ORPHANS.get(route.path)
+
+
+def unexplained_orphans(routes: list[Route], orphans: list[Route]) -> list[Route]:
+    """Orphans with no recorded classification. These are the failures."""
+    return [r for r in orphans if orphan_reason(r) is None]
+
+
+
+
+def _print_orphan(route: Route) -> None:
+    """One orphan, with its classification when it has one."""
+    reason = orphan_reason(route)
+    if reason is None:
+        # Loud, because an unexplained orphan is the failure this tool exists to catch.
+        print(f"   {route.label}   <-- UNEXPLAINED, not tolerated")
+    else:
+        print(f"   {route.label}")
+        print(f"       {reason}")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Route reachability, two metrics.")
-    parser.add_argument("--strict", action="store_true", help="exit non-zero on any orphan")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit non-zero on any UNEXPLAINED orphan. Orphans listed in "
+             "INTENTIONAL_ORPHANS are tolerated; anything else fails.",
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args()
 
@@ -318,6 +374,11 @@ def main() -> int:
     caller_orphans = [r for r in routes if r not in caller_ok]
     product_orphans = [r for r in routes if r not in product_ok]
 
+    # Every orphan must be accounted for. A route that is neither explained nor tolerated is
+    # the failure this whole tool exists to catch, so `--strict` fails on the UNEXPLAINED set
+    # rather than on the raw orphan count.
+    unexplained = unexplained_orphans(routes, caller_orphans)
+
     if args.json:
         print(
             json.dumps(
@@ -326,13 +387,24 @@ def main() -> int:
                     "total": len(routes),
                     "caller_reachable": len(caller_ok),
                     "product_reachable": len(product_ok),
-                    "caller_orphans": [{"verb": o.verb, "path": o.path} for o in caller_orphans],
+                    "caller_orphans": [
+                        {
+                            "verb": o.verb,
+                            "path": o.path,
+                            # None means unexplained, which is the failure case. Carried
+                            # in the JSON so a check can assert on the CLASSIFICATION
+                            # rather than on a count.
+                            "classification": orphan_reason(o),
+                        }
+                        for o in caller_orphans
+                    ],
+                    "unexplained_orphans": [o.path for o in unexplained],
                     "product_orphans": [{"verb": o.verb, "path": o.path} for o in product_orphans],
                 },
                 indent=2,
             )
         )
-        return 1 if (args.strict and product_orphans) else 0
+        return 1 if (args.strict and unexplained) else 0
 
     print(f"backend routes          : {len(routes)}")
     print(f"CALLER_REACHABLE        : {len(caller_ok)}")
@@ -342,19 +414,27 @@ def main() -> int:
         print()
         print("No frontend caller anywhere in src/:")
         for route in caller_orphans:
-            print(f"   {route.label}")
+            _print_orphan(route)
     if product_orphans:
         print()
         print("Has a caller, but NOT reachable through the running application:")
         for route in product_orphans:
-            print(f"   {route.label}")
+            _print_orphan(route)
         print()
         print(
             "PRODUCT_REACHABLE proves the request is in the shipped app's render\n"
             "path. It does not prove an operator clicked anything; browser E2E\n"
             "closes that gap."
         )
-    return 1 if (args.strict and product_orphans) else 0
+    if unexplained:
+        print()
+        print(
+            f"{len(unexplained)} orphan(s) with no recorded classification. Each is "
+            "either a missing frontend caller or a decision that belongs in "
+            "INTENTIONAL_ORPHANS -- which is where the reasoning has to live, not in a "
+            "commit message."
+        )
+    return 1 if (args.strict and unexplained) else 0
 
 
 if __name__ == "__main__":
