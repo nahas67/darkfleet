@@ -11,14 +11,14 @@
  *    one failing provider cannot hide behind a healthy sibling.
  */
 
-import { loadProviders } from '../api/client';
+import { loadDatasetHealth, loadProviders } from '../api/client';
 import { engine } from '../globe/engine';
 import { useStore } from '../state/store';
 import { healthColor, healthSeverity } from '../design/tokens';
 import { SHORTCUTS } from './useGlobalKeys';
 import { NOT_ESTABLISHED } from '../design/format';
 import { useArchiveCoverage } from '../ais/archiveCoverage';
-import { installStatusLabel, useDatasetHealth, versionLabel } from '../maritime/datasetHealth';
+import { installStatusLabel, versionLabel } from '../maritime/datasetHealth';
 
 /**
  * Deployment-level AIS archive state.
@@ -153,33 +153,38 @@ function BasemapSection() {
  * trusted TLS handshake, and TLS verification was not disabled to work around it.
  */
 function DatasetHealthSection() {
-  const health = useDatasetHealth();
+  const health = useStore();
 
   return (
-    <div className="mt-3" data-df-dataset-health={health.status}>
+    <div className="mt-3" data-df-dataset-health={health.datasetHealth === null ? health.datasetHealthError ? 'failed' : 'loading' : 'ready'}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <span className="df-label text-[10px]">Local reference data</span>
-        <button type="button" className="df-btn text-[10px]" onClick={health.reload}>
+        <button
+          type="button"
+          className="df-btn text-[10px]"
+          // `force` so an operator who installs a dataset and presses Re-check sees it.
+          onClick={() => void loadDatasetHealth(true)}
+        >
           Re-check
         </button>
       </div>
 
-      {health.status === 'loading' ? (
+      {health.datasetHealth === null && health.datasetHealthError === null ? (
         <p className="text-[11px] text-ink-dim">Reading the local dataset store…</p>
-      ) : health.status === 'failed' ? (
+      ) : health.datasetHealth === null ? (
         <p className="text-[11px] text-fault" data-df-dataset-health-error>
-          The dataset store could not be read: {health.reason}. That is a connection
-          failure, not an absent dataset.
+          The dataset store could not be read: {health.datasetHealthError}. That is a
+          connection failure, not an absent dataset.
         </p>
       ) : (
         <>
           <p className="mb-1 text-[10px] leading-relaxed text-ink-dim">
-            Files on this machine, not remote services. {health.value.usable_count} of{' '}
-            {health.value.datasets.length} usable, {health.value.verified_count} with a
+            Files on this machine, not remote services. {health.datasetHealth.usable_count} of{' '}
+            {health.datasetHealth.datasets.length} usable, {health.datasetHealth.verified_count} with a
             recorded checksum.
           </p>
           <ul className="space-y-1.5" data-df-dataset-list>
-            {health.value.datasets.map((entry) => (
+            {health.datasetHealth.datasets.map((entry) => (
               <li
                 key={entry.id}
                 data-df-dataset={entry.id}

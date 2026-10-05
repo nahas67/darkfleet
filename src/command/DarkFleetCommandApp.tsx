@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from 'react';
 
-import { loadProviders, loadRaster } from '../api/client';
+import { loadDatasetHealth, loadProviders, loadRaster } from '../api/client';
 import { engine } from '../globe/engine';
 import { store, useStore } from '../state/store';
 import { OperationRail, type WorkspaceId } from './OperationRail';
@@ -49,6 +49,15 @@ export function DarkFleetCommandApp() {
   // probe is an explicit state, never an implied "online".
   useEffect(() => {
     void loadProviders();
+  /*
+   * The ONE dataset-health fetch, beside the one provider-health fetch.
+   *
+   * Two panels read `/api/maritime/datasets`: the layer console, to decide whether a maritime
+   * layer is drawable, and the system panel, to render the list. Loading it here rather than
+   * in a hook per panel is what makes them agree -- as two hook instances they could show the
+   * console disabled while the panel rendered the data, which the DF-X8.5 browser E2E caught.
+   */
+  void loadDatasetHealth();
   }, []);
 
   // The raster is attached to the measured rectangle the backend reports. It is

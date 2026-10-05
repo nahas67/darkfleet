@@ -21,6 +21,25 @@ import type {
 } from '../api/contract';
 import { ApiError, ContractViolation, api } from './errors';
 import { validateScanTargetsResponse } from './validate';
+import {
+  DATASETHEALTHRESPONSE_FIELDS,
+  type DatasetHealthResponse,
+} from '../api/contract';
+import { contractValidator } from './validateGenerated';
+
+/**
+ * Validated from the GENERATED field metadata, not hand-listed.
+ *
+ * The generated TypeScript types are erased at runtime, so an unvalidated payload arrives as
+ * `undefined` and renders as a plausible-looking EMPTY LIST. For this route that would read
+ * as "no reference datasets are installed" -- an alarming and completely wrong statement about
+ * a machine that has three of them. Deriving the key list from the contract means a field
+ * added to the Pydantic model is checked here with no edit to this file.
+ */
+const validateDatasetHealthResponse = contractValidator<DatasetHealthResponse>(
+  DATASETHEALTHRESPONSE_FIELDS,
+  'DatasetHealthResponse',
+);
 import { openStageStream, type StageStreamHandle } from './sse';
 import {
   DEFAULT_CFAR_CONFIG,
@@ -445,6 +464,55 @@ export async function loadScenes(bbox?: BBox | null): Promise<void> {
     // A failed catalogue load is not a scan failure. It used to overwrite
     // `scanError`, so a scene-search 400 surfaced as the analysis having failed.
     store.set({ scenes: [], scenesLoading: false });
+  }
+}
+
+/**
+ * Read `/api/maritime/datasets` into the store. ONE fetch, shared.
+ *
+ * WHY THIS IS HERE RATHER THAN IN A HOOK
+ * --------------------------------------
+ * Two panels need this fact: `LayerConsole` uses it to decide whether a maritime layer is
+ * drawable, and `SystemPanel` renders it. As two hook instances they issued two requests for
+ * one fact -- and, worse, could DISAGREE. The DF-X8.5 browser E2E caught exactly that: with
+ * LAYERS opened immediately after SYSTEM, the coastline toggle was disabled with "the store
+ * has not been read yet" while the system panel had rendered the full list seconds earlier.
+ *
+ * This mirrors `loadProviders`, which already works this way for remote source health.
+ *
+ * `force` exists for the explicit re-check button. An operator who installs a dataset and
+ * presses Re-check must see it, so the initial call is not a once-per-process guard -- the
+ * read is local and cheap, and a stale panel is worse than a redundant one.
+ *
+ * VALIDATED ON THE WAY IN, like every other branch here. The generated TypeScript types are
+ * erased at runtime, so an unvalidated payload would arrive as `undefined` and render as a
+ * plausible-looking empty list -- which for this route would read as "no datasets installed".
+ */
+export async function loadDatasetHealth(force = false): Promise<void> {
+  const current = store.getState();
+  if (current.datasetHealthLoading) return;
+  if (current.datasetHealth !== null && !force) return;
+
+  store.set({ datasetHealthLoading: true, datasetHealthError: null });
+  try {
+    const raw = await api.get<unknown>('/api/maritime/datasets');
+    const payload = validateDatasetHealthResponse(raw);
+    store.set({
+      datasetHealth: payload,
+      datasetHealthLoading: false,
+      datasetHealthError: null,
+    });
+  } catch (error) {
+    /*
+     * A failure to READ the store is an explicit state, and it is NOT the same as an empty
+     * store. Leaving `datasetHealth` null makes every consumer render "unknown", which is
+     * the honest reading; writing an empty list would tell an operator their reference data
+     * is missing when the only fault was the request.
+     */
+    store.set({
+      datasetHealthLoading: false,
+      datasetHealthError: error instanceof Error ? error.message : 'The dataset store could not be read.',
+    });
   }
 }
 

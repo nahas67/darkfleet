@@ -21,6 +21,7 @@ import type {
   AisCoverageState,
   AisObservationOut,
   ProviderHealthEntry,
+  DatasetHealthResponse,
   ScanStage,
   ScanScene,
   SceneSummary,
@@ -232,6 +233,28 @@ export type State = {
   /* --- system --- */
   providers: ProviderHealthEntry[];
   providersLoading: boolean;
+  /**
+   * Local reference-dataset state, read from `/api/maritime/datasets`.
+   *
+   * IN THE STORE, NOT IN A HOOK, because two panels need it. `LayerConsole` reads it to
+   * decide whether a maritime layer is drawable, and `SystemPanel` renders it. As two
+   * independent hook instances they issued two requests for one fact -- and could disagree,
+   * which the DF-X8.5 browser E2E caught: the layer console showed "the store has not been
+   * read yet" while the system panel had rendered the whole list seconds earlier. An operator
+   * seeing both would conclude the console was broken.
+   *
+   * `null` means not yet read, and every consumer treats it as "unknown", never as "absent".
+   * That distinction is the same one the API itself makes.
+   */
+  datasetHealth: DatasetHealthResponse | null;
+  datasetHealthLoading: boolean;
+  /**
+   * Why the dataset-health read failed, or null.
+   *
+   * A failure to READ the store is not the same as an empty store, and conflating them would
+   * tell an operator their reference data is missing when the only fault was the request.
+   */
+  datasetHealthError: string | null;
 
   /* --- presentation --- */
   /**
@@ -286,6 +309,9 @@ const initialState: State = {
 
   providers: [],
   providersLoading: false,
+  datasetHealth: null,
+  datasetHealthLoading: false,
+  datasetHealthError: null,
 
   layerState: defaultLayerState(),
   workspace: 'TACTICAL',

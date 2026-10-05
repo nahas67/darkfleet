@@ -31,7 +31,7 @@ import {
   type LayerEntry,
 } from '../globe/layerRegistry';
 import { groupColor } from '../design/tokens';
-import { useDatasetHealth } from '../maritime/datasetHealth';
+
 import type { DatasetHealthResponse } from '../api/contract';
 
 /**
@@ -220,20 +220,20 @@ export function deriveLayers(
 export function LayerConsole() {
   const state = useStore();
   /*
-   * ONE health fetch for the panel, not one per layer.
+   * Reads the store's single dataset-health value.
    *
-   * The three maritime layers all read the same response. Fetching per layer would triple
-   * the requests for one fact and could show two layers enabled while the third was
-   * disabled, if the responses disagreed -- which they would, being separate snapshots of
-   * the same store.
+   * NOT a hook of its own. Two panels need this fact, and as two hook instances they issued
+   * two requests for one AND could disagree: with LAYERS opened straight after SYSTEM, this
+   * console showed the maritime rows disabled while the system panel had rendered the whole
+   * list seconds earlier. The browser E2E caught that; `client.loadDatasetHealth` is the one
+   * fetch and `store.datasetHealth` is the one value.
    *
-   * A FAILED probe leaves `null`, which disables the maritime rows with "the store has not
-   * been read yet" rather than enabling them optimistically. Offering a toggle for data
-   * whose presence is unknown is the inert-control failure in a new place.
+   * A null value -- still loading, or the read FAILED -- disables the maritime rows rather
+   * than enabling them optimistically. Offering a toggle for data whose presence is unknown is
+   * the inert-control failure in a new place, and "could not read the store" is not "no data
+   * installed".
    */
-  const health = useDatasetHealth();
-  const healthValue = health.status === 'ready' ? health.value : null;
-  const rows = deriveLayers(state, healthValue);
+  const rows = deriveLayers(state, state.datasetHealth);
 
   /**
    * Write one layer's choice to the store.
