@@ -1,4 +1,4 @@
-﻿"""Offline maritime context for DarkFleet.
+"""Offline maritime context for DarkFleet.
 
 Three concerns, deliberately separated:
 

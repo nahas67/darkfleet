@@ -54,6 +54,7 @@ import { PolarizationTab } from './tabs/PolarizationTab';
 import { RevisitTab } from './tabs/RevisitTab';
 import { SarTab } from './tabs/SarTab';
 import { WakeTab } from './tabs/WakeTab';
+import { ClassificationPill } from './classification';
 import { targetRefOf, type TargetRef } from '../intelligence/targetRef';
 import { loadMaritimeContext } from './api';
 import { useTabData } from './useTabData';
@@ -324,9 +325,10 @@ function DossierHeader({
           <h2 className="df-num text-[13px]" data-df-target-id>
             {target.id}
           </h2>
-          <Pill tone={isGhostVessel(target.classification) ? 'warn' : 'neutral'}>
-            {target.classification}
-          </Pill>
+          {/* The readable-wording pill: at 1024x768 the raw 28-character token split as
+              STATIONARY_OR_INFRASTR / UCTURE, which reads as a corrupted value rather than a
+              long one. The canonical value stays in the DOM and in the accessible name. */}
+          <ClassificationPill classification={target.classification} />
         </div>
         <button type="button" className="df-btn text-[10px]" onClick={focusOnGlobe} data-df-focus-globe>
           Focus on globe

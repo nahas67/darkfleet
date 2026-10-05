@@ -1,4 +1,4 @@
-﻿"""Typed request/response contracts for the DarkFleet HTTP API (API-011).
+"""Typed request/response contracts for the DarkFleet HTTP API (API-011).
 
 Every field the API accepts or returns is declared here once. The frontend
 mirrors these shapes; it never re-derives them, and this module never

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * DarkFleet wire contracts — mirror of the backend Pydantic models.
  *
  * These are TYPES ONLY. The frontend holds no detector, correlation,

@@ -1,4 +1,4 @@
-﻿"""Reference-dataset readers. One authority each, provenance always attached.
+"""Reference-dataset readers. One authority each, provenance always attached.
 
 WHAT THIS MODULE IS
 

@@ -26,6 +26,7 @@ import {
 import { POLARIZATION_STATUS_BANNER, WAKE_STATUS_BANNER } from '../format';
 import { POLARIZATION_UNAVAILABLE_NOTE } from './polarizationNote';
 import { MaritimeContextSection } from './MaritimeContextSection';
+import { ClassificationPill } from '../classification';
 
 export function OverviewTab({
   target,
@@ -63,7 +64,10 @@ export function OverviewTab({
             <span className="df-num">{target.id}</span>
           </Row>
           <Row label="Classification">
-            <Pill tone={ghost ? 'warn' : 'neutral'}>{target.classification}</Pill>
+            {/* Same readable-wording treatment as the header. Two sites show the
+                classification on OVERVIEW, so fixing only one would leave the debt visible
+                the moment the operator looked at the Detection block. */}
+            <ClassificationPill classification={target.classification} />
           </Row>
           <Row label="Latitude">
             <span className="df-num">{target.lat.toFixed(5)}</span>
