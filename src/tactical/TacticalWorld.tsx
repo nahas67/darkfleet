@@ -10,12 +10,12 @@
  * "no contacts here".
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useCoastlineGeometry, useZoneGeometry } from '../globe/maritimeGeometry';
 
 import { engine, type TargetHandle } from '../globe/engine';
-import { isLayerId } from '../globe/layerRegistry';
+import { isLayerId, type LayerId } from '../globe/layerRegistry';
 import { isWebGLAvailable } from '../globe/cesiumViewer';
 import { store, useStore } from '../state/store';
 import { fmt, fmtLatLon } from '../design/format';
@@ -146,8 +146,55 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    * Regions whenever its geometry is on screen. CC BY is a licence obligation, not a
    * courtesy, and an uncredited drawing of a CC BY dataset is a licence failure.
    */
+  /**
+   * The reason a maritime layer declined to draw, or '' when there is none.
+   *
+   * ONE FUNCTION, three call sites, because the wording must not vary per layer: an operator
+   * reading "EEZ boundaries is unavailable" and "Coastline is unavailable" needs the same
+   * information in both, and three hand-built strings would drift.
+   *
+   * `idle` -- the operator has not switched the layer on -- is NOT a refusal and returns ''. An
+   * absent OPTIONAL dataset is not a fault either, so `absent` carries the backend's own reason
+   * rather than being folded into the same word.
+   */
+  const refusalReason = (layer: {
+    status: string;
+    reason?: string;
+  }): string => {
+    if (layer.status === 'ready' || layer.status === 'idle') return '';
+    const label = layer.status.replace(/_/g, ' ');
+    const detail = layer.reason ?? '';
+    return detail ? `${label}: ${detail}` : label;
+  };
+
+  /*
+   * Record or clear a maritime layer's refusal.
+   *
+   * A refusal that nothing displays is indistinguishable from a broken product, so the
+   * reason is written into the store where the layer console can disable the row and state
+   * it. `ready` CLEARS rather than leaves: an operator who fixed the cause and switched the
+   * layer back on must not still see the stale reason.
+   */
+  const recordRefusal = useCallback((layerId: LayerId, reason: string | null) => {
+    const current = store.getState().maritimeLayerRefusals;
+    const has = current[layerId] !== undefined;
+    if (reason === null) {
+      if (!has) return;
+      const { [layerId]: _removed, ...rest } = current;
+      store.set({ maritimeLayerRefusals: rest });
+      return;
+    }
+    if (current[layerId] === reason) return;
+    store.set({ maritimeLayerRefusals: { ...current, [layerId]: reason } });
+  }, []);
+
   const coastlineVisible = layerState.REFERENCE_COASTLINE?.visible === true;
   const coastline = useCoastlineGeometry(coastlineVisible);
+  useEffect(() => {
+    const reason = refusalReason(coastline);
+    recordRefusal('REFERENCE_COASTLINE', reason === '' ? null : reason);
+  }, [recordRefusal, coastline]);
+
   useEffect(() => {
     if (coastline.status !== 'ready') return;
     engine.setCoastline(
@@ -158,6 +205,11 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
 
   const eezVisible = layerState.EEZ_BOUNDARIES?.visible === true;
   const eez = useZoneGeometry('EEZ_BOUNDARIES', eezVisible);
+  useEffect(() => {
+    const reason = refusalReason(eez);
+    recordRefusal('EEZ_BOUNDARIES', reason === '' ? null : reason);
+  }, [recordRefusal, eez]);
+
   useEffect(() => {
     if (eez.status !== 'ready') return;
     engine.setZoneBoundaries(
@@ -175,6 +227,11 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
 
   const highSeasVisible = layerState.HIGH_SEAS?.visible === true;
   const highSeas = useZoneGeometry('HIGH_SEAS', highSeasVisible);
+  useEffect(() => {
+    const reason = refusalReason(highSeas);
+    recordRefusal('HIGH_SEAS', reason === '' ? null : reason);
+  }, [recordRefusal, highSeas]);
+
   useEffect(() => {
     if (highSeas.status !== 'ready') return;
     engine.setZoneBoundaries(

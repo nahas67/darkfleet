@@ -212,7 +212,17 @@ def _eez_wfs() -> DatasetManifest:
     return DatasetManifest(
         id="marine_regions_eez_wfs",
         provider="VLIZ / Marine Regions",
-        dataset="Marine Regions WFS — MaritimeRegions:eez",
+        # `MarineRegions:eez`, NOT `MaritimeRegions:eez`.
+    #
+    # The GeoServer WORKSPACE is `MarineRegions`, so every layer in it is `MarineRegions:*`.
+    # "MaritimeRegions" is the organisation's older trade name and is not the layer name --
+    # which is exactly why `source_layer` two lines below has always been correct and this
+    # field was not.
+    #
+    # Found by the browser, not by reading: the frontend's provenance guard refused to draw the
+    # EEZ layer because this string did not match the layer the registry declares, and it said
+    # so in the layer console. The guard did its job; the manifest was wrong.
+    dataset="Marine Regions WFS — MarineRegions:eez",
         version="CURRENT-SERVICE-SNAPSHOT",
         version_established=False,
         source_mechanism=SourceMechanism.WFS,

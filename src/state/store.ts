@@ -249,6 +249,20 @@ export type State = {
   datasetHealth: DatasetHealthResponse | null;
   datasetHealthLoading: boolean;
   /**
+   * Why each MARITIME layer declined to draw, keyed by layer id. Empty string means no
+   * recorded problem.
+   *
+   * PRESENT BECAUSE A SILENT REFUSAL IS A DEFECT. The EEZ layer's toggle read
+   * `aria-pressed="true"`, the console showed it enabled, and the globe drew nothing -- no
+   * error, no reason anywhere. An operator's only available conclusion was that the product
+   * was broken.
+   *
+   * A layer can have a real renderer, the fetch can succeed, and the render can still be
+   * DECLINED because the served provenance does not match what the registry declares. Every
+   * one of those outcomes used to be invisible.
+   */
+  maritimeLayerRefusals: Record<string, string>;
+  /**
    * Why the dataset-health read failed, or null.
    *
    * A failure to READ the store is not the same as an empty store, and conflating them would
@@ -311,6 +325,7 @@ const initialState: State = {
   providersLoading: false,
   datasetHealth: null,
   datasetHealthLoading: false,
+  maritimeLayerRefusals: {},
   datasetHealthError: null,
 
   layerState: defaultLayerState(),

@@ -103,6 +103,37 @@ def simplify(
     """
     import numpy as np
 
+    # A CLOSED RING IS SPLIT, THEN RE-CLOSED.
+    #
+    # Marine Regions delivers polygons as closed rings -- first vertex identical to the last
+    # -- and every one of the 3,113 parts in the installed snapshot is closed. RDP's outermost
+    # span is `points[0]` to `points[-1]`, which for a closed ring is a ZERO-LENGTH segment:
+    # every vertex is measured against a degenerate line, the recursion does nothing like the
+    # algorithm was designed to do, and the ring collapses to its two identical endpoints.
+    #
+    # MEASURED on that snapshot at tolerance 0.02: 2,744 of 3,113 rings collapsed to two
+    # vertices, and the renderer drew 325 entities instead of 3,113. The coastline was not
+    # affected -- its features are open `LineString`s -- which is why this hid behind a
+    # working coastline and a passing analytical delta.
+    #
+    # The fix is to decide redundancy over the OPEN path and re-append the closing vertex
+    # afterwards. The vertex is not dropped; it is merely excluded from the question "which
+    # intermediate vertices are redundant", which is what closed means.
+    closed_ring = (
+        len(points) >= 3
+        and points[0][0] == points[-1][0]
+        and points[0][1] == points[-1][1]
+    )
+    if closed_ring:
+        open_path = simplify(tuple(points[:-1]), tolerance_deg)
+        # Re-append the closing vertex so the ring stays closed for Cesium and for
+        # `point_in_polygon`, both of which treat an open ring as unbounded.
+        if len(open_path) >= 3:
+            return open_path + (points[-1],)
+        # An open path that simplified below three points cannot enclose anything, so the
+        # ring is returned un-simplified rather than emitted as a degenerate shape.
+        return tuple(points)
+
     if len(points) < 3:
         return tuple(points)
     if tolerance_deg < _MIN_TOLERANCE_DEG:

@@ -162,6 +162,7 @@ export type LayerRow = {
 export function deriveLayers(
   state: ReturnType<typeof useStore>,
   maritimeHealth: DatasetHealthResponse | null = null,
+  maritimeRefusals: Readonly<Record<string, string>> = {},
 ): LayerRow[] {
   const hasScan = state.scanId !== null && state.targets.length > 0;
   // Both must hold: the artifact exists AND it is actually on the globe.
@@ -203,6 +204,23 @@ export function deriveLayers(
       unavailableReason = maritimeLayerReason(maritimeHealth, datasetId);
     }
 
+    /*
+     * A RUNTIME REFUSAL OUTRANKS EVERYTHING ELSE.
+     *
+     * The layer can have usable data, a live renderer and an enabled control, and still draw
+     * nothing -- because the served provenance did not match what the registry declares, or
+     * the payload failed to load. That happened during DF-X8.5, and the only visible symptom
+     * was an enabled toggle over an empty globe with no error anywhere.
+     *
+     * So whatever the loader recorded wins, and it is reported VERBATIM rather than
+     * summarised: "provenance mismatch: the layer declares X and the server returned Y" is
+     * actionable, and a generic "unavailable" would not be.
+     */
+    const refusal = maritimeRefusals?.[id];
+    if (refusal !== undefined && refusal !== '') {
+      unavailableReason = refusal;
+    }
+
     return {
       id,
       label: entry.label,
@@ -233,7 +251,7 @@ export function LayerConsole() {
    * the inert-control failure in a new place, and "could not read the store" is not "no data
    * installed".
    */
-  const rows = deriveLayers(state, state.datasetHealth);
+  const rows = deriveLayers(state, state.datasetHealth, state.maritimeLayerRefusals);
 
   /**
    * Write one layer's choice to the store.
