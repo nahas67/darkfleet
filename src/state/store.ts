@@ -78,14 +78,38 @@ export type SarTarget = {
   sceneItemId?: string | null;
 };
 
+/**
+ * One vessel, projected for the globe.
+ *
+ * A PROJECTION, not evidence. Every field is a pass-through from an archive observation
+ * (`AisObservationOut`); nothing here is derived, and nothing here is smoothed. The renderer
+ * computes display state separately -- see `ais/displayState.ts` -- precisely so this type can
+ * stay a faithful copy of what was observed.
+ *
+ * The three kinematics fields are nullable and `null` means ONE thing only: the vessel did not
+ * report it. `0` is a real measurement in all three cases (course 0 is due north, speed 0 is at
+ * anchor, heading 0 is north). `AisObservation` in the backend goes to explicit lengths to keep
+ * those distinguishable, and this projection preserves the distinction rather than collapsing
+ * it -- `AisTab` reads `heading` and `cog` in separate columns for exactly that reason.
+ */
 export type AisContact = {
   mmsi: string;
   lat: number;
   lon: number;
   timestamp: string;
   shipName: string | null;
+  /** knots, or null when not reported */
   sog: number | null;
+  /** degrees true, or null when not reported */
   cog: number | null;
+  /**
+   * degrees true, or null when not reported.
+   *
+   * Added by DF-X9. It was absent from this type entirely, so the renderer had no way to prefer
+   * a vessel's own heading over its course over ground -- which is the distinction DF-X9 §12
+   * requires, because they are not interchangeable.
+   */
+  heading: number | null;
 };
 
 /**
@@ -215,7 +239,23 @@ export type State = {
    * chances to render two different answers.
    */
   targetDetail: VesselTarget[];
+  /**
+   * One marker per vessel, projected from `aisObservations`.
+   *
+   * Populated by `loadScanAis` from the AIS ARCHIVE, not from `payload.ais_only` in the scan
+   * targets response. Those are different sources with different fields: `AisOnlyTarget` has no
+   * `sog`, `cog` or `heading` at all, which is why every contact used to arrive with no
+   * kinematics to orient it by.
+   */
   aisOnly: AisContact[];
+  /**
+   * Every observation in the scan's AIS window, verbatim.
+   *
+   * Added by DF-X9 so a track can be drawn and a contact oriented without a second request.
+   * This is a read-only copy of what the archive already holds -- no field is computed, rounded
+   * or smoothed on the way in. `aisOnly` is derived from it; it is never the other way round.
+   */
+  aisObservations: AisObservationOut[];
   scene: ScanScene | null;
   rasterLoaded: boolean;
   rasterLoading: boolean;
@@ -309,6 +349,7 @@ const initialState: State = {
   targets: [],
   targetDetail: [],
   aisOnly: [],
+  aisObservations: [],
   scene: null,
   rasterLoaded: false,
   rasterLoading: false,

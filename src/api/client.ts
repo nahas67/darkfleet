@@ -10,8 +10,10 @@
 import type {
   AisAssociation,
   AisCoverageOut,
+  AisObservationOut,
   CfarConfig as CfarConfigContract,
   HealthResponse,
+  ScanAisResponse,
   ScanCreateRequest,
   ScanTargetsResponse,
   SceneListResponse,
@@ -23,6 +25,8 @@ import { ApiError, ContractViolation, api } from './errors';
 import { validateScanTargetsResponse } from './validate';
 import {
   DATASETHEALTHRESPONSE_FIELDS,
+  SCANAISRESPONSE_FIELDS,
+  VESSELTRACKRESPONSE_FIELDS,
   type DatasetHealthResponse,
 } from '../api/contract';
 import { contractValidator } from './validateGenerated';
@@ -39,6 +43,25 @@ import { contractValidator } from './validateGenerated';
 const validateDatasetHealthResponse = contractValidator<DatasetHealthResponse>(
   DATASETHEALTHRESPONSE_FIELDS,
   'DatasetHealthResponse',
+);
+
+/**
+ * Validated from GENERATED field metadata, for the same reason as the reference-data route.
+ *
+ * `SCANAISRESPONSE_FIELDS` and `VESSELTRACKRESPONSE_FIELDS` were both generated, exported, and
+ * referenced nowhere. Two of the four AIS routes therefore had no runtime validation while the
+ * other two did. The AIS payload is exactly where an unvalidated drift is most dangerous: a
+ * missing `observations` key would read as an EMPTY AIS ARCHIVE, which is a completely different
+ * claim from a vessel that reported nothing.
+ */
+const validateScanAisResponse = contractValidator<ScanAisResponse>(
+  SCANAISRESPONSE_FIELDS,
+  'ScanAisResponse',
+);
+
+const validateVesselTrackResponse = contractValidator<VesselTrackResponse>(
+  VESSELTRACKRESPONSE_FIELDS,
+  'VesselTrackResponse',
 );
 import { openStageStream, type StageStreamHandle } from './sse';
 import {
@@ -284,6 +307,23 @@ export async function loadScanResults(scanId: string): Promise<void> {
     }
     const detailTargets = payload.targets ?? [];
     const targets = detailTargets.map(toSarTarget);
+    /*
+     * AIS contacts are NOT built here any more.
+     *
+     * This used to project `payload.ais_only`, hardcoding `sog: null, cog: null`. Those nulls
+     * were honest -- `AisOnlyTarget` (`contract.ts:149`) genuinely carries no kinematics -- but
+     * they meant the globe drew its AIS markers from a response that CANNOT supply the fields
+     * DF-X9's orientation authority depends on. `loadScanAis` now projects them from the AIS
+     * archive instead, which has every field.
+     *
+     * The `ais_only` rows are not dropped, though: they are the CORRELATION's unmatched
+     * contacts, a set with a different meaning from "every vessel in the window". A vessel that
+     * lost its match still appears here, and it would otherwise vanish from the contact list
+     * when the archive has no observations for it at all.
+     *
+     * So the two are MERGED: archive contacts win where they overlap, because they carry
+     * kinematics, and `ais_only` fills in any vessel the archive window does not contain.
+     */
     const aisOnly: AisContact[] = (payload.ais_only ?? []).map((row) => ({
       mmsi: row.mmsi,
       lat: row.lat,
@@ -292,8 +332,31 @@ export async function loadScanResults(scanId: string): Promise<void> {
       shipName: row.vesselName ?? null,
       sog: null,
       cog: null,
+      heading: null,
     }));
     const selected = store.getState().selection;
+    /*
+     * MERGE, DO NOT REPLACE.
+     *
+     * `loadScanAis` populates `aisOnly` from the AIS ARCHIVE, where every contact carries
+     * `sog`/`cog`/`heading`. This response carries `ais_only`, which carries none of them. If
+     * this function simply assigned its own list it would strip the kinematics back off every
+     * contact whenever a scan's targets were reloaded after its AIS data -- and the two
+     * functions are called in sequence by `followScan`, so the order in which they run is not
+     * something a caller controls.
+     *
+     * Archive contacts win on overlap because they are strictly richer. `ais_only` contributes
+     * only vessels the archive window does not contain at all, which is a real case: it is the
+     * correlation's unmatched-contact set, and a vessel can appear there without any
+     * observation in the AIS window the archive returned.
+     */
+    const archiveContacts = store.getState().aisOnly;
+    const mergedAis = new Map(archiveContacts.map((c) => [c.mmsi, c]));
+    for (const row of aisOnly) {
+      if (!mergedAis.has(row.mmsi)) mergedAis.set(row.mmsi, row);
+    }
+    const aisOnlyMerged = [...mergedAis.values()];
+
     store.set({
       targets,
       // The full contract record, kept alongside the globe projection.
@@ -305,7 +368,7 @@ export async function loadScanResults(scanId: string): Promise<void> {
       // requests for a payload the client already holds, so the authority is
       // retained once here and the projection stays a projection.
       targetDetail: detailTargets,
-      aisOnly,
+      aisOnly: aisOnlyMerged,
       scene: payload.scene ?? null,
       scanError: null,
       /*
@@ -348,16 +411,95 @@ function describe(error: unknown): string {
 
 /* ------------------------------------------------------------------- AIS */
 
+/**
+ * The latest observation per MMSI, which is what the globe draws a contact marker from.
+ *
+ * NOT the newest-observed-wins if a tie: the archive deduplicates on `mmsi|timestamp`, so two
+ * observations for one vessel cannot share a timestamp, and the sort is stable on the input
+ * order for the unparseable case.
+ *
+ * Keeping ONLY the latest fix is a display decision, not an evidence decision. Every
+ * observation is still available through `loadTrack`, and the full archive response is
+ * untouched. The globe needs one marker per vessel; the dossier needs the history.
+ */
+function latestPerVessel(
+  observations: readonly AisObservationOut[],
+): AisObservationOut[] {
+  const byVessel = new Map<string, AisObservationOut>();
+  for (const observation of observations) {
+    if (!Number.isFinite(observation.lat) || !Number.isFinite(observation.lon)) continue;
+    const existing = byVessel.get(observation.mmsi);
+    if (existing === undefined) {
+      byVessel.set(observation.mmsi, observation);
+      continue;
+    }
+    const incomingAt = Date.parse(observation.timestamp);
+    const existingAt = Date.parse(existing.timestamp);
+    // An unparseable timestamp never displaces a parseable one. Preferring it would let a
+    // malformed record silently blank a real contact.
+    if (!Number.isFinite(incomingAt)) continue;
+    if (!Number.isFinite(existingAt) || incomingAt > existingAt) {
+      byVessel.set(observation.mmsi, observation);
+    }
+  }
+  return [...byVessel.values()];
+}
+
 export async function loadScanAis(scanId: string): Promise<void> {
   try {
-    const payload = await api.get<{
-      coverage: AisCoverageOut;
-      observations: Array<{ mmsi: string; lat: number; lon: number; timestamp: string; ship_name?: string | null; sog?: number | null; cog?: number | null }>;
-    }>(`/api/scans/${scanId}/ais`);
+    const raw = await api.get<unknown>(`/api/scans/${scanId}/ais`);
+    const payload = validateScanAisResponse(raw);
 
     // A coverage state is stored even when it is NO_COVERAGE, so the interface
     // can say "no coverage" instead of "0 vessels".
-    store.set({ aisCoverage: toCoverage(payload.coverage) });
+    const coverage = toCoverage(payload.coverage);
+
+    /*
+     * THE FIX: THIS ROUTE USED TO THROW ITS OBSERVATIONS AWAY.
+     *
+     * `payload.observations` was fetched, typed inline, and then never read. Only
+     * `payload.coverage` reached the store. The practical consequence was that the globe's AIS
+     * contacts could not come from the archive at all, because nothing kept the archive's
+     * observations -- so they came from `payload.ais_only` inside the scan-TARGETS response
+     * instead. Those two sources are not equivalent:
+     *
+     *   `AisOnlyTarget` (generated, `contract.ts:149`) carries `mmsi`, `vesselName`, `lat`,
+     *   `lon`, `timestamp` and NOTHING ELSE. It has no `sog`, no `cog`, no `heading`.
+     *   `AisObservationOut` (`contract.ts:311`) carries all of them.
+     *
+     * So the missing kinematics were not a display bug -- they were a consequence of reading
+     * the wrong route. And `sog`/`cog` are what DF-X9's orientation authority is built on, so
+     * every contact would have arrived at the renderer with no way to point anywhere.
+     *
+     * Both are now kept. `aisOnly` is the display projection built from the archive's latest
+     * fix per vessel; `aisObservations` retains the whole window so a track can be drawn
+     * without a second request. The evidence is unchanged either way -- both are read-only
+     * copies of the same archive rows.
+     */
+    const observations = (payload.observations ?? []) as AisObservationOut[];
+    const aisOnly: AisContact[] = latestPerVessel(observations).map((observation) => ({
+      mmsi: observation.mmsi,
+      lat: observation.lat,
+      lon: observation.lon,
+      timestamp: observation.timestamp,
+      shipName: observation.ship_name ?? null,
+      /*
+       * The vessel's OWN reported values, passed through unaltered.
+       *
+       * These used to be hardcoded `null`. The types were present and the values were thrown
+       * away at the projection boundary, which is the specific shape of the DF-X9 hazard: a
+       * field that is structurally nullable, always null at every producer, and therefore
+       * indistinguishable from a vessel that reported nothing. `null` still means exactly one
+       * thing here -- NOT REPORTED -- and `0` remains a real measurement.
+       */
+      sog: observation.sog ?? null,
+      cog: observation.cog ?? null,
+      // Not previously carried at all. `AisContact` is a display projection, so this is where
+      // true heading has to live if the renderer is to prefer it over course over ground.
+      heading: observation.heading ?? null,
+    }));
+
+    store.set({ aisCoverage: coverage, aisOnly, aisObservations: observations });
   } catch (error) {
     store.set({
       aisCoverage: {
@@ -365,6 +507,14 @@ export async function loadScanAis(scanId: string): Promise<void> {
         detail: describe(error),
         observationCount: null,
       },
+      /*
+       * Cleared rather than left in place. On a failed refetch the previous observations are
+       * from a DIFFERENT window, and keeping them would leave contacts on the globe
+       * representing an acquisition that is no longer loaded -- a stale contact drawn as though
+       * it were current, which is the exact failure the display-state model exists to prevent.
+       */
+      aisOnly: [],
+      aisObservations: [],
     });
   }
 }
@@ -372,7 +522,8 @@ export async function loadScanAis(scanId: string): Promise<void> {
 export async function loadTrack(mmsi: string): Promise<void> {
   store.set({ trackLoading: true });
   try {
-    const payload = await api.get<VesselTrackResponse>(`/api/vessels/${mmsi}/track`);
+    const raw = await api.get<unknown>(`/api/vessels/${mmsi}/track`);
+    const payload = validateVesselTrackResponse(raw);
     const track: VesselTrack = {
       mmsi: payload.mmsi,
       identity: {

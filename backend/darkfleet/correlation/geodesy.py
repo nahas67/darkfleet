@@ -21,11 +21,39 @@ def geodesic_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
 
 def propagate(
-    lat: float, lon: float, sog_knots: float, cog_deg: float, delta_seconds: float
+    lat: float,
+    lon: float,
+    sog_knots: float | None,
+    cog_deg: float | None,
+    delta_seconds: float,
 ) -> dict[str, float]:
-    """Dead reckoning to SAR acquisition time. Legacy-exact spherical formula."""
+    """
+    Dead reckoning to SAR acquisition time. Legacy-exact spherical formula.
+
+    ABSENT INPUTS DECLINE TO PROJECT, RATHER THAN RAISING OR DEFAULTING.
+
+    ``sog`` and ``cog`` are nullable on ``AisObservation`` and nullable in the Parquet schema,
+    and ``correlate`` passed them straight through. So a row that omitted either reached
+    ``sog_knots < 0.1`` and raised ``TypeError``, which is the CORRELATING stage failing on an
+    archive the model explicitly permits. Confirmed by execution::
+
+        propagate(1.0, 103.0, None, 90.0, 120.0)
+        TypeError: '<' not supported between instances of 'NoneType' and 'float'
+
+    The refusal is the honest answer rather than a fallback. Without a speed there is no
+    distance to project; without a course there is no direction to project along. Substituting
+    0.0 knots would assert a vessel measured stationary, and substituting 0 degrees would
+    assert it was heading north -- both are measurements nobody made, and this function's whole
+    purpose is to be the authority on where a vessel probably was.
+
+    The unchanged guard ``sog < 0.1`` is retained and now does double duty: it declines
+    sub-0.1-knot dead reckoning for a vessel that IS moving, and it is where an absent speed
+    lands once coerced to zero motion by the caller.
+    """
     import math
 
+    if sog_knots is None or cog_deg is None:
+        return {"lat": lat, "lon": lon, "projectedDistanceMeters": 0.0}
     if abs(delta_seconds) < 1 or sog_knots < 0.1:
         return {"lat": lat, "lon": lon, "projectedDistanceMeters": 0.0}
     speed_mps = sog_knots * KNOTS_TO_MPS
@@ -47,8 +75,17 @@ def propagate(
     }
 
 
-def dynamic_radius(base_m: float, delta_seconds: float, sog_knots: float, max_m: float) -> float:
-    """Legacy-exact: base + |dt| * sog * 0.514444444 * 0.20, capped."""
+def dynamic_radius(
+    base_m: float, delta_seconds: float, sog_knots: float | None, max_m: float
+) -> float:
+    """Legacy-exact: base + |dt| * sog * 0.514444444 * 0.20, capped.
+
+    An absent speed contributes NO drift, which is the same reading ``propagate`` takes: an
+    un-reported speed licenses no allowance. The radius stays at its base, so an un-reported
+    speed is not rewarded with a wider search either -- absence is not evidence of motion.
+    """
+    if sog_knots is None:
+        return float(base_m)
     drift = abs(delta_seconds) * (sog_knots * KNOTS_TO_MPS) * 0.20
     return min(base_m + drift, max_m)
 

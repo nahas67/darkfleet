@@ -14,6 +14,120 @@ from ..ais.normalize import _as_utc
 from .geodesy import dynamic_radius, geodesic_meters, orient_diff, propagate
 
 WINDOW_S = 900
+
+
+def _speed_knots(ob: dict[str, Any]) -> float:
+    """Speed over ground in knots, treating "not reported" as ZERO MOTION.
+
+    ``AisObservation.sog`` is nullable by design -- ``models.py`` is explicit that an absent
+    measurement is ``None`` and not ``0.0``, precisely so a vessel at anchor stays
+    distinguishable from one that never broadcast. ``correlate`` read ``ob["sog"]`` directly,
+    so a single row that omitted SOG reached ``propagate``'s ``sog_knots < 0.1`` comparison and
+    raised ``TypeError``. Confirmed by execution, not by inspection::
+
+        propagate(1.0, 103.0, None, 90.0, 120.0)
+        TypeError: '<' not supported between instances of 'NoneType' and 'float'
+
+    That is the CORRELATING stage failing on an archive the model explicitly allows. The fix
+    reads absence as zero MOTION rather than as zero SPEED: an un-reported speed licenses no
+    dead reckoning, and the existing ``sog < 0.1`` guard in ``propagate`` then declines to
+    project. The distinction matters, and it is preserved: ``_speed_knots`` returns the number
+    used for kinematics, never a claim that the vessel measured zero.
+
+    An UNREADABLE value is not absence, so it is raised rather than silently read as 0.0. A
+    NaN that reached the score would propagate into every candidate.
+    """
+    value = ob.get("sog")
+    if value is None:
+        return 0.0
+    speed = float(value)
+    if not math.isfinite(speed):
+        raise ValueError(f"observation has a non-finite sog: {value!r}")
+    return max(0.0, speed)
+
+
+def _course_deg(ob: dict[str, Any]) -> float | None:
+    """Course over ground in degrees true, or ``None`` when it was not reported.
+
+    Returning ``None`` rather than ``0.0`` is the whole point. COG 0 is a real course due
+    north; substituting it for absence would assert a direction the vessel never reported, and
+    would let a contact be scored as *agreeing* with a north-oriented hull for free.
+    """
+    value = ob.get("cog")
+    if value is None:
+        return None
+    course = float(value)
+    if not math.isfinite(course):
+        return None
+    return course % 360.0
+
+
+def _has_cog(ob: dict[str, Any]) -> bool:
+    """Whether the observation reported a course at all."""
+    return _course_deg(ob) is not None
+
+
+def _hull_length_m(ob: dict[str, Any]) -> float | None:
+    """
+    The vessel's overall length in metres, or ``None`` when it was not reported.
+
+    READS BOTH SPELLINGS, CANONICAL FIRST.
+
+    ``AisObservation`` and the Parquet schema name the field ``length_m``
+    (``models.py:52``, ``archive.py:36``). The golden fixture and the correlation-input shape
+    call it ``length``. ``correlate`` only ever read the second, so on real archive rows the
+    size term was pinned to its 0.8 default and a 0.15-weighted contribution was a constant.
+
+    Canonical-first rather than either-or, so that a row carrying both cannot pick the wrong
+    one by dict ordering -- and so the golden run's parity is unchanged.
+    """
+    for key in ("length_m", "length"):
+        raw = ob.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value > 0:
+            return value
+    return None
+
+
+def _vessel_type(ob: dict[str, Any]) -> str | None:
+    """
+    The vessel's type, or ``None``.
+
+    Same two-spelling problem as the name: the archive stores ``ship_type``
+    (``models.py:50``) and the fixture uses ``shipType``. Read raw here rather than upper-cased,
+    so the CALLER decides the presentation -- a tag that has already been transformed cannot be
+    told apart from a source value.
+    """
+    for key in ("ship_type", "shipType"):
+        value = ob.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _vessel_name(ob: dict[str, Any]) -> str | None:
+    """
+    The vessel's name, or ``None``.
+
+    The same two-spelling problem as the hull length: ``AisObservation`` and the archive
+    store ``name`` (``models.py:49``), while the correlation-input shape uses ``shipName``.
+    Reading only ``shipName`` meant ``vesselName`` was always ``None`` on a real archive row,
+    so the operator saw an unnamed vessel for every contact that had one.
+
+    CANONICAL FIRST, matching ``_hull_length_m`` and ``_vessel_type``. An earlier revision read
+    ``shipName`` first, so a row carrying both spellings resolved by a different rule from every
+    other field -- and a test comparing the three helpers caught exactly that.
+    """
+    for key in ("name", "shipName"):
+        value = ob.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 MIN_SCORE = 0.40
 LOW_BAND = 0.30  # [LOW_BAND, MIN_SCORE) with a candidate -> LOW_CONFIDENCE
 CONFLICT_GAP = 0.05  # two candidates >= MIN_SCORE within this -> UNRESOLVED
@@ -167,9 +281,11 @@ def correlate(
             dt = acq - ob_ts
             if abs(dt) > WINDOW_S:
                 continue
-            pred = propagate(ob["lat"], ob["lon"], ob["sog"], ob["cog"], dt)
+            sog_knots = _speed_knots(ob)
+            cog_deg = _course_deg(ob)
+            pred = propagate(ob["lat"], ob["lon"], sog_knots, cog_deg, dt)
             dist = geodesic_meters(lat, lon, pred["lat"], pred["lon"])
-            radius = dynamic_radius(base_radius_m, dt, ob["sog"], max_radius_m)
+            radius = dynamic_radius(base_radius_m, dt, sog_knots, max_radius_m)
             if dist > radius:
                 continue
             spatial = max(0.0, 1 - dist / radius)
@@ -181,10 +297,30 @@ def correlate(
             # heading agreement was measured. Hull orientation is the only
             # validated primary source, and it is a line, so the undirected metric
             # is the correct one unconditionally.
-            hdg = max(0.0, 1 - orient_diff(eff_hdg, ob["cog"]) / 90)
+            #
+            # AN UNREPORTED COURSE SCORES ZERO, AND THAT IS A DELIBERATE PENALTY.
+            # The heading term carries weight 0.15, so an observation with no COG simply cannot
+            # win on heading. Reading absence as "agrees with everything" would let a contact
+            # that reported nothing directionally out-score one that did, and reading it as 0
+            # degrees would assert a course north that the vessel never gave.
+            hdg = max(0.0, 1 - orient_diff(eff_hdg, cog_deg) / 90) if cog_deg is not None else 0.0
+            # THE SIZE TERM WAS DEAD IN PRODUCTION.
+            #
+            # It read `ob.get("length", 0)` and `ob["length"]`, but `AisArchive` stores the
+            # column as `length_m` and `AisObservation` names the field `length_m`. On every
+            # real archive row `ob.get("length", 0)` returned 0, the guard skipped, and `size`
+            # stayed pinned at its 0.8 default -- so a 0.15-weighted term contributed a
+            # constant and the vessel's actual dimensions never influenced correlation.
+            #
+            # The golden fixture uses `length`, which is why it looked exercised. Both spellings
+            # are now read, canonical first, because the golden run's parity must not change:
+            # a fixture that says `length` and an archive that says `length_m` are the same
+            # vessel, and picking one arbitrarily would silently move the score for whichever
+            # spelling was missed.
+            hull_length = _hull_length_m(ob)
             size = 0.8
-            if ob.get("length", 0) > 0:
-                size = max(0.0, 1 - abs(apparent_len - ob["length"]) / max(ob["length"], 50))
+            if hull_length is not None and hull_length > 0:
+                size = max(0.0, 1 - abs(apparent_len - hull_length) / max(hull_length, 50))
             composite = w_sp * spatial + w_tm * temporal + w_hd * hdg + w_sz * size
             cands.append(
                 {
@@ -292,10 +428,17 @@ def correlate(
             hit = m["ais"]
             assessment = (
                 f"Correlated with AIS MMSI {hit['mmsi']} "
-                f"({hit.get('shipName') or 'Unregistered'}). Spatial delta "
+                f"({_vessel_name(hit) or 'Unregistered'}). Spatial delta "
                 f"{round(m['dist'])}m at dt {m['dt']}s."
             )
-            tags += ["CORRELATED_AIS", str(hit.get("shipType", "")).upper().replace(" ", "_")]
+            # Read through the spelling-agnostic helper: the archive column is `ship_type` and
+            # only the golden fixture spells it `shipType`, so a direct read produced an empty
+            # string that then `.upper()`-ed into a bare tag with no vessel type in it. Guarded
+            # on truthiness so an untyped vessel contributes no CORRELATED_AIS tag at all,
+            # rather than a meaningless one.
+            vessel_type = _vessel_type(hit)
+            if vessel_type:
+                tags += ["CORRELATED_AIS", vessel_type.upper().replace(" ", "_")]
         elif idx in weak_best:
             cls = "LOW_CONFIDENCE"
             assessment = (
@@ -326,7 +469,7 @@ def correlate(
         corr: dict[str, Any] = {
             "matched": bool(best_ais and score >= MIN_SCORE),
             "mmsi": str(best_ais["mmsi"]) if best_ais else None,
-            "vesselName": best_ais.get("shipName") if best_ais else None,
+            "vesselName": _vessel_name(best_ais) if best_ais else None,
             "distanceOffsetMeters": round(m["dist"]) if m else None,
             "timeDeltaSeconds": m["dt"] if m else None,
             "predictedLat": m["pred"]["lat"] if m else None,
@@ -344,7 +487,7 @@ def correlate(
         corr["closestRejected"] = (
             {
                 "mmsi": str(rejected["ais"]["mmsi"]),
-                "vesselName": rejected["ais"].get("shipName"),
+                "vesselName": _vessel_name(rejected["ais"]),
                 "score": round(rejected["score"], 3),
                 "distanceMeters": round(rejected["dist"]),
                 "timeDeltaSeconds": rejected["dt"],
@@ -415,7 +558,7 @@ def correlate(
                 {
                     "cls": "AIS_ONLY",
                     "mmsi": str(ob["mmsi"]),
-                    "vesselName": ob.get("shipName"),
+                    "vesselName": _vessel_name(ob),
                     "lat": ob["lat"],
                     "lon": ob["lon"],
                     "timestamp": str(ob["timestamp"]),

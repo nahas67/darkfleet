@@ -53,7 +53,27 @@ class GfwClient:
 
 
 def normalize_gfw_event(entry: dict[str, Any]) -> AisObservation | None:
-    """GFW event with position -> canonical. Registry-only entries are skipped."""
+    """GFW event with position -> canonical. Registry-only entries are skipped.
+
+    GFW PUBLISHES NO KINEMATICS, SO NONE ARE INVENTED.
+
+    This previously wrote ``sog=0.0, cog=0.0, heading=0.0``. GFW is a fishing-activity dataset:
+    its events carry a position, a vessel and a time, and nothing else. Writing three zeros
+    therefore asserted three measurements nobody made, in three separate ways that mattered:
+
+      * a vessel at anchor and a vessel with no speed report became indistinguishable, which is
+        the exact conflation ``AisObservation``'s module docstring exists to prevent;
+      * ``propagate``'s ``sog < 0.1`` guard -- the product's own "do not dead-reckon a vessel
+        that is not moving" rule -- was defeated, because 0.0 satisfies ``< 0.1`` and so the
+        vessel was projected as genuinely stationary rather than declined;
+      * ``cog=0.0`` is a real course, due north. A GFW contact would have been drawn pointing
+        north, and ``orient_diff`` would have scored it against north-oriented hulls as though
+        it had reported agreement.
+
+    All three are absent, so all three are ``None``. The fix is not cosmetic: it changes what
+    the correlation scores, because an un-reported course now scores zero on the heading term
+    instead of contributing a free match against a north-south hull.
+    """
     try:
         pos = entry.get("position", {})
         lat, lon = pos.get("lat"), pos.get("lon")
@@ -65,9 +85,11 @@ def normalize_gfw_event(entry: dict[str, Any]) -> AisObservation | None:
             mmsi=str(vessel.get("mmsi", "")),
             lat=float(lat),
             lon=float(lon),
-            sog=0.0,
-            cog=0.0,
-            heading=0.0,
+            # GFW carries none of these. Absent is None -- see the module docstring of
+            # `darkfleet.ais.models`, which is explicit that 0.0 is not the same claim.
+            sog=None,
+            cog=None,
+            heading=None,
             ship_type=str(vessel.get("type") or entry.get("type") or ""),
             name=str(vessel.get("name") or ""),
             callsign=str(vessel.get("callsign") or ""),
