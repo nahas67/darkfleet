@@ -868,13 +868,59 @@ describe('the defining invariant', () => {
   });
 
   it('does not extrapolate into the past either', () => {
-    // Before the earliest observation nothing is known. Drawing the earliest fix is the only
-    // answer that does not invent a position.
+    /*
+     * CORRECTED BY DF-X9.4. THIS PREVIOUSLY PINNED THE WRONG ANSWER.
+     *
+     * The test asserted that a reference time BEFORE the earliest observation draws the contact at
+     * its earliest fix, on the reasoning that this is "the only answer that does not invent a
+     * position". It is a real position, and that is exactly what made it a fabrication in a subtler
+     * form than forward extrapolation: at the reference instant the vessel had not been seen at all,
+     * so drawing it asserts a presence the evidence does not support. The lie is in the timing, not
+     * in the coordinates, which is why it survived the original no-extrapolation guarantee.
+     *
+     * The corrected answer is NOT_YET_OBSERVED with NO position, and -- critically -- with an EMPTY
+     * source list, because this state is defined by the ABSENCE of the observation rather than
+     * derived from it.
+     */
     const series = [obs({ timestamp: at(4), lat: 1.004, lon: 103.0 })];
     const s = displayStateOf(series, at(0));
-    expect(s.lat).toBeCloseTo(1.004, 9);
-    expect(s.at).toBe(at(4));
-    expect(s.sourceObservationTimestamps).toEqual([at(4)]);
+    expect(s.state).toBe('NOT_YET_OBSERVED');
+    expect(s.lat).toBeNull();
+    expect(s.lon).toBeNull();
+    expect(s.at).toBeNull();
+    expect(s.sourceObservationTimestamps).toEqual([]);
+  });
+
+  it('a NOT_YET_OBSERVED contact reports no AGE, because its observation is in the future', () => {
+    /*
+     * MY FIRST TEST PREMISE HERE WAS WRONG, AND THE CODE WAS RIGHT.
+     *
+     * I asserted `ageSeconds` would be 240 -- the four-minute offset to the earliest fix. But that
+     * offset is into the FUTURE relative to the reference time, so it is not an age, and reporting
+     * it as one would be the same class of error as drawing the vessel where it had not yet been:
+     * a number that looks like a measurement and is not.
+     *
+     * `freshnessOf` already refuses it: `ageSeconds: null` with a stated reason. So the assertion is
+     * on the refusal, which is the behaviour worth pinning.
+     */
+    const series = [obs({ timestamp: at(4), lat: 1.004, lon: 103.0 })];
+    const s = displayStateOf(series, at(0));
+    expect(s.state).toBe('NOT_YET_OBSERVED');
+    expect(s.freshness.ageSeconds).toBeNull();
+    expect(s.freshness.thresholdReason).toMatch(/newer than the reference time/i);
+  });
+
+  it('a vessel that has never been observed at the reference time is not merely stale', () => {
+    // STALE and NOT_YET_OBSERVED are DIFFERENT claims and must not converge. STALE says "we saw it,
+    // and that was a while ago"; NOT_YET_OBSERVED says "we have not seen it yet". Reporting the
+    // second as the first implies the archive is behind rather than incomplete.
+    const series = [obs({ timestamp: at(4) }), obs({ timestamp: at(8) })];
+    const beforeBoth = displayStateOf(series, at(0));
+    const longAfter = displayStateOf(series, at(120));
+    expect(beforeBoth.state).toBe('NOT_YET_OBSERVED');
+    expect(beforeBoth.freshness.tier).toBe('CURRENT');
+    expect(longAfter.state).toBe('LOST');
+    expect(longAfter.freshness.tier).not.toBe('CURRENT');
   });
 
   it('at an exact observation instant the state is OBSERVED', () => {

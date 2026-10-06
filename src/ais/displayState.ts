@@ -545,6 +545,18 @@ export type ContactDisplayState =
   | 'PREDICTED'
   /** The contact's latest observation is old; the glyph is drawn faded at that old fix. */
   | 'STALE'
+  /**
+   * The playback time is BEFORE this contact's first observation.
+   *
+   * A REAL STATE, ADDED BY DF-X9.4, and the alternative to two failures. Either the contact
+   * back-propagates across the empty span -- inventing positions before any measurement existed --
+   * or it is silently omitted, which makes an archive not yet reached look like one that was never
+   * there. Neither is truthful.
+   *
+   * Nothing is drawn for such a contact, because there is no position to draw. What is shown is its
+   * absence with a stated cause.
+   */
+  | 'NOT_YET_OBSERVED'
   /** No usable observation, or one the product would exclude from correlation. */
   | 'LOST';
 
@@ -697,15 +709,28 @@ export function displayStateOf(
     };
   }
 
-  // Strictly BEFORE the earliest observation: nothing brackets this time.
+  /*
+   * STRICTLY BEFORE THE EARLIEST OBSERVATION: NOT YET OBSERVED.
+   *
+   * Changed by DF-X9.4 from drawing the contact AT its earliest fix. That was a fabrication in a
+   * subtler form than extrapolation: the vessel had not been seen at all at this instant, and
+   * drawing it at its first known position asserted a presence the evidence does not support. It
+   * looked defensible because the drawn point is a REAL observation -- the lie is in the timing.
+   *
+   * Nothing is drawn, and `sourceObservationTimestamps` is EMPTY rather than carrying the earliest
+   * fix: this state is not derived from that observation, it is defined by its absence.
+   *
+   * Freshness still reports the age of the newest observation, so the dossier can say what IS known
+   * while the globe says the contact is not yet present.
+   */
   if (referenceAt < earliestAt) {
     return {
       ...base,
-      lat: earliest.lat,
-      lon: earliest.lon,
-      state: 'OBSERVED',
-      at: earliest.timestamp,
-      sourceObservationTimestamps: [earliest.timestamp],
+      lat: null,
+      lon: null,
+      state: 'NOT_YET_OBSERVED',
+      at: null,
+      sourceObservationTimestamps: [],
     };
   }
 
