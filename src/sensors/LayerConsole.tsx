@@ -350,8 +350,25 @@ export function LayerConsole() {
               </div>
               <ul className="space-y-1">
                 {groupRows.map((row) => {
-                  const disabled = row.unavailableReason !== undefined;
-                  const shown = row.visible && !disabled;
+                  /*
+                   * ONE derivation, THREE consumers: the styling, `disabled`, and `aria-pressed`.
+                   *
+                   * DF-X9.4H section 10 was fixed here once already and the fix was INCOMPLETE: the
+                   * comment block below stated the intent verbatim, `ariaPressedFor()` was exported
+                   * and unit-tested, `controlState` was derived on every row -- and the <button>
+                   * bound `disabled` only. A browser E2E read `getAttribute('aria-pressed') === null`
+                   * on all 14 rows and called the exported helper dead code at the call site. It was.
+                   *
+                   * The cause was structural, not a typo: `disabled` was recomputed here from
+                   * `row.unavailableReason !== undefined` -- a SECOND computation of a fact
+                   * `controlState` already held -- and `aria-pressed` was never written at all. The
+                   * lesson is the same one DF-X9.4G learned the expensive way with the playback bar's
+                   * gap counts: when one fact has two homes, the unfixed home is the one that ships
+                   * stale. So there is now exactly one home for this fact.
+                   */
+                  const controlState = row.controlState;
+                  const disabled = disabledFor(controlState);
+                  const shown = controlState === 'ON';
                   return (
                     <li key={row.id} data-df-layer={row.id}>
                       <div className="flex items-center gap-2">
@@ -383,6 +400,7 @@ export function LayerConsole() {
                               : undefined
                           }
                           disabled={disabled}
+                          aria-pressed={ariaPressedFor(controlState)}
                           title={row.unavailableReason ?? row.label}
                           onClick={() => commit(row.id, { visible: !row.visible })}
                         >

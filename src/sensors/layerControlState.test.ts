@@ -30,6 +30,7 @@ import {
  * rather than a mistake in one test. `await` is allowed at module top level and nowhere else.
  */
 const TIMELINE = (await import('../timeline/MissionTimeline?raw')).default as string;
+const LAYER_CONSOLE = (await import('./LayerConsole?raw')).default as string;
 const RENDERER = (await import('../globe/aisRenderer?raw')).default as string;
 const ENGINE = (await import('../globe/engine?raw')).default as string;
 
@@ -103,6 +104,72 @@ describe('layer control states', () => {
     expect(layerControlState(false, undefined)).toBe('OFF');
     expect(layerControlState(true, null)).toBe('ON');
     expect(layerControlState(false, null)).toBe('OFF');
+  });
+});
+
+/* ============================================================================================== *
+ * THE STATE IS BOUND TO THE BUTTON -- DF-X9.4H SECTION 10, SECOND ATTEMPT
+ * ============================================================================================== */
+
+describe('the control state REACHES the rendered button', () => {
+  /*
+   * Comments are stripped first, and that is not tidiness -- it is load-bearing here. The prose in
+   * this file QUOTES the very expressions being hunted (`<button>`, `unavailableReason !== undefined`),
+   * so an unstripped source match finds the essay instead of the code. A guard that can be satisfied
+   * by its own documentation is not a guard.
+   */
+  const CODE = LAYER_CONSOLE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  /*
+   * Every test above passed while the product was broken.
+   *
+   * `ariaPressedFor()` was exported, correct, and unit-tested. `controlState` was derived on every
+   * row. A nineteen-line comment block stated the intent verbatim. And the <button> bound `disabled`
+   * and `title` only -- so `getAttribute('aria-pressed')` returned `null` on all fourteen rows, a
+   * screen reader was told these were plain buttons rather than toggles, and the helper was dead code
+   * AT THE CALL SITE. The browser E2E found it by quoting the checkpoint's own claim back at it.
+   *
+   * This is the "exposed is not reachable" defect for the fourth time, and the tell is identical every
+   * time: a correct pure function and an unwired call site. Pure tests cannot see the wiring, because
+   * the wiring is not theirs to see. So these assertions read the SOURCE, because the wiring is
+   * exactly what is in question.
+   *
+   * WHAT THIS DOES AND DOES NOT PROVE, stated plainly: it proves the binding exists in the source.
+   * That React emits `aria-pressed="false"` for a `false` value, and that a real effect has run, is
+   * the browser E2E's claim -- section K. This is not that claim; it is the floor under it.
+   */
+
+  it('the <button> binds aria-pressed, not merely a helper beside it', () => {
+    expect(CODE).toMatch(/aria-pressed=\{ariaPressedFor\(/);
+  });
+
+  it('the binding is on the LAYER BUTTON, not on some other element', () => {
+    // Binding it anywhere in the file would satisfy the test above while the button stayed silent,
+    // which is precisely the failure mode being guarded against.
+    const buttonIndex = CODE.indexOf('<button');
+    expect(buttonIndex).toBeGreaterThan(-1);
+    const region = CODE.slice(buttonIndex, CODE.indexOf('>', buttonIndex));
+    expect(region).toContain('aria-pressed={ariaPressedFor(');
+  });
+
+  it('the row map does NOT recompute `disabled` from a second source', () => {
+    /*
+     * The structural cause, not the typo. `disabled` was `row.unavailableReason !== undefined` while
+     * `controlState` already held that answer -- two homes for one fact, and the one that feeds the
+     * DOM is the one that can drift. DF-X9.4G learned this the expensive way with the playback bar's
+     * gap counts, where bar and renderer each computed the same number independently.
+     */
+    const body = CODE.slice(CODE.indexOf('groupRows.map'));
+    expect(body).not.toMatch(/unavailableReason !== undefined/);
+    expect(body).toMatch(/disabledFor\(controlState\)/);
+  });
+
+  it('the visible styling is derived from the SAME state, not from `row.visible`', () => {
+    // `shown` was `row.visible && !disabled`. Two readings, and a stored `true` on an UNAVAILABLE row
+    // would have painted itself as on while announcing itself as unpressed.
+    const body = CODE.slice(CODE.indexOf('groupRows.map'));
+    expect(body).not.toMatch(/const shown = row\.visible/);
+    expect(body).toMatch(/const shown = controlState === 'ON'/);
   });
 });
 
