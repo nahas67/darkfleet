@@ -36,6 +36,7 @@ import {
   Cartesian2,
   Cartesian3,
   Color,
+  Material,
   HorizontalOrigin,
   LabelCollection,
   PolylineCollection,
@@ -52,12 +53,12 @@ import {
   type LabelPriority,
 } from './glyphGeometry';
 import {
-  segmentTrack,
   stabilizeOrientation,
   type ContactDisplayState,
   type DisplayContactState,
   type Freshness,
 } from '../ais/displayState';
+import { buildTrack, displayRunsFor } from '../temporal/trackBuilder';
 
 /* ============================================================================================== *
  * VISUAL VOCABULARY
@@ -373,7 +374,12 @@ export class AisContactRenderer {
    * Keeping it as its own record is what lets the browser E2E COUNT gaps and prove the track
    * visibly breaks, rather than inferring it from a line that merely looks shorter.
    */
-  #gaps: Array<{ from: { lat: number; lon: number }; to: { lat: number; lon: number } }> = [];
+  #gaps: Array<{
+    mmsi: string;
+    from: { lat: number; lon: number };
+    to: { lat: number; lon: number };
+    spanSeconds: number | null;
+  }> = [];
   /** Last DRAWN angle per MMSI, for the stabiliser. Never the reported value. */
   #drawnRotation = new Map<string, number>();
   #lastStats: ContactRenderStats = {
@@ -712,37 +718,103 @@ export class AisContactRenderer {
   ): void {
     this.#track.removeAll();
     this.#gaps = [];
-    for (const fixes of tracks.values()) {
-      // ONE fix is not a track. DF-X9 section 50.
-      if (fixes.length < 2) continue;
 
-      for (const segment of segmentTrack(
-        fixes.map((f) => ({ timestamp: f.at, mmsi: '', lat: f.lat, lon: f.lon })),
-      )) {
-        if (segment.points.length < 2) continue;
-        const positions = segment.points.map((p) => Cartesian3.fromDegrees(p.lon, p.lat));
-        if (segment.kind === 'GAP') {
-          // A gap is drawn, but as a DASH. Its endpoints are both real fixes; what is missing is
-          // everything between them, and the styling has to say so.
+    for (const [mmsi, fixes] of tracks) {
+      /*
+       * BUILT BY `buildTrack`, NOT BY HAND.
+       *
+       * This method used to slice the fixes itself and call `segmentTrack` on a hand-shaped object
+       * array. That put the gap rule in the RENDERER while the authoritative implementation lived in
+       * `trackBuilder`, so there were two places deciding whether an interval was joinable, and they
+       * would eventually disagree -- producing a glyph that refuses to interpolate across an
+       * interval its own track draws as solid.
+       *
+       * The renderer now CONSUMES the segment model. It decides nothing about evidence; it only
+       * decides how each segment is DRAWN.
+       */
+      const build = buildTrack(
+        fixes.map((fix) => ({
+          timestamp: fix.at,
+          mmsi,
+          lat: fix.lat,
+          lon: fix.lon,
+          sog: null,
+          cog: null,
+          heading: null,
+          ship_name: null,
+          source: null,
+        })),
+      );
+
+      /*
+       * ONE OBSERVATION IS EVIDENCE, NOT A TRACK.
+       *
+       * No polyline is drawn -- there is nothing to connect. The observation MARKER still draws from
+       * `#renderObservationMarkers`, because dropping the only position a contact has would lose real
+       * evidence. The count is exported so the UI can say '1 OBSERVATION' rather than implying a
+       * track exists and is merely invisible.
+       */
+      if (build.status !== 'TRACK') continue;
+
+      for (const segment of build.segments) {
+        /*
+         * ANTIMERIDIAN SPLIT, HERE AND ONLY HERE.
+         *
+         * A segment crossing +/-180 must be drawn as SEPARATE polylines. `Cartesian3.fromDegrees`
+         * normalises longitude into [-180, 180] whatever value it is handed, so unwrapping cannot
+         * help and one polyline across a crossing becomes a line around the world.
+         *
+         * Each display run is a contiguous slice and the concatenation reproduces the segment exactly:
+         * no point reordered, dropped or duplicated, stored coordinates untouched.
+         */
+        for (const run of displayRunsFor(segment)) {
+          if (run.length < 2) continue;
+          const positions = run.map((point) => Cartesian3.fromDegrees(point.lon, point.lat));
+
+          if (segment.kind === 'GAP') {
+            /*
+             * A GAP IS DRAWN BROKEN AND RECORDED AS A GAP.
+             *
+             * Dashes are the point: colour alone is not an encoding (DF-X9.4 section 46). And the gap
+             * is RECORDED so the browser E2E can count it -- counting is what distinguishes a break
+             * from a solid line, because a gap connector is still exactly one polyline. That length
+             * ambiguity is precisely why the DF-X9.3E finding "the track polyline crosses the gap
+             * unbroken" could not be settled by measurement the first time.
+             */
+            this.#track.add({
+              positions,
+              width: 1.5,
+              /*
+               * `Material.fromType('PolylineDash')`, not a colour. The dash IS the encoding: the
+               * segment's endpoints are real observations and everything between them is missing, and
+               * a tinted solid line still reads as continuous observation to anyone not told
+               * otherwise. Colour alone is not an encoding.
+               */
+              material: Material.fromType('PolylineDash', {
+                color: COLOUR_STALE.withAlpha(0.7),
+                gapColor: Color.TRANSPARENT,
+                gapAlpha: 0,
+                dashLength: 12,
+              }),
+            });
+            this.#gaps.push({
+              mmsi,
+              from: { lat: segment.points[0].lat, lon: segment.points[0].lon },
+              to: {
+                lat: segment.points[segment.points.length - 1].lat,
+                lon: segment.points[segment.points.length - 1].lon,
+              },
+              spanSeconds: segment.spanSeconds,
+            });
+            continue;
+          }
+
           this.#track.add({
             positions,
-            color: COLOUR_STALE.withAlpha(0.55),
-            width: 1.5,
+            color: COLOUR_CONTACT.withAlpha(0.75),
+            width: 2,
           });
-          this.#gaps.push({
-            from: { lat: segment.points[0].lat, lon: segment.points[0].lon },
-            to: {
-              lat: segment.points[segment.points.length - 1].lat,
-              lon: segment.points[segment.points.length - 1].lon,
-            },
-          });
-          continue;
         }
-        this.#track.add({
-          positions,
-          color: COLOUR_CONTACT.withAlpha(0.7),
-          width: 2,
-        });
       }
     }
   }
@@ -750,9 +822,15 @@ export class AisContactRenderer {
   /**
    * Every gap currently drawn, for the browser E2E.
    *
-   * Exposed so DF-X9.3 section 46 can be proven by COUNT rather than by looking at a screenshot.
+   * Exposed so DF-X9.4 section 68 is provable by COUNT rather than by looking at a screenshot, which
+   * is the only way a break can be distinguished from a solid line of the same length.
    */
-  get gaps(): ReadonlyArray<{ from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+  get gaps(): ReadonlyArray<{
+    mmsi: string;
+    from: { lat: number; lon: number };
+    to: { lat: number; lon: number };
+    spanSeconds: number | null;
+  }> {
     return [...this.#gaps];
   }
 

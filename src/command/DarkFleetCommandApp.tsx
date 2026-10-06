@@ -18,7 +18,7 @@
  * majority of the viewport, which is the whole point of the product.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { loadDatasetHealth, loadProviders, loadRaster } from '../api/client';
 import { engine } from '../globe/engine';
@@ -28,6 +28,9 @@ import { TopStrip } from './TopStrip';
 import { useGlobalKeys } from './useGlobalKeys';
 import { TacticalWorld } from '../tactical/TacticalWorld';
 import { MissionTimeline } from '../timeline/MissionTimeline';
+import { AisPlaybackBar } from '../temporal/AisPlaybackBar';
+import { buildTrack } from '../temporal/trackBuilder';
+import { frameTrack, pointsOfSegments } from '../temporal/framing';
 import { ContactList } from '../contacts/ContactList';
 import { DossierWorkspace } from '../dossier/DossierWorkspace';
 import { LayerConsole } from '../sensors/LayerConsole';
@@ -41,6 +44,52 @@ import { UnifiedSearch } from '../search/UnifiedSearch';
 
 export function DarkFleetCommandApp() {
   const state = useStore();
+  /*
+   * THE AIS FACTS THE PLAYBACK BAR SHOWS, DERIVED FROM THE ARCHIVE ONCE.
+   *
+   * Counts and gaps come from `buildTrack` rather than from the bar computing them, so the numbers on
+   * screen and the model the renderer draws cannot disagree. `gapSeconds` is the SUM over gaps, which
+   * is the figure an operator actually wants -- "4 gaps, 3,120 s of missing reporting" -- rather than a
+   * count that reads like everything is fine.
+   */
+  const aisTrack = useMemo(() => buildTrack(state.aisObservations), [state.aisObservations]);
+  const aisObservationsPresent = aisTrack.usableCount > 0;
+  const aisObservationCount = aisTrack.usableCount;
+  const aisTrackStatus = aisTrack.status;
+  const aisGapCount = aisTrack.segments.filter((s) => s.kind === 'GAP').length;
+  const aisGapSeconds = useMemo(() => {
+    const spans = aisTrack.segments
+      .filter((s) => s.kind === 'GAP')
+      .map((s) => s.spanSeconds)
+      .filter((v): v is number => v !== null);
+    return spans.length > 0 ? spans.reduce((a, b) => a + b, 0) : null;
+  }, [aisTrack]);
+
+  /*
+   * FRAME TRACK, ONE SHOT.
+   *
+   * Frames every segment point, so a track that crosses the antimeridian is framed on its SHORT
+   * extent rather than on a 359-degree box. It is a single camera move: no subscription to the
+   * playhead, because continuous follow is DF-X9.6's scope and a one-shot fit that quietly became
+   * follow would take the camera away without anyone deciding to.
+   */
+  const aisCanFrame = aisTrack.segments.some((s) => s.points.length >= 2);
+  const aisFrameTrack = useCallback(() => {
+    const points = pointsOfSegments(aisTrack.segments);
+    if (points.length === 0) return;
+    frameTrack(
+      (lat, lon, halfHeightDeg, halfWidthDeg) => {
+        engine.flyToBbox([
+          lon - halfWidthDeg,
+          lat - halfHeightDeg,
+          lon + halfWidthDeg,
+          lat + halfHeightDeg,
+        ]);
+      },
+      { points },
+    );
+  }, [aisTrack]);
+
   const workspaceRef = useRef<HTMLDivElement | null>(null);
 
   useGlobalKeys();
@@ -183,6 +232,26 @@ export function DarkFleetCommandApp() {
       </div>
 
       <MissionTimeline />
+      {/*
+       * AIS PLAYBACK, BESIDE THE TIMELINE RATHER THAN INSIDE A DOSSIER.
+       *
+       * It sits on the same row because both read the SAME authority. Buried in a dossier tab the
+       * playhead would be readable only there while the globe showed the previous instant -- the
+       * second-timeline defect DF-X9.4 section 38 forbids.
+       *
+       * Rendered only when usable AIS observations exist, so a scan with no AIS archive shows nothing
+       * rather than a disabled strip implying a feed that was never configured.
+       */}
+      {aisObservationsPresent ? (
+        <AisPlaybackBar
+          observationCount={aisObservationCount}
+          trackStatus={aisTrackStatus}
+          gapCount={aisGapCount}
+          gapSeconds={aisGapSeconds}
+          canFrame={aisCanFrame}
+          onFrameTrack={aisFrameTrack}
+        />
+      ) : null}
     </div>
   );
 }

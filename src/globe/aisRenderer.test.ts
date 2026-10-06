@@ -310,16 +310,40 @@ describe('gap segmentation', () => {
     expect(segments.filter((s) => s.kind === 'GAP')).toHaveLength(1);
   });
 
-  it('the renderer calls segmentTrack rather than drawing one polyline', () => {
-    // The wiring, asserted structurally. A behavioural test cannot reach `render` without a WebGL
-    // context, so this is what holds the CALL in place; the two tests above hold the BEHAVIOUR.
-    expect(AIS_RENDERER_CODE).toContain('segmentTrack(');
-    // And there is no unguarded whole-track polyline left.
+  it('the renderer CONSUMES the segment model rather than deciding gaps itself', () => {
+    /*
+     * UPDATED BY DF-X9.4B->C: this previously pinned `segmentTrack(`, which the renderer no longer
+     * calls. The rename hides the real change, which is WHY the call changed.
+     *
+     * The renderer used to slice the fixes itself and call `segmentTrack` on a hand-shaped array.
+     * That put the gap rule in TWO places -- the renderer and `trackBuilder` -- and two places
+     * deciding whether an interval was joinable would eventually disagree, producing a glyph that
+     * refuses to interpolate across an interval its own track draws as solid.
+     *
+     * So the renderer now consumes `buildTrack`, the single authority, and `displayRunsFor` for the
+     * antimeridian split. A behavioural test cannot reach `render` without a WebGL context, so this
+     * is what holds the CALLS in place; the tests above hold the BEHAVIOUR they delegate to.
+     */
+    expect(AIS_RENDERER_CODE).toContain('buildTrack(');
+    expect(AIS_RENDERER_CODE).toContain('displayRunsFor(');
+
+    // And the gap rule is NOT reimplemented in the renderer: no second threshold.
     const trackBody = AIS_RENDERER_CODE.slice(
       AIS_RENDERER_CODE.indexOf('renderTracks('),
-      AIS_RENDERER_CODE.indexOf('gaps'),
+      AIS_RENDERER_CODE.indexOf('get gaps'),
     );
+    expect(trackBody).not.toMatch(/MAX_INTERPOLATION_INTERVAL_S/);
+    expect(trackBody).not.toMatch(/spanSeconds\s*<=\s*/);
+    // Nor a whole-track polyline built from the raw fixes.
     expect(trackBody).not.toMatch(/points: fixes/);
+  });
+
+  it('a gap is drawn DASHED, not merely tinted', () => {
+    // Colour alone is not an encoding (DF-X9.4 section 46). A tinted solid line still reads as
+    // continuous observation to anyone not told otherwise, and the endpoints are real fixes with
+    // everything between them missing.
+    expect(AIS_RENDERER_CODE).toContain("Material.fromType('PolylineDash'");
+    expect(AIS_RENDERER_CODE).toContain('dashLength');
   });
 });
 

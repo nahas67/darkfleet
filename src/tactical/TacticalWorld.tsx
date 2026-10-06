@@ -10,7 +10,7 @@
  * "no contacts here".
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useCoastlineGeometry, useZoneGeometry } from '../globe/maritimeGeometry';
 
@@ -21,6 +21,9 @@ import { store, useStore } from '../state/store';
 import { fmt, fmtLatLon } from '../design/format';
 import type { PredictedPoint } from '../globe/aisRenderer';
 import type { AisObservationOut, VesselTarget } from '../api/contract';
+import { rangeFromTimestamps, temporal, temporalNowIso, useTemporal } from '../temporal/TemporalController';
+import { buildTrack } from '../temporal/trackBuilder';
+import { frameTrack, planToBBox, pointsOfSegments } from '../temporal/framing';
 
 /**
  * Observed track polylines, one per MMSI.
@@ -99,9 +102,97 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   const [hovered, setHovered] = useState<TargetHandle | null>(null);
 
   const state = useStore();
+  /*
+   * THE SINGLE PLAYBACK AUTHORITY, SUBSCRIBED HERE.
+   *
+   * Every AIS freshness and interpolation decision reads this one instant. Before DF-X9.4 the
+   * reference time was a store field set once by `loadScanAis`, so there was no way to move it --
+   * and adding a second clock beside it is exactly the drift `TemporalController` exists to prevent.
+   */
+  const temporalState = useTemporal();
   const targets = state.targets;
   const selection = state.selection;
   const rasterBounds = engine.rasterBounds;
+
+  /*
+   * ESTABLISH THE PLAYBACK RANGE FROM THE SELECTED CONTACT'S OWN OBSERVATIONS.
+   *
+   * Derived, never fabricated: first and last observation, and nothing outside them. DF-X9.4 section
+   * 9 requires exactly that, and a range padded with invented time either way would let an operator
+   * seek to a moment with no evidence behind it.
+   *
+   * The range is set on EVERY AIS data change, not only on selection, because the fallback case --
+   * no contact selected, but observations loaded -- is a legitimate thing to play.
+   */
+  useEffect(() => {
+    const selectedMmsi = selection.kind === 'mmsi' ? selection.mmsi : null;
+    const relevant = selectedMmsi
+      ? state.aisObservations.filter((o) => o.mmsi === selectedMmsi)
+      : state.aisObservations;
+    temporal.setRange(rangeFromTimestamps(relevant.map((o) => o.timestamp)));
+  }, [selection, state.aisObservations]);
+
+  /*
+   * SELECTED CONTACT'S TRACK MODEL.
+   *
+   * Built from the archive observations rather than from the contact projection, because a contact
+   * carries only its latest fix and one fix is not a track. The status decides what the UI says --
+   * `SINGLE_OBSERVATION` renders its marker and says so, rather than implying a track exists and is
+   * merely invisible.
+   */
+  const selectedTrack = useMemo(() => {
+    const selectedMmsi = selection.kind === 'mmsi' ? selection.mmsi : null;
+    if (!selectedMmsi) return null;
+    const rows = state.aisObservations.filter((o) => o.mmsi === selectedMmsi);
+    if (rows.length === 0) return null;
+    return buildTrack(rows);
+  }, [selection, state.aisObservations]);
+
+  /*
+   * FRAME TRACK -- ONE SHOT (DF-X9.4 sections 32 and 33).
+   *
+   * A single move, then the camera belongs to the operator again. There is deliberately no
+   * subscription to the playhead here: continuous FOLLOW, CHASE and oblique tracking are DF-X9.6's
+   * scope, and a one-shot fit that quietly became a follow mode would take the camera away without
+   * anyone deciding to.
+   */
+  const onFrameTrack = useCallback(() => {
+    if (!selectedTrack) return;
+    const points = pointsOfSegments(selectedTrack.segments);
+    // A lone fix has no track to frame, but it IS a position, and framing it is useful. So the
+    // fallback is the fix itself rather than a no-op that reads as a broken button.
+    const target = points.length > 0
+      ? points
+      : selectedTrack.lonePoint
+        ? [{ lat: selectedTrack.lonePoint.lat, lon: selectedTrack.lonePoint.lon }]
+        : [];
+    if (target.length === 0) return;
+    /*
+     * The bbox is handed over UNNORMALISED. For a crossing track the plan's east edge is above 180,
+     * and folding it back to a negative longitude would make the camera wrap the long way -- which is
+     * the same class of bug the wrap-aware bounds exist to prevent, one layer up.
+     */
+    frameTrack(
+      (lat, lon, halfHeightDeg, halfWidthDeg) => {
+        const bbox = planToBBox({
+          centerLat: lat,
+          centerLon: lon,
+          halfHeightDeg,
+          halfWidthDeg,
+          bounds: {
+            centerLat: lat,
+            centerLon: lon,
+            widthDeg: halfWidthDeg * 2,
+            heightDeg: halfHeightDeg * 2,
+            crossesAntimeridian: false,
+          },
+          wrapped: false,
+        });
+        engine.flyToBbox([bbox.west, bbox.south, bbox.east, bbox.north]);
+      },
+      { points: target },
+    );
+  }, [selectedTrack]);
 
   /*
    * The AIS observation history, handed to the renderer so orientation can use more than one fix.
@@ -215,7 +306,21 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
         shipName: contact.shipName,
       })),
       {
-        referenceTimeIso: state.aisReferenceTime,
+        /*
+       * THE REFERENCE TIME, FROM THE ONE AUTHORITY.
+       *
+       * The controller's playhead wins whenever a range has been established, because during
+       * playback the playhead IS the instant under examination. `state.aisReferenceTime` is the
+       * fallback for the non-playback case -- an operator examining a single acquisition instant
+       * still needs a reference, and the acquisition time is the honest one.
+       *
+       * Both are explicit instants. Neither is ever derived from the wall clock: with no live feed,
+       * a wall-clock reference would mark every archived vessel stale and assert that all of them
+       * stopped transmitting.
+       */
+      referenceTimeIso:
+        (temporalState.range.source === 'OBSERVATIONS' ? temporalNowIso(temporalState) : null)
+        ?? state.aisReferenceTime,
         observationMarkers: state.aisObservations.map((o) => ({
           mmsi: o.mmsi,
           lat: o.lat,
@@ -263,6 +368,12 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     state.aisReferenceTime,
     state.aisObservations,
     state.targetDetail,
+    /*
+     * `temporalState` is the playhead. It is a WHOLE OBJECT, so it changes identity on every emit and
+     * the effect re-runs on every tick -- which is exactly what is wanted during playback, and is the
+     * reason the controller emits a fresh snapshot rather than mutating one in place.
+     */
+    temporalState,
     webgl,
     initError,
   ]);
