@@ -174,6 +174,71 @@ describe('the control state REACHES the rendered button', () => {
 });
 
 /* ============================================================================================== *
+ * REACT DOES NOT OMIT IT -- the one link source-reading cannot settle
+ * ============================================================================================== */
+
+describe('the rendered markup carries aria-pressed for EVERY state', () => {
+  /*
+   * The three checks above read source, so they are blind to the last link in the chain: what React
+   * actually EMITS. That link is not a formality, because `disabled` and `aria-pressed` behave
+   * differently and the difference is exactly what made this bug survive a test suite.
+   *
+   * `disabled` is a boolean HTML attribute, so React OMITS it when false -- which is correct, and it
+   * means a naive reader can never infer "the attribute was there but false".
+   *
+   * `aria-pressed` is NOT a boolean HTML attribute. It is a string-valued ARIA attribute, and React
+   * renders a `false` value as the literal string `"false"` rather than dropping it.
+   *
+   * So the two are NOT interchangeable, and had React omitted a falsy `aria-pressed` the binding
+   * would have been as dead as before -- present in source, absent from the DOM, and every assertion
+   * above still green. That possibility is now closed by measurement rather than by belief:
+   * `renderToStaticMarkup` is React's own server renderer, so this is React deciding, not a
+   * browser agreeing, and it needs no WebGL and no CDP to run.
+   *
+   * THIS DOES NOT REPLACE THE BROWSER READ. It settles the emission question; the browser E2E still
+   * owes the claim that a real effect has run and a real control reports these states.
+   */
+
+  it('emits aria-pressed="false" rather than omitting it', async () => {
+    const { createElement } = await import('react');
+    const { renderToStaticMarkup } = await import('react-dom/server');
+
+    const render = (state: LayerControlState): string =>
+      renderToStaticMarkup(
+        createElement(
+          'button',
+          {
+            type: 'button',
+            disabled: disabledFor(state),
+            'aria-pressed': ariaPressedFor(state),
+            title: state,
+          },
+          'row',
+        ),
+      );
+
+    const markup = render('UNAVAILABLE');
+    // The exact failure being guarded: present in the call, absent from the output.
+    expect(markup).toContain('aria-pressed="false"');
+    // And for contrast, the boolean attribute IS omitted when false -- which is why the two cannot
+    // be checked the same way.
+    expect(render('ON')).not.toContain('disabled');
+  });
+
+  it('never emits disabled together with aria-pressed="true"', () => {
+    // The §10 invariant, on real markup rather than on two function results. Every state is
+    // enumerated, so the invalid combination is unreachable rather than merely untested today.
+    for (const state of ['ON', 'OFF', 'UNAVAILABLE'] as LayerControlState[]) {
+      const attributes = { disabled: disabledFor(state), pressed: ariaPressedFor(state) };
+      expect(
+        attributes.disabled && attributes.pressed,
+        `${state} is disabled, so its markup must not announce it as pressed`,
+      ).toBe(false);
+    }
+  });
+});
+
+/* ============================================================================================== *
  * TIMELINE IDENTITY -- DF-X9.4H SECTIONS 23, 24
  * ============================================================================================== */
 
