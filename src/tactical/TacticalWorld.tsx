@@ -30,9 +30,15 @@ import type { AisObservationOut, VesselTarget } from '../api/contract';
  * contributes no entry, and the renderer drops it again -- stated in both places, because "one
  * point is a track" is exactly the claim DF-X9 section 50 forbids.
  *
- * NOT segmented against the interpolation interval here. Gap-aware segmentation belongs to
- * DF-X9.4's track engine, and doing half of it now would put a break rule in one layer and not in
- * the other.
+ * NOT segmented HERE. The SEGMENTATION HAPPENS IN THE RENDERER, which calls `segmentTrack` and
+ * draws observed stretches solid while drawing gaps as a broken connector.
+ *
+ * An earlier version of this comment said segmentation was deferred to DF-X9.4, and the DF-X9.3D
+ * browser E2E then reported a live defect against it: "the track polyline crosses the 3120 s gap
+ * unbroken while the contact position correctly refuses to." It was reporting against a build that
+ * predated the fix -- a Vite reload had straddled its run -- but the comment was the reason that
+ * looked true, and it stayed wrong after the code changed. A comment claiming a defect is unfixed
+ * is worse than no comment, because it invites someone to re-report it.
  */
 function buildTrackGeometries(
   observations: readonly AisObservationOut[],
@@ -375,6 +381,38 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   }, [coastline]);
 
   const eezVisible = layerState.EEZ_BOUNDARIES?.visible === true;
+
+  /*
+   * `AIS_PREDICTED` HONEST AVAILABILITY -- DF-X9.3 section 28.
+   *
+   * THE DEFECT THIS CLOSES, FOUND BY THE BROWSER: every target in the real archive carries
+   * `corr.predictedLat = null`, because no archived detection was ever associated with a vessel. The
+   * layer declared `defaultVisibility: true` and its toggle read as enabled while it could draw
+   * nothing -- an inert control, which is the DF-X8 defect class DF-X9.3 set out to eliminate.
+   *
+   * Repairing the WIRING was necessary but not sufficient: the wiring now works, and there is still
+   * nothing to draw. That is a DIFFERENT reason and needs a different response, which is why this is
+   * a separate effect from the one that draws the contacts.
+   *
+   * So the layer REPORTS that no analytical prediction exists, through the same refusal channel the
+   * maritime layers use. The console disables the row and states the reason verbatim, rather than
+   * showing an enabled switch over an empty globe with no explanation anywhere.
+   *
+   * The reason names the CAUSE -- an association is what produces a predicted position -- so the
+   * operator is not left deciding whether the layer is broken or merely has no inputs. `null` CLEARS
+   * the refusal, so an operator who loads an associated scan sees the layer become available.
+   */
+  useEffect(() => {
+    const predictedCount = collectPredictedPoints(state.targetDetail).length;
+    recordRefusal(
+      'AIS_PREDICTED',
+      predictedCount === 0
+        ? 'No predicted position exists. A predicted position requires a detection correlated to an '
+          + 'AIS vessel, and this scan has no such association, so the backend propagated nothing.'
+        : null,
+    );
+  }, [recordRefusal, state.targetDetail]);
+
   const eez = useZoneGeometry('EEZ_BOUNDARIES', eezVisible);
   useEffect(() => {
     const reason = refusalReason(eez);
