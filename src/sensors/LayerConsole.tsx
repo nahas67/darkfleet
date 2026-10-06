@@ -302,6 +302,25 @@ export function LayerConsole() {
                   return (
                     <li key={row.id} data-df-layer={row.id}>
                       <div className="flex items-center gap-2">
+                          {/*
+                           * `aria-pressed` IS `false` FOR A DISABLED ROW, NOT ITS STORED VISIBILITY.
+                           *
+                           *
+                           * The browser E2E caught this, and it is correct:
+                           *
+                           *   [FAIL] DISCLOSED, NOT ASSERTED AS CORRECT: the disabled control still reads
+                           *          aria-pressed=true, so it presents as an enabled layer that cannot be switched off
+                           *
+                           * `aria-pressed` is the accessibility name for "this toggle is currently ON". A row disabled
+                           * BECAUSE it has nothing to draw is not switched on -- it is unusable, which is exactly what
+                           * `disabled` already communicates. Reporting `true` beside `disabled` describes a control
+                           * that is simultaneously on and unavailable, which is incoherent to a screen reader AND to
+                           * a test, which is why an E2E assertion tripped over it before anyone read the markup.
+                           *
+                           * The visible STYLING is deliberately unchanged: `AIS_PREDICTED` keeps its on-tint so the
+                           * operator can see which layers are configured on, and the row states its refusal in the
+                           * title. Only the ARIA state changes, because only the ARIA state was making a false claim.
+                           */}
                         <button
                           type="button"
                           className="df-btn flex-1 justify-start"
@@ -310,7 +329,6 @@ export function LayerConsole() {
                               ? { color: 'var(--df-text)', borderColor: 'var(--df-structural-bright)' }
                               : undefined
                           }
-                          aria-pressed={shown}
                           disabled={disabled}
                           title={row.unavailableReason ?? row.label}
                           onClick={() => commit(row.id, { visible: !row.visible })}

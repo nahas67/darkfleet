@@ -589,6 +589,35 @@ export class TacticalEngine {
   }
 
   /**
+   * Every reporting gap currently DRAWN, with its vessel and its span.
+   *
+   * FORWARDED, BECAUSE EXPOSING IT ON THE RENDERER WAS NOT ENOUGH.
+   *
+   * DF-X9.4C added `get gaps()` to `AisContactRenderer` and DF-X9.4E committed that this made the
+   * gap provable "by COUNT rather than by looking at a screenshot". The browser E2E then reported:
+   *
+   *   [FAIL] `engine.gaps` is reachable, so DF-X9.4 section 68's exported gap record is readable
+   *          from a browser probe
+   *
+   * which is correct. A getter on an object nothing holds a reference to is not reachable, and a
+   * verification affordance nobody can call is not a verification affordance -- it is a comment
+   * about one. The probe also could not ATTRIBUTE a drawn gap to a vessel as a result, which is why
+   * a second assertion failed: without this record, "is this gap the one I seeked into?" is
+   * unanswerable from outside.
+   *
+   * This is the second time in two checkpoints that "exposed" was mistaken for "reachable". Both are
+   * recorded rather than quietly fixed, because the pattern is the finding.
+   */
+  get aisGaps(): ReadonlyArray<{
+    mmsi: string;
+    from: { lat: number; lon: number };
+    to: { lat: number; lon: number };
+    spanSeconds: number | null;
+  }> {
+    return this.#aisRenderer?.gaps ?? [];
+  }
+
+  /**
    * Why the AIS layer is not drawing, or null when it is.
    *
    * RECORDED, AND NOT YET SURFACED TO THE OPERATOR. An earlier version of this comment claimed that

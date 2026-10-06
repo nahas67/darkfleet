@@ -444,12 +444,33 @@ export class AisContactRenderer {
     };
 
     const frame = cameraFrameFromViewer(this.#viewer);
-    const seen = new Set<string>();
+    /** MMSIs actually given a glyph this pass. The retention key. */
+    const drawn = new Set<string>();
 
     for (const contact of options.contacts) {
       const state = contact.state;
-      seen.add(contact.mmsi);
       stats.contacts += 1;
+
+      /*
+       * NO POSITION MEANS NO GLYPH -- AND THE PREVIOUS ONE MUST GO.
+       *
+       * This is a DEFECT THE BROWSER E2E CAUGHT, and it contradicted DF-X9.4A's central claim.
+       *
+       * DF-X9.4A correctly changed `displayStateOf` so a reference time before a contact's first
+       * observation yields `NOT_YET_OBSERVED` with a null position. That fixed the ARITHMETIC. It did
+       * not reach the RENDERER: the MMSI was added to `seen` BEFORE the null check, the loop then
+       * `continue`d, and the removal pass only drops MMSIs absent from `seen`. So the billboard drawn
+       * one tick earlier stayed exactly where it was -- frozen at the vessel's last known position,
+       * which is the back-propagation fabrication DF-X9.4A said it had eliminated.
+       *
+       * The browser probe found it via `engine.drawnAisMmsis()`, which still contained the MMSI:
+       *
+       *   [FAIL] the glyph is GENUINELY ABSENT from the contacts collection, not merely faded:
+       *          engine.drawnAisMmsis() does not contain it
+       *
+       * So the retained set is keyed on contacts that were ACTUALLY DRAWN, not on contacts that were
+       * merely mentioned. A contact with no position is not retained, and its billboard is removed.
+       */
       if (state.lat === null || state.lon === null) continue;
 
       const position = Cartesian3.fromDegrees(state.lon, state.lat);
@@ -513,6 +534,7 @@ export class AisContactRenderer {
         }
         if (rotation !== undefined) existing.rotation = rotation;
         existing.color = colourFor(contact, state.freshness.tier);
+        drawn.add(contact.mmsi);
         stats.reusedBillboards += 1;
         continue;
       }
@@ -533,12 +555,19 @@ export class AisContactRenderer {
       });
       this.#billboards.set(contact.mmsi, added);
       this.#glyphKind.set(contact.mmsi, hasDirection);
+      drawn.add(contact.mmsi);
       stats.createdBillboards += 1;
     }
 
-    // Remove only what has genuinely departed.
+    /*
+     * REMOVE EVERYTHING NOT DRAWN THIS PASS.
+     *
+     * Keyed on `drawn`, not on "mentioned this pass". A contact that is in the fleet but has no
+     * drawable position -- `NOT_YET_OBSERVED`, or no usable fix at all -- is NOT drawn, so its
+     * retained billboard must go rather than persist at a stale coordinate.
+     */
     for (const [mmsi, billboard] of this.#billboards) {
-      if (seen.has(mmsi)) continue;
+      if (drawn.has(mmsi)) continue;
       this.#contacts.remove(billboard);
       this.#billboards.delete(mmsi);
       this.#glyphKind.delete(mmsi);

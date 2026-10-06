@@ -274,6 +274,71 @@ describe('label vocabulary', () => {
  * VISUAL VOCABULARY
  * ============================================================================================== */
 
+describe('retention is keyed on contacts actually DRAWN', () => {
+  /*
+   * THE DEFECT THE BROWSER E2E CAUGHT, AND THE ONE A UNIT TEST HAD TO BE BUILT FOR.
+   *
+   * The renderer used to add each MMSI to `seen` BEFORE the null-position check, `continue` past a
+   * contact with no drawable position, and then remove only the MMSIs absent from `seen`. So a
+   * contact in `NOT_YET_OBSERVED` kept the billboard drawn one tick earlier, frozen at its last known
+   * position.
+   *
+   * That is not a styling detail. It is the back-propagation fabrication DF-X9.4A claimed to have
+   * eliminated, still on screen: the display-state arithmetic was fixed and the renderer kept drawing
+   * the old answer. The probe caught it via `engine.drawnAisMmsis()` still listing the MMSI.
+   *
+   * The bug was in the ORDER of two operations in a loop that needs a Viewer to run, so it cannot be
+   * observed from a unit test directly. What CAN be pinned is the retention invariant the fix rests
+   * on, stated so a future edit that reintroduces the ordering breaks it.
+   */
+  it('the retained set is named `drawn`, not `seen`', () => {
+    // A name that says what it means. `seen` invites exactly the bug that happened: "was mentioned"
+    // is not "was drawn".
+    expect(AIS_RENDERER_CODE).toContain('const drawn = new Set<string>()');
+    expect(AIS_RENDERER_CODE).not.toMatch(/const seen = new Set/);
+  });
+
+  it('the null-position check PRECEDES any retention bookkeeping', () => {
+    // The ordering IS the defect. If a MMSI is recorded as drawn before its position is known to
+    // exist, the removal pass can never reclaim its billboard.
+    const loop = AIS_RENDERER_CODE.slice(
+      AIS_RENDERER_CODE.indexOf('stats.contacts += 1'),
+      AIS_RENDERER_CODE.indexOf('Remove everything not drawn'),
+    );
+    const nullCheck = loop.indexOf('state.lat === null || state.lon === null');
+    const firstRetention = loop.indexOf('drawn.add(');
+    expect(nullCheck).toBeGreaterThan(-1);
+    expect(firstRetention).toBeGreaterThan(-1);
+    expect(nullCheck).toBeLessThan(firstRetention);
+  });
+
+  it('removal is keyed on `drawn`, so an undrawn contact loses its billboard', () => {
+    expect(AIS_RENDERER_CODE).toMatch(/if \(drawn\.has\(mmsi\)\) continue;/);
+  });
+
+  it('a state with NO POSITION is a real, reachable state, not a hypothetical', () => {
+    // The premise of the whole fix. If `displayStateOf` could never return a null position, the
+    // renderer bug would be unreachable and this test would be guarding nothing.
+    const state = displayStateOf([observation({ timestamp: at(8) })], at(0));
+    expect(state.state).toBe('NOT_YET_OBSERVED');
+    expect(state.lat).toBeNull();
+    expect(state.lon).toBeNull();
+  });
+
+  it('the engine FORWARDS the gap record, rather than exposing it where nothing holds a reference', () => {
+    /*
+     * `get gaps()` existed on AisContactRenderer and the commit claimed it made DF-X9.4 section 68
+     * provable "by COUNT". The E2E reported it unreachable, which is correct: a getter on an object
+     * nobody holds a reference to is a comment about one, not a verification affordance.
+     *
+     * This asserts the ENGINE forwards it -- the second time in two checkpoints that "exposed" was
+     * mistaken for "reachable".
+     */
+    expect(ENGINE_SOURCE).toMatch(/get aisGaps\(/);
+    expect(ENGINE_SOURCE).toContain('this.#aisRenderer?.gaps ?? []');
+  });
+});
+
 describe('gap segmentation', () => {
   /*
    * THE DEFECT THIS GUARDS.
@@ -554,3 +619,12 @@ const AIS_RENDERER_SOURCE = (await import('./aisRenderer?raw')).default as strin
  * measurement rather than a temporal authority.
  */
 const AIS_RENDERER_CODE = AIS_RENDERER_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+/**
+ * The ENGINE's source, for the reachability assertion.
+ *
+ * Module scope, because an `await import` inside a non-async `it()` callback is a parse error --
+ * which is exactly what happened when this was first written, and the whole suite failed to
+ * transform rather than failing one assertion.
+ */
+const ENGINE_SOURCE = (await import('./engine?raw')).default as string;
