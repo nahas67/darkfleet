@@ -17,6 +17,11 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 import { sameTargetRef, targetRefOf } from '../intelligence/targetRef';
 
+import {
+  EMPTY_AIS_DIAGNOSTICS,
+  type AisDiagnostics,
+} from '../diagnostics/aisDiagnostics';
+
 import type {
   AisCoverageState,
   AisObservationOut,
@@ -308,6 +313,36 @@ export type State = {
    * be shown to be current against an instant nobody has established.
    */
   aisReferenceTime: string | null;
+  /**
+   * AIS renderer diagnostics, AS DRAWN.
+   *
+   * Not a debugging aid. These are the counts and gap records the operator's questions are actually
+   * answered by -- "how many gaps, which vessel, how long", and "is this contact really drawn" -- and
+   * they come from the RENDERER rather than being re-derived in a component.
+   *
+   * That distinction is the point. The playback bar previously computed its own gap count from the
+   * archive, so the number on screen and the geometry on the globe were two answers to one question
+   * computed twice. They could disagree, and nothing would have said so. Reading the renderer's record
+   * makes a disagreement impossible rather than merely unlikely.
+   *
+   * `aisRenderFailureReason` was DEAD from DF-X9.3 until now: written by the engine, read by nothing.
+   * This field is what closes that, and `diagnostics/aisDiagnostics.ts` registers it with a named
+   * consumer so the next instance is caught before the browser run rather than during it.
+   */
+  aisDiagnostics: AisDiagnostics;
+  /**
+   * The observation the operator has singled out, or null.
+   *
+   * STABLE IDENTITY: MMSI plus the observation's own timestamp, never a row index. An index would
+   * point at a different observation the moment the archive were read in a different order, which is
+   * the failure mode DF-X9.4H section 23 names.
+   *
+   * Set by selecting an AIS event on the mission timeline. Distinct from `selection`, which names a
+   * VESSEL: selecting a vessel says which ship is under examination, and this says which of its
+   * recorded fixes is being looked at. They are separate because they are separate questions, and
+   * collapsing them would make selecting a vessel appear to single out one observation arbitrarily.
+   */
+  highlightedObservation: { mmsi: string; at: string } | null;
 
   /* --- catalogue --- */
   scenes: SceneSummary[];
@@ -402,6 +437,8 @@ const initialState: State = {
   trackLoading: false,
   aisCoverage: null,
   aisReferenceTime: null,
+  aisDiagnostics: EMPTY_AIS_DIAGNOSTICS,
+  highlightedObservation: null,
 
   scenes: [],
   scenesLoading: false,

@@ -23,6 +23,7 @@ import type { PredictedPoint } from '../globe/aisRenderer';
 import type { AisObservationOut, VesselTarget } from '../api/contract';
 import { rangeFromTimestamps, temporal, temporalNowIso, useTemporal } from '../temporal/TemporalController';
 import { buildTrack } from '../temporal/trackBuilder';
+import { describeAisFailure } from '../diagnostics/aisDiagnostics';
 import { frameTrack, planToBBox, pointsOfSegments } from '../temporal/framing';
 
 /**
@@ -321,6 +322,7 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       referenceTimeIso:
         (temporalState.range.source === 'OBSERVATIONS' ? temporalNowIso(temporalState) : null)
         ?? state.aisReferenceTime,
+        highlightedObservation: state.highlightedObservation,
         observationMarkers: state.aisObservations.map((o) => ({
           mmsi: o.mmsi,
           lat: o.lat,
@@ -331,6 +333,18 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
         predicted: collectPredictedPoints(state.targetDetail),
       },
     );
+    /*
+     * THE DIAGNOSTICS HANDOFF, AND IT IS NOT OPTIONAL.
+     *
+     * `engine.aisRenderFailureReason` was DEAD from DF-X9.3 until this commit: written by the engine,
+     * read by nothing outside it, flagged by its own audit and left that way for three checkpoints.
+     * `engine.gaps` then repeated the same mistake in DF-X9.4. Both are now pushed into the store and
+     * RENDERED by the playback bar, so "the getter exists" is no longer the end of the story -- the
+     * registry in `diagnostics/aisDiagnostics.ts` names this consumer and a test fails if the bar stops
+     * reading them.
+     */
+    store.set({ aisDiagnostics: engine.aisDiagnostics });
+
     // The setters above CLEAR and re-add their entities, and Cesium gives every new
     // entity `show = true`. Without this the layer toggles would be authoritative only
     // until the next target update, at which point every switched-off layer would
@@ -368,6 +382,7 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     state.aisReferenceTime,
     state.aisObservations,
     state.targetDetail,
+    state.highlightedObservation,
     /*
      * `temporalState` is the playhead. It is a WHOLE OBJECT, so it changes identity on every emit and
      * the effect re-runs on every tick -- which is exactly what is wanted during playback, and is the
@@ -513,6 +528,22 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    * operator is not left deciding whether the layer is broken or merely has no inputs. `null` CLEARS
    * the refusal, so an operator who loads an associated scan sees the layer become available.
    */
+  /*
+   * `AIS_CONTACTS` REFUSAL -- THE FIRST REAL CONSUMER OF `aisRenderFailureReason`.
+   *
+   * That field was DEAD from DF-X9.3 until this checkpoint: written by the engine, read by nothing
+   * outside it, flagged by its own audit and left there for three commits. It now has two product
+   * consumers, and this is the more important one because the LAYER CONSOLE RENDERS WHENEVER THE
+   * APPLICATION IS OPEN, while the playback bar only appears once AIS observations exist.
+   *
+   * So a renderer failure with an empty archive is still visible: the AIS_CONTACTS row disables itself
+   * and states the reason verbatim. That is the whole difference between "the layer is off" and "the
+   * layer could not be drawn, and here is why" -- which are otherwise identical on screen.
+   */
+  useEffect(() => {
+    recordRefusal('AIS_CONTACTS', describeAisFailure(state.aisDiagnostics.failure));
+  }, [recordRefusal, state.aisDiagnostics.failure]);
+
   useEffect(() => {
     const predictedCount = collectPredictedPoints(state.targetDetail).length;
     recordRefusal(

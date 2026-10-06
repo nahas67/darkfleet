@@ -47,6 +47,7 @@ import {
   type RenderableContact as AisRenderableContact,
 } from './aisRenderer';
 import { displayStateOf } from '../ais/displayState';
+import type { AisDiagnostics, AisRenderFailure } from '../diagnostics/aisDiagnostics';
 import type { AisObservationOut } from '../api/contract';
 import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
@@ -128,7 +129,7 @@ export class TacticalEngine {
   /** Contacts associated with the selected SAR target. Emphasis only; never classification. */
   #associatedAisMmsis = new Set<string>();
   #aisStats: ContactRenderStats | null = null;
-  #aisRenderFailure: string | null = null;
+  #aisRenderFailure: AisRenderFailure | null = null;
   /**
    * Maritime reference entities, kept in SEPARATE arrays per layer.
    *
@@ -449,6 +450,8 @@ export class TacticalEngine {
         lon: number;
         at: string;
       }[];
+      /** The observation singled out by a timeline selection. */
+      highlightedObservation?: { mmsi: string; at: string } | null;
       tracks?: ReadonlyMap<string, ReadonlyArray<{ lat: number; lon: number; at: string }>>;
     },
   ): void {
@@ -469,8 +472,9 @@ export class TacticalEngine {
          * could not build is not. The reason is RECORDED rather than swallowed, because a silently
          * absent layer is indistinguishable from an empty archive.
          */
-        this.#aisRenderFailure =
-          error instanceof Error ? error.message : 'unknown renderer failure';
+        // A TYPED CODE, not a message. `describeAisFailure` turns it into operator text at the one
+        // place that renders it, so the vocabulary is defined once and cannot drift per call site.
+        this.#aisRenderFailure = 'RENDERER_UNAVAILABLE';
         return;
       }
     }
@@ -545,6 +549,7 @@ export class TacticalEngine {
       predicted: options?.predicted ?? [],
       referenceTimeIso: options?.referenceTimeIso ?? '',
       observationMarkers: options?.observationMarkers,
+      highlightedObservation: options?.highlightedObservation ?? null,
       tracks: options?.tracks,
       visibility: {
         contacts: this.#isVisible('AIS_CONTACTS'),
@@ -589,6 +594,39 @@ export class TacticalEngine {
   }
 
   /**
+   * ALL AIS renderer diagnostics, as ONE typed object.
+   *
+   * DF-X9.4H section 7. The four loose getters this replaces -- `aisGaps`, `aisRenderFailureReason`,
+   * `aisRenderStats`, `drawnAisMmsis` -- were each individually unread by any product code, which is
+   * the "exposed is not reachable" defect twice over: they existed, and nothing could see them.
+   *
+   * They are now ONE value, pushed into the store and rendered by the playback bar, so a diagnostic
+   * cannot be added here and forgotten there. Adding a field to `AisDiagnostics` without a consumer
+   * fails `aisDiagnostics.test.ts`; it cannot simply be declared and abandoned.
+   *
+   * The gap list is read from the RENDERER, not recomputed. The bar used to derive its own counts from
+   * the archive, so the number on screen and the geometry on the globe were two answers to one
+   * question. Reading the renderer's record makes them one answer.
+   */
+  get aisDiagnostics(): AisDiagnostics {
+    const stats = this.aisRenderStats;
+    return {
+      gaps: this.#aisRenderer?.gaps ?? [],
+      failure: this.#aisRenderFailure,
+      counts: {
+        contacts: this.#aisRenderer?.drawnMmsis().length ?? 0,
+        observationMarkers: stats.labels > 0 || this.#aisRenderer !== null
+          ? (this.#aisRenderer?.drawnObservationCount() ?? 0)
+          : 0,
+        trackPrimitives: this.#aisRenderer?.drawnTrackPrimitiveCount() ?? 0,
+        predictedMarkers: this.#aisRenderer?.drawnPredictedCount() ?? 0,
+        labels: stats.labels,
+      },
+      drawnMmsis: this.#aisRenderer?.drawnMmsis() ?? [],
+    };
+  }
+
+  /**
    * Every reporting gap currently DRAWN, with its vessel and its span.
    *
    * FORWARDED, BECAUSE EXPOSING IT ON THE RENDERER WAS NOT ENOUGH.
@@ -617,6 +655,11 @@ export class TacticalEngine {
     return this.#aisRenderer?.gaps ?? [];
   }
 
+  /** The observation currently drawn as highlighted, or null. */
+  get highlightedAisObservation(): { mmsi: string; at: string } | null {
+    return this.#aisRenderer?.highlightedObservation ?? null;
+  }
+
   /**
    * Why the AIS layer is not drawing, or null when it is.
    *
@@ -625,7 +668,7 @@ export class TacticalEngine {
    * empty when the renderer fails to build. Surfacing it is owed, and the honest state of that debt
    * is recorded here rather than implied by the word "exposed".
    */
-  get aisRenderFailureReason(): string | null {
+  get aisRenderFailureReason(): AisRenderFailure | null {
     return this.#aisRenderFailure;
   }
 

@@ -56,14 +56,17 @@ export function DarkFleetCommandApp() {
   const aisObservationsPresent = aisTrack.usableCount > 0;
   const aisObservationCount = aisTrack.usableCount;
   const aisTrackStatus = aisTrack.status;
-  const aisGapCount = aisTrack.segments.filter((s) => s.kind === 'GAP').length;
-  const aisGapSeconds = useMemo(() => {
-    const spans = aisTrack.segments
-      .filter((s) => s.kind === 'GAP')
-      .map((s) => s.spanSeconds)
-      .filter((v): v is number => v !== null);
-    return spans.length > 0 ? spans.reduce((a, b) => a + b, 0) : null;
-  }, [aisTrack]);
+  /*
+   * GAP COUNTS ARE NO LONGER DERIVED HERE.
+   *
+   * They used to be computed from `buildTrack` in this component, while the geometry on screen came
+   * from the renderer's own build. Two computations of one fact, in two files, with nothing comparing
+   * them -- so a disagreement would have been invisible. The bar now reads `state.aisDiagnostics`,
+   * which the renderer writes, so the number on screen and the geometry are one answer.
+   *
+   * `aisTrack` remains, for the FRAME TRACK geometry and the observation count, which are properties
+   * of the ARCHIVE rather than of what is currently drawn.
+   */
 
   /*
    * FRAME TRACK, ONE SHOT.
@@ -246,8 +249,7 @@ export function DarkFleetCommandApp() {
         <AisPlaybackBar
           observationCount={aisObservationCount}
           trackStatus={aisTrackStatus}
-          gapCount={aisGapCount}
-          gapSeconds={aisGapSeconds}
+          diagnostics={state.aisDiagnostics}
           canFrame={aisCanFrame}
           onFrameTrack={aisFrameTrack}
         />

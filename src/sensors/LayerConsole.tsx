@@ -75,6 +75,41 @@ const REQUIREMENT: Partial<Record<LayerId, Requirement>> = {
  * of the store. It is not reconstructed from the layer id, so a dataset that becomes
  * installed mid-session reports correctly without this file changing.
  */
+/**
+ * The three control states a layer row can be in, and what each one reports.
+ *
+ * DF-X9.4H section 10 requires these be DISTINCT states rather than a boolean plus a flag:
+ *
+ *   enabled + on             an operator can turn it off, and it is on
+ *   enabled + off            an operator can turn it on, and it is off
+ *   disabled + unavailable   an operator can do nothing, and it is NOT on
+ *
+ * The third is where the E2E caught a real incoherence: the row was `disabled` with a stated refusal
+ * AND `aria-pressed="true"`, which describes a control that is simultaneously on and unusable.
+ *
+ * EXTRACTED AND PURE so it can be tested without a DOM. What it returns is a THREE-STATE value, not a
+ * pair of booleans, so the invalid combination cannot be expressed by accident at the call site.
+ */
+export type LayerControlState = 'ON' | 'OFF' | 'UNAVAILABLE';
+
+export function layerControlState(
+  visible: boolean,
+  unavailableReason: string | null | undefined,
+): LayerControlState {
+  if (unavailableReason !== null && unavailableReason !== undefined) return 'UNAVAILABLE';
+  return visible ? 'ON' : 'OFF';
+}
+
+/** The `aria-pressed` value for a control state. `UNAVAILABLE` is never pressed. */
+export function ariaPressedFor(state: LayerControlState): boolean {
+  return state === 'ON';
+}
+
+/** The `disabled` attribute for a control state. */
+export function disabledFor(state: LayerControlState): boolean {
+  return state === 'UNAVAILABLE';
+}
+
 export function maritimeLayerReason(
   health: DatasetHealthResponse | null,
   datasetId: string,
@@ -150,6 +185,11 @@ export type LayerRow = {
   supportsOpacity: boolean;
   /** Why this layer cannot be shown, when it cannot. Absence means usable. */
   unavailableReason?: string;
+  /**
+   * The three-state control model for this row. Always present, so no consumer has to infer it from a
+   * pair of booleans that can be combined into an invalid state.
+   */
+  controlState: LayerControlState;
 };
 
 /**
@@ -231,6 +271,19 @@ export function deriveLayers(
       // rendered. A slider that does nothing is an inert control.
       supportsOpacity: entry.supportsOpacity,
       ...(unavailableReason ? { unavailableReason } : {}),
+      /*
+       * THE THREE STATES, DERIVED ONCE AND ON THE ROW.
+       *
+       * `UNAVAILABLE` outranks visibility. A layer with nothing to draw is not "on", whatever its
+       * stored flag says, and that precedence is what stops `disabled` and `aria-pressed` from
+       * contradicting each other -- the incoherence DF-X9.4H section 10 records, where a disabled row
+       * still announced itself as pressed.
+       *
+       * Deriving it HERE rather than in the JSX means the row object is self-consistent: a consumer
+       * reading `row.controlState` and the DOM reading `aria-pressed` cannot disagree, because both
+       * come from one value.
+       */
+      controlState: layerControlState(choice?.visible ?? entry.defaultVisibility, unavailableReason),
     };
   });
 }

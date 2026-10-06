@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 
 import { engine } from '../globe/engine';
 import { store, useStore } from '../state/store';
+import { temporal } from '../temporal/TemporalController';
 import { fmtDelta, fmtInstant, fmtUtc, NOT_ESTABLISHED } from '../design/format';
 
 type Event = {
@@ -24,6 +25,15 @@ type Event = {
   label: string;
   detail: string;
   targetId?: string;
+  /**
+   * Stable identity for an AIS event: the vessel AND the observation's own timestamp.
+   *
+   * These were previously baked into `key` as a string and never read as fields, so the timeline could
+   * display an observation it could not act on. Carrying them as data is what makes the event
+   * addressable -- and an INDEX is explicitly not used, because the archive's read order is not
+   * guaranteed and an index would silently point at a different observation.
+   */
+  mmsi?: string;
 };
 
 const KIND_COLOR: Readonly<Record<Event['kind'], string>> = {
@@ -94,6 +104,20 @@ export function MissionTimeline() {
         kind: 'AIS_OBSERVATION',
         label: `AIS fix ${fix.mmsi}`,
         detail: fix.ship_name ?? 'no name reported',
+        /*
+         * STABLE IDENTITY, AS DATA.
+         *
+         * This line was MISSING for one commit, and the omission was invisible: an earlier edit script
+         * used `str.replace(old, new)` with no assertion, the anchor did not match the file's real
+         * indentation, and the write succeeded having changed NOTHING. The `mmsi?: string` field landed
+         * on the type, so the code compiled, and `event.mmsi` was silently `undefined` for every event
+         * -- which would have made the whole timeline-synchronisation feature a no-op that looked
+         * finished, and would have passed `tsc`.
+         *
+         * Every textual edit in this checkpoint now asserts that it applied. A replace that matches
+         * nothing is not a no-op; it is an unannounced failure to make the change that was asked for.
+         */
+        mmsi: fix.mmsi,
       });
     }
     return out
@@ -178,6 +202,31 @@ export function MissionTimeline() {
             title={`${event.label} — ${event.detail}`}
             data-df-timeline-event={event.kind}
             onClick={() => {
+              /*
+               * AN AIS EVENT SYNCHRONISES THE PLAYBACK AUTHORITY (DF-X9.4H sections 21-24).
+               *
+               * Selecting an AIS observation on the mission timeline does three things, in order:
+               * selects the VESSEL, highlights that exact OBSERVATION, and SEEKS the shared
+               * `TemporalController` to its timestamp. The mission timeline does not become a clock --
+               * it remains discrete event navigation, and it drives the AIS playhead rather than
+               * keeping one of its own.
+               *
+               * Without the seek, the panel would name an instant while the globe kept drawing the
+               * previous one, which is exactly the stale-UI-after-a-seek defect DF-X9.4 section 11
+               * forbids.
+               */
+              if (event.mmsi) {
+                store.select({ kind: 'mmsi', mmsi: event.mmsi });
+                store.set({ highlightedObservation: { mmsi: event.mmsi, at: event.at } });
+                /*
+                 * `seek` takes epoch MILLISECONDS. The conversion is guarded rather than passed
+                 * through, because `Date.parse` of an unparseable string is `NaN` and a `NaN` into
+                 * `clampTo` is a playhead at a position nothing was ever observed at.
+                 */
+                const atMs = Date.parse(event.at);
+                if (Number.isFinite(atMs)) temporal.seek(atMs);
+                return;
+              }
               if (event.targetId)
       // The timeline event carries no scan of its own; the currently loaded scan is
       // the one whose event this is, so the store is the authority here.

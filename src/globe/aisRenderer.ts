@@ -374,6 +374,8 @@ export class AisContactRenderer {
    * Keeping it as its own record is what lets the browser E2E COUNT gaps and prove the track
    * visibly breaks, rather than inferring it from a line that merely looks shorter.
    */
+  /** The highlighted observation, so a probe can see the highlight exist. */
+  #highlighted: { mmsi: string; at: string } | null = null;
   #gaps: Array<{
     mmsi: string;
     from: { lat: number; lon: number };
@@ -428,6 +430,8 @@ export class AisContactRenderer {
       lon: number;
       at: string;
     }[];
+    /** The observation singled out by a timeline selection, drawn emphasised. */
+    highlightedObservation?: { mmsi: string; at: string } | null;
     /**
      * Per-MMSI ordered observed fixes, used to draw track polylines.
      *
@@ -576,7 +580,8 @@ export class AisContactRenderer {
     }
 
     this.#renderLabels(options.contacts, frame, stats);
-    this.#renderObservationMarkers(options.observationMarkers ?? []);
+    this.#highlighted = options.highlightedObservation ?? null;
+    this.#renderObservationMarkers(options.observationMarkers ?? [], this.#highlighted);
     this.#renderPredicted(options.predicted);
     this.#renderTracks(options.tracks ?? new Map());
     this.#applyVisibility(options.visibility);
@@ -679,24 +684,46 @@ export class AisContactRenderer {
     return point;
   }
 
-  /** The actual recorded fixes, as small inspectable markers. */
+  /**
+   * The actual recorded fixes, as small inspectable markers.
+   *
+   * THE HIGHLIGHTED OBSERVATION IS DRAWN DIFFERENTLY, and that is the whole point of threading it
+   * through here rather than storing it and hoping. A `highlightedObservation` in the store that no
+   * primitive reflects is the "exposed is not reachable" defect a third time, in a field whose name
+   * promises exactly this.
+   *
+   * THE HIGHLIGHT MATCHES ON MMSI **AND** TIMESTAMP. Matching on position would highlight whichever
+   * observation happens to sit there, which for a vessel at anchor is several of them at once; and
+   * matching on a row index would point at a different observation the moment the archive were read in
+   * a different order.
+   */
   #renderObservationMarkers(
     markers: ReadonlyArray<{ mmsi: string; lat: number; lon: number; at: string }>,
+    highlighted: { mmsi: string; at: string } | null,
   ): void {
     this.#observations.removeAll();
     for (const marker of markers) {
+      const isHighlighted =
+        highlighted !== null && highlighted.mmsi === marker.mmsi && highlighted.at === marker.at;
       this.#observations.add({
         position: Cartesian3.fromDegrees(marker.lon, marker.lat),
-        image: OBSERVATION_DOT,
-        width: 7,
-        height: 7,
-        // Deliberately dimmer and smaller than a contact glyph. An observation is the evidence
-        // UNDER a contact; it must not compete with it for attention.
-        color: COLOUR_CONTACT.withAlpha(0.85),
+        image: isHighlighted ? HIGHLIGHTED_DOT : OBSERVATION_DOT,
+        // Larger AND brighter. Both, because a size change alone is easy to miss on a dense track
+        // and a brightness change alone is easy to miss on a dark one.
+        width: isHighlighted ? 15 : 7,
+        height: isHighlighted ? 15 : 7,
+        color: (isHighlighted ? COLOUR_SELECTED : COLOUR_CONTACT).withAlpha(
+          isHighlighted ? 1 : 0.85,
+        ),
         verticalOrigin: VerticalOrigin.CENTER,
         horizontalOrigin: HorizontalOrigin.CENTER,
       });
     }
+  }
+
+  /** MMSI + timestamp of the observation currently drawn as highlighted, or null. */
+  get highlightedObservation(): { mmsi: string; at: string } | null {
+    return this.#highlighted;
   }
 
   /**
@@ -919,6 +946,28 @@ export class AisContactRenderer {
     return null;
   }
 
+  /**
+   * Observation markers currently drawn.
+   *
+   * A COUNT and not the collection, so no raw Cesium object escapes this class. DF-X9.4H section 7 is
+   * explicit that the product surface exposes typed domain state; handing out a BillboardCollection
+   * would let a consumer mutate the renderer's internals through a diagnostic getter, which is the
+   * reachability fix reintroduced as a write hole.
+   */
+  drawnObservationCount(): number {
+    return this.#observations.length;
+  }
+
+  /** Track polylines currently drawn, including gap connectors. */
+  drawnTrackPrimitiveCount(): number {
+    return this.#track.length;
+  }
+
+  /** Predicted markers currently drawn. */
+  drawnPredictedCount(): number {
+    return this.#predicted.length;
+  }
+
   /** All MMSIs currently drawn, in stable MMSI order. For the browser E2E. */
   drawnMmsis(): string[] {
     return [...this.#billboards.keys()].sort();
@@ -986,6 +1035,29 @@ function makeIcon(draw: (ctx: CanvasRenderingContext2D, size: number) => void): 
   draw(ctx, size);
   return canvas;
 }
+
+/**
+ * The highlighted observation: a ring around the dot.
+ *
+ * A DIFFERENT SHAPE, not just a bigger brighter dot. Colour and size alone would leave the highlight
+ * indistinguishable in greyscale or to a colour-vision-deficient reader, and the outer ring reads as
+ * "selected" without depending on either.
+ */
+const HIGHLIGHTED_DOT = makeIcon((ctx, size) => {
+  const mid = size / 2;
+  ctx.beginPath();
+  ctx.arc(mid, mid, 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#040705';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(mid, mid, 13, 0, Math.PI * 2);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+});
 
 /** A small filled dot: an actual recorded observation. */
 const OBSERVATION_DOT = makeIcon((ctx, size) => {
