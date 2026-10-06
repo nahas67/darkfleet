@@ -2,10 +2,19 @@
  * Dense presentation primitives for the dossier.
  *
  * These exist because the repo had no shared component layer: `Row` was
- * duplicated between `TargetIntel` and `GhostVesselPanel`, and the tables were
- * hand-built per panel. A dossier with eleven tabs that each invent their own row
+ * duplicated between the retired `TargetIntel` and `GhostVesselPanel`, and the
+ * tables were hand-built per panel. A dossier whose tabs each invent their own row
  * markup will not read as one surface, and the duplication is where the key/value
  * alignment drifts.
+ *
+ * Both of those components were DELETED in DF-X9.4R rather than left as a historical
+ * implementation. `GhostVesselPanel` rendered the ghost-vessel decision record and was
+ * reachable from nothing -- its only importer was the superseded `TargetIntel` -- so the
+ * candidate count, the acceptance threshold and the rejected near miss were computed by the
+ * backend and shown to no operator. Its semantics now live in `tabs/GhostSemantics.tsx`,
+ * rendered by the EVIDENCE tab, which already fetched the same endpoint. Keeping the dead
+ * panel "for reference" would have preserved a second copy of the epistemics that could drift
+ * from the live one, which is the exact duplication this layer exists to prevent.
  *
  * Style follows the existing conventions rather than inventing new ones: `.df-*`
  * structural classes from `design/tokens.css` for typography and rules, Tailwind

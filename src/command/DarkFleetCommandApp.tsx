@@ -209,11 +209,26 @@ export function DarkFleetCommandApp() {
           {activeWorkspace === 'SEARCH' ? <UnifiedSearch /> : null}
           {activeWorkspace === 'INTELLIGENCE' ? (
             /*
-             * The dossier replaces TargetIntel here. TargetIntel's five tabs are a
-             * subset of what the dossier now answers, and keeping both would leave two
-             * surfaces disagreeing about the same target -- the exact duplication this
-             * checkpoint exists to remove. ContactList is retained because it is the
-             * other way to change the single global selection, not part of the dossier.
+             * The dossier replaces TargetIntel here, and `TargetIntel.tsx` has since been
+             * DELETED rather than left dormant.
+             *
+             * The original comment here claimed "TargetIntel's five tabs are a subset of
+             * what the dossier now answers". DF-X9.4R checked that and it was false in one
+             * direction: OVERVIEW, AIS and EVIDENCE mapped, ANALYSIS decomposed into several
+             * dossier tabs, and GHOST mapped to NOTHING. The dossier had no ghost-vessel
+             * surface, so `GhostVesselPanel` -- the only renderer of the association decision,
+             * the rejected near miss and the score decomposition -- was unreachable, and the
+             * backend's arithmetic was shown to no operator.
+             *
+             * A subset claim true in four directions out of five went unchecked precisely
+             * because it read as settled. So the ghost-vessel semantics were INTEGRATED into
+             * the dossier's EVIDENCE tab (`tabs/GhostSemantics.tsx`), which already fetched
+             * the same `/targets/{id}` slice and already narrowed the `ghost_vessel` union --
+             * rather than restored as a twelfth tab, which would have duplicated one endpoint
+             * and one warning across two surfaces that could then disagree.
+             *
+             * ContactList is retained because it is the other way to change the single global
+             * selection, not part of the dossier.
              */
             <>
               <div className="min-h-0 flex-[3] overflow-hidden border-b border-structural">

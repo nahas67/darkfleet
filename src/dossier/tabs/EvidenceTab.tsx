@@ -33,6 +33,7 @@ import type {
   VesselTarget,
 } from '../../api/contract';
 import { loadScanRecord, loadTargetSlice, loadTargetSummary } from '../api';
+import { GhostSemantics } from './GhostSemantics';
 import { readWake } from '../format';
 import type { TargetRef } from '../../intelligence/targetRef';
 import {
@@ -231,6 +232,20 @@ function EvidenceBody({ payload }: { payload: TargetEvidenceResponse }) {
         </div>
       ) : null}
 
+      {/*
+        THE GHOST VESSEL DECISION.
+
+        This is the block that was unreachable. `GhostVesselPanel` rendered it and nothing in the
+        product mounted that panel, so the candidate count, the acceptance threshold, the rejected
+        near miss and the score decomposition were computed by the backend and shown to no one --
+        while this very tab fetched the same endpoint and already had the union narrowed in hand.
+
+        It is rendered HERE rather than as a twelfth tab because the tab would have duplicated this
+        one: same URL, same warning, two copies of the epistemics that could disagree. See the
+        module header of `GhostSemantics.tsx`.
+      */}
+      {ghost ? <GhostSemantics ghost={ghost} /> : null}
+
       <div>
         <SubTitle>Structured epistemics</SubTitle>
         {/*
@@ -238,11 +253,16 @@ function EvidenceBody({ payload }: { payload: TargetEvidenceResponse }) {
           from what remains unknown. `observed` is stated from the record's own
           detection fields rather than reconstructed from prose, so it cannot drift
           from the structured data beside it.
+
+          A GHOST VESSEL'S OWN bullets win. `evidence.hypotheses` is the record-wide list; the ghost
+          dossier carries its own, written for this case. Reading the wrong one would put generic
+          text beside a specific finding -- and the wrong list is the easier mistake to make
+          silently, because both are arrays of `{ text }` and neither throws.
         */}
         <Epistemics
           observed={observedStatements(evidence)}
-          hypotheses={texts(evidence.hypotheses)}
-          unknowns={texts(evidence.unknowns)}
+          hypotheses={texts(ghost?.hypotheses ?? evidence.hypotheses)}
+          unknowns={texts(ghost?.unknowns ?? evidence.unknowns)}
         />
       </div>
 
