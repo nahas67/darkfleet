@@ -112,3 +112,56 @@ numbers.
 A watchlist membership must never change classification. A Ghost Vessel is a
 correlation outcome; watchlisting is an organisational act. Confusing the two
 would let an analyst's own note become evidence.
+---
+
+## OPEN DEFECT (DF-X9.4H-B, found by import-graph reachability): the Ghost Vessel tab is unreachable
+
+The section above promises a rendered tab. **There is none in the shipped app.**
+
+Measured, not inferred:
+
+| stage | state |
+|---|---|
+| Backend produces the data | LIVE — `backend/darkfleet/evidence.py:116` sets `"ghost_vessel": ghost`, built by `ghost_vessel.assess()` |
+| Contract declares it | LIVE — `backend/darkfleet/api/evidence_models.py:451`, and `src/api/contract.ts:589` |
+| A renderer exists | LIVE — `src/intelligence/GhostVesselPanel.tsx` renders `designation`, `observed`, `decision`, `hypotheses`, `unknowns` |
+| That renderer is reachable | **NO.** `GhostVesselPanel` has exactly one importer: `src/intelligence/TargetIntel.tsx:18` |
+| `TargetIntel` is reachable | **NO.** `src/command/DarkFleetCommandApp.tsx:212` replaced it with `<DossierWorkspace />` |
+| The dossier has a GHOST tab | **NO.** `src/dossier/DossierWorkspace.tsx:63` declares OVERVIEW, SAR, AIS, CORRELATION, WAKE, POLARIZATION, MULTIPASS, REVISIT, PATTERNS, EVIDENCE, HISTORY — eleven, none of them ghost |
+
+`DossierWorkspace` does render *something* ghost-flavoured: `ghostHeader(target.classification)`
+producing a `data-df-ghost-warning` banner (`DossierWorkspace.tsx:194, 313`). That is a warning derived
+from the classification string. It is **not** the dossier: `observed`, `decision`, `hypotheses` and
+`unknowns` never reach the screen. The backend computes the correlation threshold, the rejected near
+miss and the separation margin; the operator cannot see any of it.
+
+### Why the superseded comment is wrong
+
+`DarkFleetCommandApp.tsx:212` states:
+
+> The dossier replaces TargetIntel here. TargetIntel's five tabs are a subset of what the
+> dossier now answers.
+
+`TargetIntel`'s five tabs were OVERVIEW, **GHOST**, AIS, ANALYSIS, EVIDENCE (`TargetIntel.tsx:38`).
+Four map. **GHOST does not.** The claim is true in four directions out of five, and the fifth was
+never checked — which is the same failure this checkpoint exists to catch, in a place nobody looked
+because the comment sounded settled.
+
+### What is NOT wrong, and was checked
+
+- `src/ghost_vessel.ts` is unreachable from `main.tsx`, but only through `GhostVesselPanel`. It is
+  correct, and 10 tests over it pass.
+- The four modules unreachable from the entry point are: `intelligence/TargetIntel.tsx` (superseded),
+  `intelligence/GhostVesselPanel.tsx` (itself, above), `ghost_vessel.ts` (itself, above), and
+  `globe/stripSourceComments.ts` (a source-text helper used by `attribution.test.ts` only — legitimately
+  test-only).
+
+### Not fixed here, and why
+
+Wiring `GhostVesselPanel` into the dossier is not a tab append: it reads `details.ghost_vessel` from a
+details fetch, so it needs the dossier workspace's data plumbing verified first. It was found while a
+browser E2E was measuring "all eleven dossier tabs reachable" against an eleven-tab build, and adding a
+twelfth mid-run would have invalidated that measurement.
+
+**This is a confirmed product-surface regression, not a deferral.** Until it is fixed, the honest
+statement is that DarkFleet computes a careful epistemic ghost-vessel dossier and does not show it.
