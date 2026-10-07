@@ -386,6 +386,13 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
     state.targetDetail,
     state.highlightedObservation,
     /*
+     * `selectedAisMmsi`: the renderer's `selected` flags (glyph emphasis, SELECTED_AIS label
+     * priority) are read at render time, so an AIS pick must re-run this effect -- otherwise a
+     * globe-click selection would sit unstyled until the next temporal tick. A SAR `selection`
+     * change already re-runs it; the AIS authority beside it must do the same.
+     */
+    selectedAisMmsi,
+    /*
      * `temporalState` is the playhead. It is a WHOLE OBJECT, so it changes identity on every emit and
      * the effect re-runs on every tick -- which is exactly what is wanted during playback, and is the
      * reason the controller emits a fresh snapshot rather than mutating one in place.

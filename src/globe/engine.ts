@@ -51,7 +51,8 @@ import type { AisDiagnostics, AisRenderFailure } from '../diagnostics/aisDiagnos
 import type { AisObservationOut } from '../api/contract';
 import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
-import { toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
+import { decodeAisPick } from './aisPick';
+import { store, toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
 
 const TARGET_LAYER = 'targets';
 const RASTER_LAYER = 'sar-raster';
@@ -779,6 +780,32 @@ export class TacticalEngine {
 
   /* --------------------------------------------------------- interaction */
 
+  /**
+   * Click and hover picking.
+   *
+   * CLICK SELECTS; HOVER ONLY READS. The LEFT_CLICK path decodes every `scene.pick` result
+   * through `decodeAisPick`:
+   *
+   *   SAR entity picks keep their existing path (name-prefix handle lookup, reported to the
+   *   hover consumer) -- unchanged.
+   *   AIS contact, track and prediction picks write the AIS authority beside the target:
+   *   `store.selectAis({ mmsi })`, which never disturbs `selection` (§7).
+   *   AIS observation picks additionally carry the EXACT raw timestamp into
+   *   `selectedAis.observationAt` and ring the marker via `highlightedObservation` -- the same
+   *   two writes the mission timeline makes, so globe and timeline picks are one behaviour.
+   *   UNKNOWN or empty clicks clear ONLY `selectedAis` (the SAR target is untouched, §13).
+   *
+   * AIS picks also clear a stale target hover: the hover HUD names SAR targets only, so leaving
+   * it up after the operator picked a contact would describe a target nobody is looking at.
+   *
+   * OVERLAP IS DETERMINISTIC BY CONSTRUCTION. `scene.pick` returns the topmost primitive at
+   * the pixel, so the vessel on top wins and repeated clicks re-select the same contact. There
+   * is deliberately no pick cycling: two identical clicks must never mean two different things.
+   *
+   * The engine writes the store here because the pick event originates in Cesium, not in a
+   * component: routing it out through a callback and back in would add a round trip that can
+   * disagree about what was clicked. Reads of React state still never happen here.
+   */
   #installPicking(): void {
     const handler = this.#handler;
     const viewer = this.#viewer;
@@ -786,10 +813,35 @@ export class TacticalEngine {
 
     handler.setInputAction((movement: { position: Cartesian2 }) => {
       const picked = viewer.scene.pick(movement.position);
-      const entity = picked?.id as { name?: string } | undefined;
-      const id = entity?.name?.startsWith('target:') ? entity.name.slice('target:'.length) : null;
-      const found = id ? (this.#targetEntities.get(id)?.handle ?? null) : null;
-      this.#callbacks.onPick?.(found);
+      const decoded = decodeAisPick(
+        picked,
+        (primitive) => this.#aisRenderer?.mmsiOf(primitive) ?? null,
+      );
+      switch (decoded.kind) {
+        case 'SAR_TARGET': {
+          const found = this.#targetEntities.get(decoded.targetId)?.handle ?? null;
+          this.#callbacks.onPick?.(found);
+          return;
+        }
+        case 'AIS_CONTACT':
+        case 'AIS_TRACK':
+        case 'AIS_PREDICTION':
+          // The AIS authority, beside -- not instead of -- the SAR target (§7).
+          store.selectAis({ mmsi: decoded.mmsi });
+          this.#callbacks.onPick?.(null);
+          return;
+        case 'AIS_OBSERVATION':
+          store.selectAis({ mmsi: decoded.mmsi, observationAt: decoded.at });
+          store.set({ highlightedObservation: { mmsi: decoded.mmsi, at: decoded.at } });
+          this.#callbacks.onPick?.(null);
+          return;
+        case 'UNKNOWN':
+          // Clears ONLY the AIS side. `selectAis(null)` leaves `selection` intact by
+          // construction, so the target under examination survives an empty click (§13).
+          store.selectAis(null);
+          this.#callbacks.onPick?.(null);
+          return;
+      }
     }, ScreenSpaceEventType.LEFT_CLICK);
 
     // Hover is tracked so the HUD can show a compact target readout. It is not a

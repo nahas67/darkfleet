@@ -29,8 +29,123 @@ import {
   useTemporal,
   type PlaybackSpeed,
 } from './TemporalController';
-import { fmtInstant, NOT_ESTABLISHED } from '../design/format';
+import { fmtDegrees, fmtInstant, fmtKnots, fmtLatLon, fmtText, NOT_ESTABLISHED } from '../design/format';
 import { describeAisFailure, type AisDiagnostics } from '../diagnostics/aisDiagnostics';
+import {
+  courseOverGround,
+  displayStateOf,
+  inTimeOrder,
+  speedKnots,
+  trueHeading,
+  type ContactDisplayState,
+} from '../ais/displayState';
+import type { AisObservationOut } from '../api/contract';
+import { useStore } from '../state/store';
+
+/**
+ * The RAW observation singled out by `selectedAis.observationAt`, verbatim.
+ *
+ * Archive numbers, unrounded and unsmoothed: what the source reported is what is shown. Any
+ * null is a field the source did not report, and the bar renders the shared absence wording
+ * for it -- never a zero, which would invent a measurement.
+ */
+export type SelectedAisObservationSummary = {
+  at: string;
+  lat: number;
+  lon: number;
+  sog: number | null;
+  cog: number | null;
+  heading: number | null;
+  source: string | null;
+};
+
+/**
+ * The selected contact as the bar describes it (§48-49).
+ *
+ * Identity and kinematics come from the contact's LATEST archive row; `observation` is present
+ * only when `selectedAis.observationAt` names a real row, and is then that row -- never a
+ * neighbour, never an interpolation. `displayState` is the `displayStateOf` vocabulary at the
+ * reference instant, so the words here match the glyph on the globe.
+ */
+export type SelectedAisSummary = {
+  mmsi: string;
+  name: string | null;
+  imo: string | null;
+  callsign: string | null;
+  displayState: ContactDisplayState;
+  latestAt: string | null;
+  sog: number | null;
+  cog: number | null;
+  heading: number | null;
+  source: string | null;
+  observation: SelectedAisObservationSummary | null;
+};
+
+/**
+ * Describe the selected AIS contact from the verbatim archive.
+ *
+ * Pure: selected authority + archive rows + reference instant in, typed summary out. The bar
+ * renders it; nothing else computes it, so the readout cannot disagree with the globe's
+ * selection the way two derivations of one fact could.
+ */
+export function buildSelectedAisSummary(
+  selectedAis: { mmsi: string; observationAt: string | null } | null,
+  observations: readonly AisObservationOut[],
+  referenceTimeIso: string | null,
+): SelectedAisSummary | null {
+  if (selectedAis === null) return null;
+  const rows = observations.filter((o) => o.mmsi === selectedAis.mmsi);
+  if (rows.length === 0) {
+    // Selected but nothing in the archive -- reachable after a reload clears the rows while a
+    // selection persists. The MMSI still shows, every field NOT ESTABLISHED, rather than the
+    // bar forgetting what was selected.
+    return {
+      mmsi: selectedAis.mmsi,
+      name: null,
+      imo: null,
+      callsign: null,
+      displayState: 'LOST',
+      latestAt: null,
+      sog: null,
+      cog: null,
+      heading: null,
+      source: null,
+      observation: null,
+    };
+  }
+  // Latest by TIMESTAMP, not by array order: the archive's read order is not guaranteed.
+  const ordered = inTimeOrder(rows);
+  const latest = ordered[ordered.length - 1];
+  const display = displayStateOf(rows, referenceTimeIso ?? latest.timestamp);
+  const rawRow =
+    selectedAis.observationAt === null
+      ? null
+      : (rows.find((o) => o.timestamp === selectedAis.observationAt) ?? null);
+  return {
+    mmsi: selectedAis.mmsi,
+    name: latest.ship_name ?? null,
+    imo: latest.imo ?? null,
+    callsign: latest.callsign ?? null,
+    displayState: display.state,
+    latestAt: latest.timestamp,
+    sog: speedKnots(latest),
+    cog: courseOverGround(latest),
+    heading: trueHeading(latest),
+    source: latest.source ?? null,
+    observation:
+      rawRow === null
+        ? null
+        : {
+            at: rawRow.timestamp,
+            lat: rawRow.lat,
+            lon: rawRow.lon,
+            sog: speedKnots(rawRow),
+            cog: courseOverGround(rawRow),
+            heading: trueHeading(rawRow),
+            source: rawRow.source ?? null,
+          },
+  };
+}
 
 /**
  * What the bar is showing. Supplied by the owner so the bar has no opinion about WHICH track.
@@ -60,6 +175,24 @@ export function AisPlaybackBar(props: AisPlaybackBarProps) {
   const { diagnostics } = props;
   const nowIso = temporalNowIso(temporalState);
   const failureText = describeAisFailure(diagnostics.failure);
+
+  /*
+   * THE SELECTED CONTACT, read from the store authorities.
+   *
+   * `selectedAis` names the contact, `aisObservations` is the verbatim archive, and the
+   * reference instant is the same authority the globe reads (playhead when a range is
+   * established, else the acquisition reference). Reading them here -- rather than threading
+   * copies through props -- is what keeps this readout from disagreeing with the selection
+   * the globe just made.
+   */
+  const state = useStore();
+  const referenceTimeIso =
+    (temporalState.range.source === 'OBSERVATIONS' ? temporalNowIso(temporalState) : null)
+    ?? state.aisReferenceTime;
+  const selected = useMemo(
+    () => buildSelectedAisSummary(state.selectedAis, state.aisObservations, referenceTimeIso),
+    [state.selectedAis, state.aisObservations, referenceTimeIso],
+  );
 
   const hasRange = range.source === 'OBSERVATIONS' && range.endMs > range.startMs;
 
@@ -174,6 +307,60 @@ export function AisPlaybackBar(props: AisPlaybackBarProps) {
       </label>
 
       {/* ---- what the track actually contains ---- */}
+      {/*
+        * THE SELECTED CONTACT (§48-49), AND THE RAW FIX WHEN ONE IS SINGLED OUT.
+        *
+        * This bar is the ONE surface for it: it already shows AIS state (diagnostics, FRAME
+        * TRACK, gap/MMSI readout), and a second surface would be a second answer to one
+        * question. Contact fields come from the latest archive row; the observation block is
+        * the RAW row at `observationAt` -- archive numbers verbatim, never smoothed values
+        * presented as raw. Missing renders the shared absence wording, never zero.
+        */}
+      {selected !== null && (
+        <div
+          className="min-w-0 shrink-0 border-l border-structural pl-3"
+          data-df-ais-selected={selected.mmsi}
+        >
+          <p className="df-num text-[11px] leading-tight">
+            <span data-df-ais-selected-mmsi>{selected.mmsi}</span>
+            {' · '}
+            <span data-df-ais-selected-name>{selected.name ?? NOT_ESTABLISHED}</span>
+          </p>
+          <p className="df-num text-[10px] leading-tight text-ink-dim">
+            <span data-df-ais-selected-state>{selected.displayState}</span>
+            {' · '}
+            <span data-df-ais-selected-latest>
+              {selected.latestAt === null ? NOT_ESTABLISHED : fmtInstant(selected.latestAt)}
+            </span>
+            {' · '}
+            <span data-df-ais-selected-kinematics>
+              {fmtKnots(selected.sog)} / {fmtDegrees(selected.cog)} / {fmtDegrees(selected.heading)}
+            </span>
+            {' · '}
+            <span data-df-ais-selected-identity>
+              IMO {selected.imo ?? NOT_ESTABLISHED} · {selected.callsign ?? NOT_ESTABLISHED}
+            </span>
+            {' · '}
+            <span data-df-ais-selected-source>{fmtText(selected.source)}</span>
+          </p>
+          {selected.observation !== null && (
+            <p
+              className="df-num mt-0.5 text-[10px] leading-tight text-ink-2"
+              data-df-ais-selected-observation={selected.observation.at}
+              title="Raw observation as reported. Never smoothed or interpolated."
+            >
+              FIX {fmtInstant(selected.observation.at)}
+              {' · '}
+              {fmtLatLon(selected.observation.lat, selected.observation.lon, 4)}
+              {' · '}
+              {fmtKnots(selected.observation.sog)} / {fmtDegrees(selected.observation.cog)} /{' '}
+              {fmtDegrees(selected.observation.heading)}
+              {' · '}
+              {fmtText(selected.observation.source)}
+            </p>
+          )}
+        </div>
+      )}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {/*
          * THE OBSERVATION COUNT, ALWAYS VISIBLE.

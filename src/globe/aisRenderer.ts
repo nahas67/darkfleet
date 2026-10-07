@@ -65,6 +65,12 @@ import {
   type DisplayContactState,
   type Freshness,
 } from '../ais/displayState';
+import {
+  aisContactTag,
+  aisObservationTag,
+  aisPredictionTag,
+  aisTrackTag,
+} from './aisPick';
 import { buildTrack, displayRunsFor } from '../temporal/trackBuilder';
 
 /* ============================================================================================== *
@@ -132,6 +138,19 @@ export type PredictedPoint = {
  * temporal tick, and allocating a 48x48 canvas per tick per contact would dominate the frame.
  */
 const GLYPH_SIZE = 48;
+
+/**
+ * Drawn glyph sizes, in pixels.
+ *
+ * Selection is SIZE as well as colour: the selected contact draws larger (42 px against 34),
+ * paralleling the SAR target emphasis (pixelSize 10 -> 15 with a brighter outline). Colour
+ * alone is not an encoding, and a selected vessel must read as selected in greyscale and at a
+ * glance on a dense globe. The outline itself cannot vary per contact -- the glyph image is a
+ * module-scope canvas shared by every billboard, and re-authoring it per selection would
+ * re-upload a texture per tick, which the update-in-place rule forbids.
+ */
+const GLYPH_SIZE_PX = 34;
+const GLYPH_SIZE_SELECTED_PX = 42;
 const glyphImage = ((): HTMLCanvasElement | undefined => {
   if (typeof document === 'undefined') return undefined;
   const canvas = document.createElement('canvas');
@@ -545,6 +564,16 @@ export class AisContactRenderer {
         }
         if (rotation !== undefined) existing.rotation = rotation;
         existing.color = colourFor(contact, state.freshness.tier);
+        /*
+         * SELECTION RESTYLES IN PLACE, like position and colour. A selection change must not
+         * rebuild the billboard: the size write is two numbers, guarded so an unchanged
+         * selection writes nothing at all.
+         */
+        const selectedSize = contact.selected ? GLYPH_SIZE_SELECTED_PX : GLYPH_SIZE_PX;
+        if (existing.width !== selectedSize || existing.height !== selectedSize) {
+          existing.width = selectedSize;
+          existing.height = selectedSize;
+        }
         drawn.add(contact.mmsi);
         stats.reusedBillboards += 1;
         continue;
@@ -555,9 +584,10 @@ export class AisContactRenderer {
         position,
         image: image as unknown as string,
         // 34 px reads as a vessel at theatre zoom; the previous 8 px point could not carry a
-        // direction even in principle.
-        width: 34,
-        height: 34,
+        // direction even in principle. Selected draws larger -- see GLYPH_SIZE_SELECTED_PX.
+        width: contact.selected ? GLYPH_SIZE_SELECTED_PX : GLYPH_SIZE_PX,
+        height: contact.selected ? GLYPH_SIZE_SELECTED_PX : GLYPH_SIZE_PX,
+        id: aisContactTag(contact.mmsi),
         // Not disabled: DF-X9 section 18 requires contacts behind the globe to disappear rather
         // than show through it. `disableDepthTestDistance: Infinity` on the old point primitive
         // was what let a marker float over the limb.
@@ -655,6 +685,10 @@ export class AisContactRenderer {
         text: labelTextFor(contact),
         font: LABEL_FONT,
         fillColor: colourFor(contact, state.freshness.tier),
+        // The label carries its contact's tag (DF-X9 §17): clicking the name selects the
+        // vessel. Never the label text -- parsing display format back into identity would
+        // couple picking to typography.
+        id: aisContactTag(contact.mmsi),
         outlineColor: Color.fromCssColorString('#040705'),
         outlineWidth: 2,
         style: 2, // LabelStyle.FILL_AND_OUTLINE
@@ -735,6 +769,9 @@ export class AisContactRenderer {
         // and a brightness change alone is easy to miss on a dark one.
         width: isHighlighted ? 15 : 7,
         height: isHighlighted ? 15 : 7,
+        // The tag carries the EXACT raw timestamp: the marker highlight matches on MMSI AND
+        // timestamp, and any other identity (position, row index) would point at the wrong fix.
+        id: aisObservationTag(marker.mmsi, marker.at),
         color: (isHighlighted ? COLOUR_SELECTED : COLOUR_CONTACT).withAlpha(
           isHighlighted ? 1 : 0.85,
         ),
@@ -770,6 +807,8 @@ export class AisContactRenderer {
         width: 22,
         height: 22,
         color: COLOUR_PREDICTED.withAlpha(0.95),
+        // Selecting a prediction names the vessel it was computed for, not a measurement.
+        id: aisPredictionTag(point.mmsi),
         verticalOrigin: VerticalOrigin.CENTER,
         horizontalOrigin: HorizontalOrigin.CENTER,
       });
@@ -863,6 +902,9 @@ export class AisContactRenderer {
             this.#track.add({
               positions,
               width: 1.5,
+              // The gap connector belongs to the vessel's track: clicking the visible break
+              // selects the contact whose reporting broke, rather than clearing the selection.
+              id: aisTrackTag(mmsi),
               /*
                * `Material.fromType('PolylineDash')`, not a colour. The dash IS the encoding: the
                * segment's endpoints are real observations and everything between them is missing, and
@@ -892,6 +934,8 @@ export class AisContactRenderer {
             positions,
             color: COLOUR_CONTACT.withAlpha(0.75),
             width: 2,
+            // Clicking a track names its vessel: the polyline is observed evidence of one MMSI.
+            id: aisTrackTag(mmsi),
           });
         }
       }
@@ -957,10 +1001,12 @@ export class AisContactRenderer {
    * `remove`: reverse-mapping a stale index would silently select the wrong vessel, which is the
    * defect DF-X9 section 34 forbids by requiring stable identity.
    *
-   * NO CALLER YET. Globe picking is still wired to `viewer.entities` targets only, so AIS contacts
-   * are not clickable on the globe -- that is a real gap, recorded rather than papered over, and
-   * this method is the seam it will use. An earlier version of this comment claimed a pick handler
-   * already called it, which was not true.
+   * WIRED, as the decoder's untagged-billboard fallback. Every primitive this renderer creates
+   * now carries a typed tag in its `id`, so this scan fires only for billboards from elsewhere
+   * -- a foreign collection, or a primitive that predates tagging. It is RETAINED rather than
+   * deleted for exactly that case: without it those clicks would die silently with no record of
+   * why, and a present tag always wins over this scan (see `decodeAisPick`), so keeping it can
+   * never override a real identity.
    */
   mmsiOf(billboard: unknown): string | null {
     for (const [mmsi, retained] of this.#billboards) {
