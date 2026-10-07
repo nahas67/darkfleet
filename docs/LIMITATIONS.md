@@ -234,10 +234,11 @@ OSM tiles **5** times and Esri fallback tiles **5** times (both `DECLARED_PROVID
 `BASEMAP`), then stopped: 10 attempts by 10 seconds, 10 at 20 seconds, 10 at 30 seconds and 10
 at 35 seconds. `SYSTEM` reported `data-df-basemap="none"` with the visible notice
 "No configured basemap source could be constructed. The globe will render without imagery."
-This is the acceptable air-gapped state, not a successful basemap. Local scan, AIS playback and
-seek, GhostSemantics, coastline, EEZ, HIGH_SEAS and maritime context continued to work. Full
-basemap **recovery after connectivity returns** remains deferred; this test proved exhaustion,
-not recovery.
+This is the acceptable air-gapped state, not a successful basemap. The SYSTEM panel also names
+failed OSM and Esri providers individually as `UNAVAILABLE`, using the controller's own attempted
+source IDs; its aggregate notice alone did not name them. Local scan, AIS playback and seek,
+GhostSemantics, coastline, EEZ, HIGH_SEAS and maritime context continued to work. Full basemap
+**recovery after connectivity returns** remains deferred; this test proved exhaustion, not recovery.
 
 The deployment baseline's previously unexplained third field is **Windows FILETIME ticks** (100ns
 since 1601-01-01 UTC). Its value `639266744270954823` converts exactly to

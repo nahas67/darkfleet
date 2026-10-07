@@ -121,6 +121,19 @@ function BasemapSection() {
           {status.notice}
         </p>
       ) : null}
+      {Array.from(new Set(status.attempted))
+        .filter((id) => id !== status.activeId)
+        .map((id) => (
+          <div
+            key={id}
+            className="flex items-baseline justify-between gap-2 pt-1 text-[10px]"
+            data-df-basemap-provider={id}
+            data-df-basemap-provider-health="UNAVAILABLE"
+          >
+            <span className="df-label text-[10px]">{id}</span>
+            <span className="df-num text-fault">UNAVAILABLE</span>
+          </div>
+        ))}
       <p className="pt-1 text-[10px] leading-relaxed text-ink-dim">
         Reference basemap, not analytical source evidence. It provides geographic context
         beneath SAR targets and is never an input to detection, correlation or
