@@ -152,17 +152,42 @@ export const CAPABILITY_REGISTRY: readonly CapabilityRegistration[] = [
     userAction:
       'Select a SAR_UNMATCHED target, open the dossier EVIDENCE tab: the decision record, the '
       + 'coverage verdict, the structured observed block, and the rejected near miss.',
-    stage: 'PRODUCT_REACHABLE',
+    stage: 'BROWSER_PROVEN',
     browserSelector: '[data-df-ghost-semantics="true"]',
     /*
-     * NOT browser-proven yet, and deliberately recorded as such.
+     * PROVEN IN A BROWSER, against a strict build stamped `4dc55cd` and verified fresh by
+     * `freshness.py` (exit 0, digest `c25ccb88`, `build_dirty=false`) served from `dist/`.
      *
-     * The component is mounted and reachable in the product graph, but no browser run has
-     * observed it against a `SAR_UNMATCHED` fixture. Claiming BROWSER_PROVEN here would repeat
-     * the exact failure this registry exists to prevent: a capability described as shipped on
-     * the strength of its source. DF-X9.4R owes section GV.
+     * The evidence is a 3x2 matrix rather than a single target, because the defect this capability
+     * inherited was a CONSTANT: `decision.ais_coverage_state` was `NOT_ESTABLISHED` for every
+     * target, so one green screenshot would have hidden it. Three targets differing only in
+     * `candidatesConsidered` (key absent / 0 / 3) against two deployments differing only in
+     * whether an `ais/` archive exists:
+     *
+     *   no archive  + null      -> AIS SOURCE NOT CONFIGURED   (candidates field blank)
+     *   no archive  + 0         -> AIS SOURCE NOT CONFIGURED
+     *   no archive  + 3         -> AIS SOURCE NOT CONFIGURED
+     *   archive    + null      -> NOT ESTABLISHED               (candidates field BLANK, not 0)
+     *   archive    + 0         -> ZERO CANDIDATES CONSIDERED    (candidates 0)
+     *   archive    + 3         -> CANDIDATES REJECTED           (candidates 3)
+     *
+     * Six cells, six distinct renderings. The null cell rendering BLANK rather than `0` is the
+     * specific regression: a null candidate count must never become a measured zero.
+     *
+     * Also rendered and read from the live DOM: `GHOST VESSEL` above `SAR_UNMATCHED`; the semantic
+     * warning verbatim ("No sufficiently confident AIS association ... This alone does not
+     * establish why."); the closest rejected candidate (MMSI 257000001, short by 0.29 at 1,840 m /
+     * 96 s); the score decomposition (spatial 0.18, temporal 0.31, heading 0.22, size 0.14,
+     * composite 0.11); `AIS COVERAGE STATE`; 6 hypotheses and 8 unknowns.
+     *
+     * Negative language: 0 violations across the rendered surface.
      */
-    browserEvidence: '',
+    browserEvidence:
+      'DF-X9.4S section GV, run at build 4dc55cd (digest c25ccb88): 6-cell coverage matrix '
+      + '(3 candidate counts x 2 deployments), every cell rendered a distinct coverage verdict; '
+      + 'null candidate count rendered BLANK not 0; decomposition 0.18/0.31/0.22/0.14/0.11; '
+      + 'closest rejected MMSI 257000001 short by 0.29 at 1840 m / 96 s; 6 hypotheses, 8 unknowns; '
+      + '0 forbidden-inference violations. Screenshots: shots_s2/s2_ghost_*.png.',
   },
   {
     id: 'ais-layer-control-aria-state',
@@ -172,14 +197,31 @@ export const CAPABILITY_REGISTRY: readonly CapabilityRegistration[] = [
     productSurface: 'LayerConsole',
     symbol: 'LayerConsole',
     userAction: 'Focus a layer row: its aria-pressed state is "true", "false", or false-when-disabled.',
-    stage: 'PRODUCT_REACHABLE',
+    stage: 'BROWSER_PROVEN',
     browserSelector: '[data-df-layer] button[aria-pressed]',
     /*
-     * Verified in source, in the compiled bundle and by React's own server renderer -- and NOT in
-     * a browser. The three verifications disagree with each other about what they prove, so the
-     * honest stage is the one the strongest of them earns. DF-X9.4R owes section S10.
+     * PROVEN IN A BROWSER, section S10, against the strict build stamped `4dc55cd`.
+     *
+     * Source, compiled bundle and React's own server renderer had each "verified" this earlier and
+     * all three were insufficient: the binding was absent from the DOM and no amount of reading
+     * the code could have said so. The browser read all 14 rows: every `[data-df-layer] button`
+     * carries `df-btn flex-1 justify-start`, 11 toggled and all settled with `aria-pressed`
+     * inverting correctly, three legitimately UNAVAILABLE rows (`AIS_PREDICTED`, `LAND_MASK`,
+     * `CFAR_DEBUG`) all reading `disabled=true, aria-pressed="false"`, and NO row anywhere reading
+     * `disabled=true` together with `aria-pressed="true"`. No absent attribute.
+     *
+     * Three UNAVAILABLE rows, not one: the brief expected only `AIS_PREDICTED`, and an earlier
+     * harness inferred "only AIS_PREDICTED may be disabled" and produced a false failure from it.
+     * A harness that invents a rule and then reports the product against it is worse than no
+     * harness, so the rule was withdrawn rather than the product changed.
      */
-    browserEvidence: '',
+    browserEvidence:
+      'DF-X9.4S section S10, run at build 4dc55cd (digest c25ccb88): 14/14 layer rows read live, '
+      + 'all with class df-btn flex-1 justify-start; 11 toggled and settled with aria-pressed '
+      + 'inverting; UNAVAILABLE = AIS_PREDICTED, LAND_MASK, CFAR_DEBUG all disabled=true with '
+      + 'aria-pressed="false"; zero rows with disabled=true AND aria-pressed="true"; zero absent '
+      + 'attributes. Screenshots: shots_s2/s2_layers_panel_1920x1080.png, '
+      + 's2_layers_after_toggles.png.',
   },
   {
     id: 'timeline-ais-sync',

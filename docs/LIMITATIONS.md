@@ -145,3 +145,74 @@ nationality, determine intent, or support legal conclusions on its own.
 
 Every result should be read with its provenance, its uncertainty, and its
 unknowns — which is why those are first-class outputs rather than footnotes.
+---
+
+## OPEN DEFECT (DF-X9.4S, measured in a browser): the shell requires a public font CDN
+
+### What was measured
+
+Section O blocked all public network and counted attempts rather than asserting failure. On a plain
+load of the strict production build (stamped `4dc55cd`, digest `c25ccb88`), against **zero**
+permitted public hosts:
+
+```
+fonts.googleapis.com        x 1
+fonts.gstatic.com           x 4
+tile.openstreetmap.org      x 99
+                            ----
+                            104 external attempts
+```
+
+Everything else passed underneath it: app boots, archived scan loads, Ghost Vessel fixture loads,
+AIS playback works, seek works, coastline, EEZ, HIGH_SEAS and maritime context all work, and
+GhostSemantics renders. The functional product is intact. What is not intact is the claim that this
+deploys without egress.
+
+### The two findings are NOT the same finding
+
+**1. `index.html:55-60` requires Google Fonts, unguarded.**
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed...&display=swap" rel="stylesheet" />
+```
+
+Three font families load from a public CDN at shell load, with no `local()` source and no
+`font-family` fallback declared for them. On an air-gapped deployment the typography silently
+degrades to whatever the OS substitutes while every panel, label and numeric readout still renders
+and still looks like it is working.
+
+This is a real defect and it is **not** declared intentional anywhere. It is also not a
+correctness risk -- nothing depends on those metrics -- so it is a fidelity defect, which is why it
+is recorded rather than treated as a blocker.
+
+**2. `tile.openstreetmap.org` egress is INTENTIONAL.**
+
+`src/globe/mapSources.ts:46` names OpenStreetMap "the required keyless fallback", and
+`MapSourceController` implements an explicit fallback policy whose first documented bug was "one
+tile server down left a blank world, with no fallback and no message".
+
+So the section O expectation of **zero** external attempts is **unsatisfiable by design** against
+this product. It encodes an assumption -- that a basemap needs no egress -- which the basemap
+source layer explicitly contradicts.
+
+### The honest statement of the offline requirement
+
+Not "0 external attempts". It is:
+
+> Every ATTEMPT is DECLARED. A source that cannot be reached is reported as `NOT_CONFIGURED` or
+> `ALL_SOURCES_EXHAUSTED` in the SOURCE panel, and the fallback chain is exercised rather than
+> assumed.
+
+That is what `MapSourceController` is built to do. Proving it in a browser is
+**BROWSER BASEMAP-RECOVERY PROOF**, which is on the deferred list and is NOT closed by section O.
+Section O measured the attempt count and reported it; it did not establish that the failure is
+*visible*, and this record does not claim it is.
+
+### Not fixed here, and why
+
+The font link is a three-line change plus a decision about which weights to self-host, and self-hosting
+three families is a binary-asset decision with a visual consequence that cannot be verified in a
+headless run. Guessing at it would be a change I could not honestly report as verified. The OSM
+egress is intentional and must not be "fixed" by deleting the keyless fallback.

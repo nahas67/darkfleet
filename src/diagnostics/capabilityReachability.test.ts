@@ -264,13 +264,34 @@ describe('product capabilities are actually reachable', () => {
   });
 
   it('the registry reports its own weakest link', () => {
-    // Useful as a single number in a status report: the registry is not a wall of green.
-    expect(registryWeakestStage()).toBe('PRODUCT_REACHABLE');
+    /*
+     * Useful as a single number in a status report: the registry is not a wall of green.
+     *
+     * It was `PRODUCT_REACHABLE` while the Ghost Vessel capability was mounted but unproven, and
+     * it is `BROWSER_PROVEN` now that a browser read the rendered decision record. Computed rather
+     * than written down, so adding a capability without evidence moves this number by itself.
+     */
+    expect(registryWeakestStage()).toBe('BROWSER_PROVEN');
   });
 
   it('awaitingBrowserProof() lists exactly the entries that still owe a browser run', () => {
+    /*
+     * Now EMPTY, and that is a real state rather than a missing test: it means nothing is claimed
+     * without evidence.
+     *
+     * Both entries left this list in DF-X9.4S, against build 4dc55cd:
+     *
+     *   ghost-vessel-semantics        section GV -- the 6-cell coverage matrix, below
+     *   ais-layer-control-aria-state  section S10 -- all 14 layer rows read live; three legitimately
+     *                                 UNAVAILABLE rows (AIS_PREDICTED, LAND_MASK, CFAR_DEBUG) all
+     *                                 `disabled=true, aria-pressed="false"`; NO row was ever
+     *                                 `disabled=true AND aria-pressed="true"`
+     *
+     * The stale pair this test used to assert is deliberately NOT reinstated. Pinning the previous
+     * answer would have made the registry look maintained while it described a superseded state.
+     */
     const waiting = awaitingBrowserProof().map((c) => c.id).sort();
-    expect(waiting).toEqual(['ais-layer-control-aria-state', 'ghost-vessel-semantics']);
+    expect(waiting).toEqual([]);
   });
 });
 
@@ -291,18 +312,26 @@ describe('the three historical reachability failures are registered, not forgott
     expect(ids).toContain('ghost-vessel-semantics');
   });
 
-  it('the ghost-vessel capability is NOT claimed browser-proven before it is', () => {
+  it('the ghost-vessel capability was PRODUCT_REACHABLE before it was proven, and is now proven', () => {
     /*
-     * The honest stage today. `GhostSemantics` is mounted in the dossier's EVIDENCE tab and
-     * reachable in the product graph, but no browser run has observed it against a
-     * `SAR_UNMATCHED` fixture. Writing `BROWSER_PROVEN` here because the component renders would
-     * be the identical mistake this file was written to stop, so the registry says
-     * PRODUCT_REACHABLE and section GV owes the rest.
+     * This test asserted `PRODUCT_REACHABLE` with empty evidence while the capability was mounted
+     * but unproven, and it FAILED THE MOMENT the browser run landed -- which is the correct
+     * outcome and the reason it was written that way.
+     *
+     * The recorded history is the point. `GhostSemantics` rendered, compiled, and satisfied every
+     * pure test in the repo while no operator could reach the decision record. Asserting
+     * BROWSER_PROVEN then would have been the identical mistake this file exists to stop, so the
+     * registry said PRODUCT_REACHABLE and section GV owed the rest. It now says BROWSER_PROVEN
+     * because a browser read a 6-cell coverage matrix off the live DOM.
      */
     const ghost = CAPABILITY_REGISTRY.find((c) => c.id === 'ghost-vessel-semantics');
     expect(ghost).toBeDefined();
-    expect(ghost?.stage).toBe('PRODUCT_REACHABLE');
-    expect(ghost?.browserEvidence).toBe('');
+    expect(ghost?.stage).toBe('BROWSER_PROVEN');
+    expect(ghost?.browserEvidence.length).toBeGreaterThan(40);
+    // The evidence must name a build, or it names nothing: the whole point of DF-X9.4S is that
+    // "the component renders" is not a measurement.
+    expect(ghost?.browserEvidence).toMatch(/4dc55cd/);
+    expect(ghost?.browserEvidence).toMatch(/\d/);
     // The owner is BACKEND code: the capability's substance was always server-side, which is
     // why the missing edge was a frontend one and no amount of backend testing could find it.
     expect(ghost?.owner).toBe('backend/darkfleet/ghost_vessel.py');
