@@ -14,4 +14,10 @@ describe('air-gapped provider failures reach SYSTEM', () => {
     expect(source).toContain('data-df-basemap-provider={id}');
     expect(source).toContain('data-df-basemap-provider-health="UNAVAILABLE"');
   });
+
+  it('does not call an all-sources-exhausted state an active fallback', () => {
+    const source = readFileSync(resolve(__dirname, 'SystemPanel.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(source).toContain("status.activeId === null ? 'No basemap active'");
+  });
 });

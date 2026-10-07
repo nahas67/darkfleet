@@ -113,7 +113,7 @@ function BasemapSection() {
           style={{ color: status.isFallback ? 'var(--df-amber)' : 'var(--df-green)' }}
           data-df-basemap-fallback={status.isFallback ? 'true' : 'false'}
         >
-          {status.isFallback ? 'Fallback active' : 'Active'}
+          {status.activeId === null ? 'No basemap active' : status.isFallback ? 'Fallback active' : 'Active'}
         </span>
       </div>
       {status.notice !== null ? (
