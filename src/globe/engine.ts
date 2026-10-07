@@ -1283,6 +1283,25 @@ export class TacticalEngine {
   }
 
   /**
+   * Counts of entities ACTUALLY built for each local reference layer.
+   *
+   * A HIGH_SEAS payload and an ON toggle both appeared healthy while the loader sent
+   * `polygons: []` into the renderer. Attribution alone was not a drawing proof. This
+   * bounded diagnostic exposes only counts, never raw Cesium entities, so SYSTEM can
+   * distinguish "data arrived" from "geometry was built". These are BUILT entities;
+   * an OFF layer retains its entities but hides them, so SYSTEM labels both the count
+   * and the operator's visibility choice separately.
+   */
+  maritimeEntityCounts(): { coastline: number; eez: number; highSeas: number } | null {
+    if (!this.#viewer) return null;
+    return {
+      coastline: this.#coastlineEntities.length,
+      eez: this.#eezEntities.length,
+      highSeas: this.#highSeasEntities.length,
+    };
+  }
+
+  /**
    * Push the current maritime attribution into its credit slot.
    *
    * Called from the renderer rather than from the fetch, so the credit changes at the same

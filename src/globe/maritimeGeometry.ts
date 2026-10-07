@@ -64,6 +64,22 @@ const DRAWABLE = new Set(['AVAILABLE', 'CHECKSUM_UNRECORDED']);
 export type CoastlineGeometry = { lines: readonly DisplayLine[] };
 export type ZoneGeometry = { polygons: readonly DisplayPolygon[] };
 
+/**
+ * Preserve HIGH_SEAS multipart rings for the outline-only zone renderer.
+ *
+ * The old loader put the only polygon into `lines` (flattening its parts), then set
+ * `polygons: []`. TacticalWorld passes `highSeas.polygons` to setZoneBoundaries, so
+ * the actual renderer received zero shapes while attribution and an ON toggle looked
+ * healthy. The renderer ALREADY draws HIGH_SEAS outlines with transparent fill; it
+ * needs the polygons, not flattened lines. Keep each disconnected part separate.
+ */
+export function highSeasDisplay(zones: ZoneGeometryResponse): {
+  lines: readonly DisplayLine[];
+  polygons: readonly DisplayPolygon[];
+} {
+  return { lines: [], polygons: zones.polygons ?? [] };
+}
+
 export type MaritimeLayerState =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -195,25 +211,18 @@ function useMaritimeLayer(
         const zones = payload as ZoneGeometryResponse;
         if (layerId === 'HIGH_SEAS') {
           /*
-           * HIGH_SEAS is drawn, but ONLY its OUTLINE.
+           * HIGH_SEAS is drawn as an OUTLINE by engine.setZoneBoundaries. Keep the
+           * backend's 21 disconnected parts separate: joining them would draw lines
+           * across oceans the dataset does not assert, while a filled high-seas
+           * polygon would paint the entire ocean as if it belonged to somebody.
            *
-           * The single Marine Regions high-seas feature is 366,469 vertices covering
-           * 222,496,418 km² -- every ocean not inside an EEZ. Filling it would paint the
-           * entire habitable ocean a solid colour underneath every other layer, and it
-           * would read as "this water belongs to somebody", which is precisely the claim
-           * the high-seas rule refuses to make. An outline says "high seas was MEASURED
-           * against this geometry" without asserting anything about the water inside.
-           *
-           * The parts are concatenated rather than kept separate because an outline that
-           * jumped between the 21 parts would draw 20 straight lines across oceans the
-           * dataset says ARE high seas -- visible, and wrong.
+           * The old mapping flattened parts into `lines` and set `polygons: []`;
+           * TacticalWorld then forwarded only `polygons`, so no entities were drawn.
+           * Attribution and a pressed layer row still appeared, masking the defect.
            */
           setState({
             status: 'ready',
-            lines: (zones.polygons ?? []).map((polygon) => ({
-              coordinates: polygon.parts.flatMap((part) => part.coordinates),
-            })),
-            polygons: [],
+            ...highSeasDisplay(zones),
             provenance: zones.provenance as SourceRef,
             notice: meta.notice ?? '',
             sourceVertexCount: meta.source_vertex_count ?? 0,

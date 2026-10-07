@@ -271,6 +271,35 @@ function DatasetHealthSection() {
   );
 }
 
+function MaritimeEntitySection() {
+  const state = useStore();
+  const counts = engine.maritimeEntityCounts();
+  const rows = [
+    { id: 'REFERENCE_COASTLINE' as const, label: 'Reference coastline', count: counts?.coastline },
+    { id: 'EEZ_BOUNDARIES' as const, label: 'EEZ boundaries', count: counts?.eez },
+    { id: 'HIGH_SEAS' as const, label: 'High seas outline', count: counts?.highSeas },
+  ];
+  return (
+    <div className="mt-3" data-df-maritime-entities>
+      <p className="df-label mb-1.5 text-[10px]">Local geometry built</p>
+      {rows.map(({ id, label, count }) => (
+        <div key={id} className="flex items-baseline justify-between gap-2 py-0.5"
+          data-df-maritime-entity-count={id} data-df-count={count ?? 'unknown'}>
+          <span className="text-[11px] text-ink-2">{label}</span>
+          <span className="df-num text-[10px]">
+            {count === undefined ? NOT_ESTABLISHED : `${count} parts built`}
+            {' · '}{state.layerState[id]?.visible ? 'ON' : 'OFF'}
+          </span>
+        </div>
+      ))}
+      <p className="pt-1 text-[10px] text-ink-dim">
+        Built entities are not a measurement of coverage. An OFF layer retains hidden geometry;
+        a zero on an ON layer may still be loading. LAYERS states any refusal.
+      </p>
+    </div>
+  );
+}
+
 export function SystemPanel() {
   const state = useStore();
 
@@ -292,6 +321,7 @@ export function SystemPanel() {
       <div className="p-3">
         <ArchiveCoverageSection />
         <BasemapSection />
+        <MaritimeEntitySection />
         {/* Deliberately adjacent to, not inside, `Source health` below: those are remote
             HTTP sources with a live-uptime meaning, these are files on this disk. */}
         <DatasetHealthSection />

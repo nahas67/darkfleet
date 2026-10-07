@@ -240,6 +240,18 @@ source IDs; its aggregate notice alone did not name them. Local scan, AIS playba
 GhostSemantics, coastline, EEZ, HIGH_SEAS and maritime context continued to work. Full basemap
 **recovery after connectivity returns** remains deferred; this test proved exhaustion, not recovery.
 
+**HIGH_SEAS correction (independent DF-X9.4T review).** The first blocked-network browser run
+above established that the local high-seas endpoint returned a polygon, the control toggled ON
+and Marine Regions attribution appeared. It did **not** establish that the globe drew it. Review
+found the loader put the polygon into `lines` while forwarding `polygons: []` to
+`engine.setZoneBoundaries`. The renderer built **zero** high-seas entities despite the healthy-
+looking UI. The loader now forwards the original multipart polygon to the engine's existing
+outline-only renderer (transparent fill), preserving separate parts rather than drawing straight
+links across disconnected seas. SYSTEM now exposes counts of actually built coastline, EEZ and
+HIGH_SEAS entities separately from source health and toggle state. A browser measurement must
+confirm each is nonzero before the offline layer row may be called closed. Attribution alone is
+not evidence of drawing.
+
 The deployment baseline's previously unexplained third field is **Windows FILETIME ticks** (100ns
 since 1601-01-01 UTC). Its value `639266744270954823` converts exactly to
 `(ticks - 621355968000000000) × 100 = 1791077627095482300` Unix nanoseconds, which equals
