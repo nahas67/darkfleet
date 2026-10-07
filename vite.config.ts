@@ -7,7 +7,7 @@ import { defineConfig } from 'vite';
 
 // The `.ts` extension is explicit because vite's `configLoader: 'native'` warns without it, and a
 // warning in a config file is a warning nobody reads until the day the loader changes.
-import { darkfleetBuildIdentity } from './build/buildIdentity.ts';
+import { darkfleetBuildIdentity } from './build-tools/buildIdentity.ts';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,10 +49,10 @@ export default defineConfig(() => ({
   test: {
     environment: 'node',
     /*
-     * `build/` is included because the build-identity gate is product-surface code: it decides what
+     * `build-tools/` is included because the build-identity gate is product-surface code: it decides what
      * a browser can prove about itself. A gate that is not in the test run is a gate that does not
      * run, and the previous evidence failure is exactly a gate that did not run.
      */
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'build/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'build-tools/**/*.test.ts'],
   },
 }));
