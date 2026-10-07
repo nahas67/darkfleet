@@ -35,9 +35,13 @@ export function useGlobalKeys(): void {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === 'Escape') {
-        // Escape closes the workspace, or clears the selection if none is open.
+        // Escape closes the workspace, or clears BOTH selections if none is open.
+        // `select({ kind: 'none' })` clears the SAR target AND the AIS contact;
+        // the guard names both authorities, or an AIS-only selection would make
+        // Escape a silent no-op.
         if (state.workspace !== 'TACTICAL') store.set({ workspace: 'TACTICAL' });
-        else if (state.selection.kind !== 'none') store.select({ kind: 'none' });
+        else if (state.selection.kind !== 'none' || state.selectedAis !== null)
+          store.select({ kind: 'none' });
         return;
       }
 
@@ -91,5 +95,5 @@ export function useGlobalKeys(): void {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [state.workspace, state.selection, state.targets]);
+  }, [state.workspace, state.selection, state.selectedAis, state.targets]);
 }

@@ -181,7 +181,7 @@ export type Coverage = {
 };
 
 export type State = {
-  /* --- selection: the single shared reference --- */
+  /* --- selection: the two authorities that coexist (DF-X9.6 section 7) --- */
   selection:
     | { kind: 'none' }
     /**
@@ -197,10 +197,35 @@ export type State = {
      * Optional so that existing writers keep compiling, but every surface that
      * knows the owning scan should supply it, and `targetRefOf` is the only
      * sanctioned way to read the pair.
+     *
+     * Names the SAR target ONLY. The AIS contact lives in `selectedAis` beside
+     * it, and neither write disturbs the other: selecting a contact must not
+     * deselect the target under examination, and selecting a target must not
+     * drop the contact. The one exception is `select({ kind: 'none' })`
+     * (Escape), which clears BOTH -- the existing "Escape clears selection" UX,
+     * kept so Escape cannot leave a highlighted contact behind with no visible
+     * way to clear it.
      */
     | { kind: 'target'; targetId: string; scanId?: string | null }
-    | { kind: 'mmsi'; mmsi: string }
     | { kind: 'scene'; sceneId: string };
+
+  /**
+   * THE AIS selection authority (DF-X9.6 section 7).
+   *
+   * The vessel under examination, independent of `selection` above. There is
+   * exactly ONE MMSI field in the store -- this one -- so the camera lane's
+   * follow identity reads `selectedAis?.mmsi` and no second field is ever added
+   * beside it. Follow BEHAVIOUR itself stays unwired (see `aisFollowMode`); this
+   * field names the contact, not the camera mode.
+   *
+   * `observationAt` holds the EXACT raw observation timestamp when an
+   * observation marker is picked (mission timeline), else null. A contact
+   * selection (`selectAis({ mmsi })` with no timestamp) preserves the prior
+   * `observationAt` only when the MMSI is unchanged -- the operator is still
+   * looking at the same fix -- and resets it to null for a different vessel,
+   * which must never inherit another vessel's fix.
+   */
+  selectedAis: { mmsi: string; observationAt: string | null } | null;
 
   /* --- spatial --- */
   aoi: BBox | null;
@@ -233,6 +258,9 @@ export type State = {
    * comment saying "there is no control for this" is discoverable in a way that an absent field is
    * not. No UI element writes it: there is no shipped operator control that appears to do
    * something and does nothing, which is what DF-X9.3 section 66 forbids.
+   *
+   * FOLLOW IDENTITY, when it lands, reads `selectedAis?.mmsi` -- the AIS selection authority
+   * beside `selection`. No second MMSI field is ever added for it: one authority, one reader.
    */
   aisFollowMode: 'OFF' | 'CENTER' | 'FOLLOW' | 'CHASE';
   /** Camera altitude in metres, metres; null until the camera reports one. */
@@ -410,6 +438,7 @@ export type State = {
 
 const initialState: State = {
   selection: { kind: 'none' },
+  selectedAis: null,
   aoi: null,
   aoiText: '',
   savedAois: [],
@@ -513,13 +542,23 @@ class Store {
   };
 
   /**
-   * Select a domain object. The one place selection changes.
+   * Select a SAR target, a scene, or nothing. The one place `selection` changes.
    *
    * Every surface routes through here, which is what makes selection
    * bidirectional: selecting in the contact list and selecting on the globe are
    * the same transition.
+   *
+   * Writes `selection` ONLY and never touches `selectedAis` -- except for
+   * `{ kind: 'none' }` (Escape), which clears BOTH authorities. See the
+   * `selection` docs for why the exception exists.
    */
   select = (selection: State['selection']): void => {
+    if (selection.kind === 'none') {
+      const current = this.#state.selection;
+      if (current.kind === 'none' && this.#state.selectedAis === null) return;
+      this.set({ selection, selectedAis: null });
+      return;
+    }
     const current = this.#state.selection;
     if (current.kind === selection.kind) {
       // Compare the identity payload of both sides rather than reaching for one
@@ -531,12 +570,10 @@ class Store {
       if ('targetId' in current && 'targetId' in selection) {
         if (sameTargetRef(targetRefOf(current), targetRefOf(selection))) return;
       }
-      if ('mmsi' in current && 'mmsi' in selection && current.mmsi === selection.mmsi) return;
       if ('sceneId' in current && 'sceneId' in selection && current.sceneId === selection.sceneId) return;
-      if (current.kind === 'none') return;
     }
     /*
-     * Selecting a contact does NOT move the camera, and selection must not imply follow.
+     * Selecting a target does NOT move the camera, and selection must not imply follow.
      *
      * This used to write `followingMmsi` here, on the reasoning that selecting a vessel should
      * start following it. Nothing ever read it, so selecting a contact appeared to arm a follow
@@ -545,6 +582,37 @@ class Store {
      * as a side effect of selecting something.
      */
     this.set({ selection });
+  };
+
+  /**
+   * Select an AIS contact. The one place `selectedAis` changes.
+   *
+   * The AIS counterpart of `select()`: every surface that names a vessel routes
+   * through here, and this writes `selectedAis` ONLY, never `selection`, so a
+   * contact pick cannot deselect the SAR target under examination (DF-X9.6
+   * section 7).
+   *
+   * `observationAt` is the EXACT raw observation timestamp when an observation
+   * marker is picked (mission timeline), else null. Omitting it on a contact
+   * selection preserves the prior value only for the SAME vessel; a different
+   * vessel resets it to null rather than inheriting another vessel's fix.
+   * Passing null clears the AIS authority and leaves the target selected.
+   */
+  selectAis = (ref: { mmsi: string; observationAt?: string | null } | null): void => {
+    if (ref === null) {
+      if (this.#state.selectedAis === null) return;
+      this.set({ selectedAis: null });
+      return;
+    }
+    const current = this.#state.selectedAis;
+    const observationAt = ref.observationAt ?? (current?.mmsi === ref.mmsi ? current.observationAt : null) ?? null;
+    if (current !== null && current.mmsi === ref.mmsi && current.observationAt === observationAt) return;
+    this.set({ selectedAis: { mmsi: ref.mmsi, observationAt } });
+  };
+
+  /** Clear the AIS contact, leaving the SAR target selected. */
+  clearAis = (): void => {
+    this.selectAis(null);
   };
 }
 

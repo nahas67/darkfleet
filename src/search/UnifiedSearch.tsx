@@ -144,7 +144,7 @@ export function UnifiedSearch() {
               onClick={() => {
                 if (result.kind === 'TARGET')
       store.select({ kind: 'target', targetId: result.id, scanId: store.getState().scanId });
-                if (result.kind === 'MMSI') store.select({ kind: 'mmsi', mmsi: result.id });
+                if (result.kind === 'MMSI') store.selectAis({ mmsi: result.id });
                 if (result.kind === 'SCENE') store.select({ kind: 'scene', sceneId: result.id });
                 engine.flyTo(result.lat, result.lon);
               }}

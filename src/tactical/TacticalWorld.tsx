@@ -113,6 +113,8 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   const temporalState = useTemporal();
   const targets = state.targets;
   const selection = state.selection;
+  // THE AIS authority, beside -- not instead of -- the SAR target (DF-X9.6 §7).
+  const selectedAisMmsi = state.selectedAis?.mmsi ?? null;
   const rasterBounds = engine.rasterBounds;
 
   /*
@@ -126,12 +128,12 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    * no contact selected, but observations loaded -- is a legitimate thing to play.
    */
   useEffect(() => {
-    const selectedMmsi = selection.kind === 'mmsi' ? selection.mmsi : null;
+    const selectedMmsi = selectedAisMmsi;
     const relevant = selectedMmsi
       ? state.aisObservations.filter((o) => o.mmsi === selectedMmsi)
       : state.aisObservations;
     temporal.setRange(rangeFromTimestamps(relevant.map((o) => o.timestamp)));
-  }, [selection, state.aisObservations]);
+  }, [selection, selectedAisMmsi, state.aisObservations]);
 
   /*
    * SELECTED CONTACT'S TRACK MODEL.
@@ -142,12 +144,12 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    * merely invisible.
    */
   const selectedTrack = useMemo(() => {
-    const selectedMmsi = selection.kind === 'mmsi' ? selection.mmsi : null;
+    const selectedMmsi = selectedAisMmsi;
     if (!selectedMmsi) return null;
     const rows = state.aisObservations.filter((o) => o.mmsi === selectedMmsi);
     if (rows.length === 0) return null;
     return buildTrack(rows);
-  }, [selection, state.aisObservations]);
+  }, [selection, selectedAisMmsi, state.aisObservations]);
 
   /*
    * FRAME TRACK -- ONE SHOT (DF-X9.4 sections 32 and 33).
@@ -221,12 +223,12 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    */
   useEffect(() => {
     if (!webgl || initError !== null) return;
-    engine.setAisSelection(selection.kind === 'mmsi' ? selection.mmsi : null);
+    engine.setAisSelection(selectedAisMmsi);
     const associated = (state.targetDetail ?? [])
       .map((t) => t.corr?.mmsi)
       .filter((mmsi): mmsi is string => typeof mmsi === 'string' && mmsi !== '');
     engine.setAssociatedAisMmsis(associated);
-  }, [selection, state.targetDetail, webgl, initError]);
+  }, [selection, selectedAisMmsi, state.targetDetail, webgl, initError]);
 
   useEffect(() => {
     // Camera telemetry is written to the store so the navigation HUD stays

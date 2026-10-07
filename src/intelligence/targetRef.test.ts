@@ -17,10 +17,10 @@ import { sameTargetRef, scanQuery, targetPath, targetRefKey, targetRefOf } from 
 
 describe('targetRefOf reads only target selections', () => {
   it('returns null for a non-target selection', () => {
-    // Returning a partial ref for an MMSI selection would let a caller read
-    // `targetId` off something that has none.
+    // A scene selection must not yield a target ref, and an AIS contact never
+    // reaches this function: it lives in `selectedAis`, a separate authority
+    // with no variant here to misread.
     expect(targetRefOf({ kind: 'none' })).toBeNull();
-    expect(targetRefOf({ kind: 'mmsi', mmsi: '477421900' })).toBeNull();
     expect(targetRefOf({ kind: 'scene', sceneId: 'S1A_X' })).toBeNull();
   });
 

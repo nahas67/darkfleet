@@ -216,7 +216,10 @@ export function MissionTimeline() {
                * forbids.
                */
               if (event.mmsi) {
-                store.select({ kind: 'mmsi', mmsi: event.mmsi });
+                // AIS authority, beside -- not instead of -- the SAR target (DF-X9.6 §7).
+                // The observation timestamp travels with the pick: it is the exact
+                // fix under examination, not a derived value.
+                store.selectAis({ mmsi: event.mmsi, observationAt: event.at });
                 store.set({ highlightedObservation: { mmsi: event.mmsi, at: event.at } });
                 /*
                  * `seek` takes epoch MILLISECONDS. The conversion is guarded rather than passed

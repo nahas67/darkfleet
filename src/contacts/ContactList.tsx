@@ -126,12 +126,9 @@ export function ContactList() {
     return sort.asc ? sorted : sorted.reverse();
   }, [rows, query, activeFilters, sort]);
 
-  const selectedKey =
-    state.selection.kind === 'target'
-      ? `sar:${state.selection.targetId}`
-      : state.selection.kind === 'mmsi'
-        ? `ais:${state.selection.mmsi}`
-        : null;
+  const selectedSarId =
+    state.selection.kind === 'target' ? state.selection.targetId : null;
+  const selectedAisMmsi = state.selectedAis?.mmsi ?? null;
 
   const activate = (row: Row) => {
     if (row.kind === 'sar') {
@@ -140,7 +137,8 @@ export function ContactList() {
     store.select({ kind: 'target', targetId: row.id, scanId: store.getState().scanId });
       engine.flyTo(row.lat, row.lon);
     } else {
-      store.select({ kind: 'mmsi', mmsi: row.mmsi as string });
+      // AIS authority, beside -- not instead of -- the SAR target (DF-X9.6 §7).
+      store.selectAis({ mmsi: row.mmsi as string });
       engine.flyTo(row.lat, row.lon);
     }
   };
@@ -249,7 +247,11 @@ export function ContactList() {
         </thead>
         <tbody>
           {visible.map((row) => {
-            const selected = row.key === selectedKey;
+            // SAR and AIS highlight independently: the two authorities coexist
+            // (DF-X9.6 §7), so a selected target and a selected contact each
+            // mark their own row.
+            const selected =
+              row.kind === 'sar' ? row.id === selectedSarId : row.mmsi === selectedAisMmsi;
             return (
               <tr
                 key={row.key}

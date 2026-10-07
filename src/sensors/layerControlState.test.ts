@@ -273,11 +273,12 @@ describe('timeline AIS event identity', () => {
   });
 
   it('selecting an AIS event selects the VESSEL, not a SAR target', () => {
-    // DF-X9.4H section 40 / the TargetRef separation: playing an AIS vessel must not overwrite the
-    // selected SAR target. `store.select({ kind: 'mmsi' })` is the AIS selection; the SAR path is a
-    // separate `kind: 'target'` branch that must remain.
+    // DF-X9.4H section 40 / the TargetRef separation, now structural in DF-X9.6
+    // section 7: `store.selectAis` is the AIS authority beside `selection`, so
+    // playing a vessel cannot overwrite the selected SAR target. The SAR path
+    // is a separate `select({ kind: 'target' })` branch that must remain.
     const code = TIMELINE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect(code).toContain("store.select({ kind: 'mmsi', mmsi: event.mmsi })");
+    expect(code).toContain('store.selectAis({ mmsi: event.mmsi, observationAt: event.at })');
     expect(code).toMatch(/store\.select\(\{\s*kind: 'target'/);
   });
 

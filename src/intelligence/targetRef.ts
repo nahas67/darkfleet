@@ -30,14 +30,15 @@ export type TargetRef = {
 export type SelectionLike =
   | { kind: 'none' }
   | { kind: 'target'; targetId: string; scanId?: string | null }
-  | { kind: 'mmsi'; mmsi: string }
   | { kind: 'scene'; sceneId: string };
 
 /**
  * The target ref a selection denotes, or null when it denotes no target.
  *
  * Returns null rather than a partial ref for non-target selections so that a
- * caller cannot accidentally read `targetId` off an MMSI selection.
+ * caller cannot accidentally read `targetId` off a scene selection. AIS
+ * contacts never reach this function at all: they live in `selectedAis`, a
+ * separate authority, so there is no MMSI variant to misread here.
  */
 export function targetRefOf(selection: SelectionLike): TargetRef | null {
   if (selection.kind !== 'target') return null;

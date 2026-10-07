@@ -62,11 +62,11 @@ export function ReportsWorkspace() {
         <div>
           <p className="df-label mb-1 text-[10px]">Selected target</p>
           <p className="df-num text-[11px] text-ink">
-            {state.selection.kind === 'target'
-              ? state.selection.targetId
-              : state.selection.kind === 'mmsi'
-                ? state.selection.mmsi
-                : NOT_ESTABLISHED}
+            {state.selection.kind === 'target' ? state.selection.targetId : NOT_ESTABLISHED}
+          </p>
+          <p className="df-label mb-1 mt-2 text-[10px]">Selected AIS contact</p>
+          <p className="df-num text-[11px] text-ink">
+            {state.selectedAis?.mmsi ?? NOT_ESTABLISHED}
           </p>
           <p className="df-num mt-0.5 text-[10px] text-ink-dim">
             Per-target export is {NOT_ESTABLISHED.toLowerCase()}. Whole-scan exports only.

@@ -202,7 +202,7 @@ describe('bbox validation', () => {
 /* ---------------------------------------------------------------- selection */
 
 describe('bidirectional selection', () => {
-  it('is one shared reference, so surfaces cannot disagree', () => {
+  it('routes target and AIS picks through separate authorities that coexist', () => {
     resetStore();
     const target: SarTarget = {
       id: 'DF-001',
@@ -224,12 +224,15 @@ describe('bidirectional selection', () => {
     store.set({ targets: [target] });
 
     store.select({ kind: 'target', targetId: 'DF-001' });
-    // Every surface reads this same field, which is what makes selection
-    // bidirectional without any cross-panel wiring.
+    // Target and AIS are separate authorities that coexist: every surface reads
+    // the same two fields, which is what makes selection bidirectional without
+    // any cross-panel wiring.
     expect(store.getState().selection).toEqual({ kind: 'target', targetId: 'DF-001' });
 
-    store.select({ kind: 'mmsi', mmsi: '123456789' });
-    expect(store.getState().selection).toEqual({ kind: 'mmsi', mmsi: '123456789' });
+    store.selectAis({ mmsi: '123456789' });
+    expect(store.getState().selectedAis).toEqual({ mmsi: '123456789', observationAt: null });
+    // And the target survived the contact pick (DF-X9.6 section 7).
+    expect(store.getState().selection).toEqual({ kind: 'target', targetId: 'DF-001' });
   });
 
   it('does not notify subscribers when nothing changed', () => {
