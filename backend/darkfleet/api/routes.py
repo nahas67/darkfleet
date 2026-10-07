@@ -1531,6 +1531,11 @@ def get_target(
     # the builder carries null provenance out as null, so a record that cannot
     # say how it was produced renders as an absent audit trail.
     provenance = owner["record"].get("provenance") or None
+    # DF-X9.4R: the real coverage state, not a hardcoded None. The ghost-vessel decision record
+    # reports WHY no candidate was accepted, and "the AIS source was never configured" is a
+    # materially different answer from "a source was configured and nothing was near enough".
+    # Both used to arrive as NOT_ESTABLISHED, which is the DF-X7 defect in a new place.
+    coverage = _ais_coverage_report(state)
     return TargetEvidenceResponse(
         scan_id=str(record.get("scan_id", "")),
         runtime_mode=str(record.get("runtime_mode", "REAL")),
@@ -1543,6 +1548,17 @@ def get_target(
                     owner["target"],
                     dict(provenance) if provenance else None,
                     None,
+                    # KEYWORD, not a third positional. The signature is
+                    # `target_evidence(target, provenance, chip, *, ais_coverage=None)`, so the
+                    # positional slot is the CHIP record and `ais_coverage` is keyword-only.
+                    #
+                    # An earlier version of this fix passed the coverage dict as the third
+                    # positional, which put a coverage report into the chip slot and left the
+                    # decision still reporting NOT_ESTABLISHED. Nothing failed: `chip` accepts a
+                    # loose dict, so the mistake was silent and would have shipped a fix that
+                    # fixed nothing. The route-level test below is what caught it, which is the
+                    # argument for testing the WIRING rather than the function it calls.
+                    ais_coverage={"state": str(coverage.state)},
                 )
             )
         ),
@@ -2661,9 +2677,22 @@ def _archive_for(state: State) -> AisArchive:
     return AisArchive(state.data_dir)
 
 
-@router.get("/ais/coverage", response_model=AisCoverageOut)
-def ais_coverage(state: State) -> AisCoverageOut:
-    """What the AIS archive can and cannot speak to. Probes nothing external."""
+def _ais_coverage_report(state: State) -> AisCoverageOut:
+    """What the local AIS archive can and cannot speak to. Probes nothing external.
+
+    EXTRACTED (DF-X9.4R) so that the ghost-vessel decision record can carry the SAME coverage
+    state the `/ais/coverage` route reports.
+
+    It was previously computed only inside that route, and the `/targets/{id}` route passed a
+    hardcoded `None` for `ais_coverage`. So `decision.ais_coverage_state` was the constant
+    `"NOT_ESTABLISHED"` for every target in the product, whatever the archive actually held --
+    which is the DF-X7 defect in a new place: "there is no AIS source" and "there is a source but
+    no vessel near this target" both rendered as the same uninformative absence, and the operator
+    could not tell a deployment with no AIS from a target with no match.
+
+    One computation, two consumers. A second implementation of this would be free to disagree
+    with the first, and the disagreement would be invisible.
+    """
     archive = _archive_for(state)
     report = archive.coverage()
     observations = int(report.get("observations", 0) or 0)
@@ -2689,6 +2718,12 @@ def ais_coverage(state: State) -> AisCoverageOut:
         archive_newest=report.get("newest"),
         sources=[str(s) for s in (report.get("sources") or [])],
     )
+
+
+@router.get("/ais/coverage", response_model=AisCoverageOut)
+def ais_coverage(state: State) -> AisCoverageOut:
+    """What the AIS archive can and cannot speak to. Probes nothing external."""
+    return _ais_coverage_report(state)
 
 
 @router.get("/scans/{scan_id}/ais", response_model=ScanAisResponse)
