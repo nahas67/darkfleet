@@ -98,9 +98,13 @@ export function buildMapSources(
 }
 
 /** Tile template per provider, for the viewer to build its imagery provider. */
-export const MAP_SOURCE_URLS: Readonly<Record<'OSM' | 'ESRI', string>> = {
+export const MAP_SOURCE_URLS: Readonly<Record<'OSM' | 'ESRI' | 'ION', string>> = {
   OSM: OPENSTREETMAP,
   ESRI: ESRI_WORLD_IMAGERY,
+  // Keep the optional ion endpoint in the SAME owner registry as the URL passed to Cesium.
+  // An egress classifier copying the wrong SDK endpoint would classify the real provider as
+  // undeclared even though the product intentionally configured it.
+  ION: 'https://assets.cesium.com/us/rest/1.0/assets/2/imagery/2023_07_28',
 };
 
 /** Fallback order, asserted against the controller's own behaviour in tests. */

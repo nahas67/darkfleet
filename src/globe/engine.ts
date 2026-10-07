@@ -951,7 +951,7 @@ export class TacticalEngine {
           // The label is the id and nothing else. No name, no class, no identity:
           // the globe asserts a position and an id, never a conclusion.
           text: target.id,
-          font: '11px "JetBrains Mono", monospace',
+          font: '11px ui-monospace, Consolas, monospace',
           fillColor: Color.fromCssColorString(selected ? '#D8E4DC' : '#8FA396'),
           outlineColor: Color.fromCssColorString('#040705'),
           outlineWidth: 2,

@@ -227,7 +227,7 @@ const MAX_ROTATION_STEP_DEG = 6;
 const ROTATION_DEADBAND_DEG = 2;
 
 /** Label typeface. Matches the contact list and dossier, so a vessel reads as one object. */
-const LABEL_FONT = '11px "JetBrains Mono", monospace';
+const LABEL_FONT = '11px ui-monospace, Consolas, monospace';
 
 /* ============================================================================================== *
  * THE RENDERER

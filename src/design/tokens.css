@@ -30,9 +30,9 @@
   --df-red: #d4553f;
   --df-violet: #7c6bb0;
 
-  --df-label: 'Barlow Condensed', 'Roboto Condensed', system-ui, sans-serif;
-  --df-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --df-body: Inter, system-ui, -apple-system, sans-serif;
+  --df-label: 'Arial Narrow', 'Liberation Sans Narrow', 'Segoe UI', system-ui, sans-serif;
+  --df-mono: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --df-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 @theme {

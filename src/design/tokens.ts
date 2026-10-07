@@ -132,7 +132,7 @@ export const groupColor: Readonly<Record<string, string>> = {
 export const type = {
   /** Section labels, panel titles, rail captions. */
   label: {
-    fontFamily: '"Barlow Condensed", "Roboto Condensed", system-ui, sans-serif',
+    fontFamily: '"Arial Narrow", "Liberation Sans Narrow", "Segoe UI", system-ui, sans-serif',
     fontSize: '11px',
     fontWeight: 600,
     letterSpacing: '0.14em',
@@ -140,12 +140,12 @@ export const type = {
   },
   /** Values, coordinates, ids, timestamps. */
   mono: {
-    fontFamily: '"JetBrains Mono", "SFMono-Regular", ui-monospace, monospace',
+    fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace',
     fontVariantNumeric: 'tabular-nums' as const,
   },
   /** Prose. Sentence case -- this product does not shout. */
   body: {
-    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     fontSize: '12px',
     lineHeight: 1.5,
   },

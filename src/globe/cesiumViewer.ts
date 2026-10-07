@@ -151,7 +151,7 @@ function createImageryProvider(kind: 'OSM' | 'ESRI' | 'ION', ionToken?: string):
   if (!ionToken) throw new Error('Cesium ion requires a token');
   Ion.defaultAccessToken = ionToken;
   return new UrlTemplateImageryProvider({
-    url: 'https://assets.cesium.com/us/rest/1.0/assets/2/imagery/2023_07_28',
+    url: MAP_SOURCE_URLS.ION,
   });
 }
 
