@@ -152,6 +152,16 @@ export class TacticalEngine {
   #maritimeCredit: string = '';
   #handler: ScreenSpaceEventHandler | null = null;
   #hovered: string | null = null;
+  /**
+   * Second input handler, for the AIS camera owner's gesture subscription.
+   *
+   * SEPARATE from `#handler` on purpose: that handler owns LEFT_CLICK picking and cursor
+   * telemetry, and `setInputAction` replaces by event type -- sharing it would risk
+   * one lane's gesture overwriting the other's pick path.
+   */
+  #cameraInputHandler: ScreenSpaceEventHandler | null = null;
+  /** Press-level zoom-gesture listeners (wheel, pinch). Never a plain click. */
+  #userInputListeners = new Set<() => void>();
   /** Live basemap ownership, or null before init. */
   #basemap: BasemapHandle | null = null;
   /** Recovery-probe interval. Cleared on dispose. */
@@ -223,6 +233,7 @@ export class TacticalEngine {
     this.#handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     this.#installPicking();
     this.#installCameraTelemetry(viewer);
+    this.#installCameraInput(viewer);
 
     return viewer;
   }
@@ -263,6 +274,9 @@ export class TacticalEngine {
   dispose(): void {
     this.#handler?.destroy();
     this.#handler = null;
+    this.#cameraInputHandler?.destroy();
+    this.#cameraInputHandler = null;
+    this.#userInputListeners.clear();
     this.#targetEntities.clear();
     this.#trackEntities = [];
     this.#linkEntities = [];
@@ -688,6 +702,110 @@ export class TacticalEngine {
     return this.#aisRenderer?.drawnMmsis() ?? [];
   }
 
+  /**
+   * The retained DISPLAY position of one drawn AIS contact, or null when it has no glyph.
+   *
+   * Reads the billboard the renderer retained -- display truth including interpolation --
+   * never a stored observation and never the predicted marker. Null is NOT_YET_OBSERVED
+   * or otherwise undrawable. The AIS camera owner (`globe/aisCamera.ts`) is the only
+   * production reader; it treats null as "suspend, never remember".
+   */
+  displayPositionOf(mmsi: string): { lat: number; lon: number } | null {
+    return this.#aisRenderer?.displayPositionOf(mmsi) ?? null;
+  }
+
+  /**
+   * The live camera pose as plain data, or null before init.
+   *
+   * Plain (not Cartesian3) so the camera owner stays Cesium-free and unit-testable: the
+   * conversion happens here, at the boundary, exactly once per read.
+   */
+  getCameraPose(): {
+    position: { x: number; y: number; z: number };
+    heading: number;
+    pitch: number;
+    roll: number;
+  } | null {
+    const viewer = this.#viewer;
+    if (!viewer) return null;
+    const position = viewer.camera.positionWC;
+    return {
+      position: { x: position.x, y: position.y, z: position.z },
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    };
+  }
+
+  /** World coordinates of a lon/lat. Needs no viewer: pure projection. */
+  cartesianOf(lat: number, lon: number, height = 0): { x: number; y: number; z: number } {
+    const cartesian = Cartesian3.fromDegrees(lon, lat, height);
+    return { x: cartesian.x, y: cartesian.y, z: cartesian.z };
+  }
+
+  /**
+   * setView-style camera move: immediate, no animation.
+   *
+   * What per-tick follow uses. One-shot framing keeps the animated `flyTo`/`flyToBbox`:
+   * an operator watching a contact recentre expects a flight, while a 10 Hz re-flight
+   * would never settle.
+   */
+  setCameraPose(
+    position: { x: number; y: number; z: number },
+    orientation: { heading: number; pitch: number; roll: number },
+  ): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+    viewer.camera.setView({
+      destination: new Cartesian3(position.x, position.y, position.z),
+      orientation: {
+        heading: orientation.heading,
+        pitch: orientation.pitch,
+        roll: orientation.roll,
+      },
+    });
+  }
+
+  /**
+   * Camera-motion and gesture subscriptions for the AIS camera owner.
+   *
+   * `onCameraMoveStart` fires on ANY camera motion, including the owner's own flights --
+   * the owner guards those itself. `onCameraUserInput` fires ONLY on press-level gestures
+   * that unambiguously move the camera (wheel zoom, pinch), never on a plain click: a
+   * click SELECTS, and releasing follow on the mouse-down of a contact pick would destroy
+   * the switch-contact retarget. Drags release through motion instead.
+   */
+  onCameraMoveStart(callback: () => void): () => void {
+    const viewer = this.#viewer;
+    if (!viewer) return () => {};
+    const listener = (): void => callback();
+    viewer.camera.moveStart.addEventListener(listener);
+    return () => {
+      viewer.camera.moveStart.removeEventListener(listener);
+    };
+  }
+
+  /** Settles the owner's in-flight guard; see `onCameraMoveStart`. */
+  onCameraMoveEnd(callback: () => void): () => void {
+    const viewer = this.#viewer;
+    if (!viewer) return () => {};
+    const listener = (): void => callback();
+    viewer.camera.moveEnd.addEventListener(listener);
+    return () => {
+      viewer.camera.moveEnd.removeEventListener(listener);
+    };
+  }
+
+  /** Press-level zoom gestures only (wheel, pinch). Never a plain click. */
+  onCameraUserInput(callback: () => void): () => void {
+    if (!this.#viewer) return () => {};
+    const listener = (): void => callback();
+    this.#userInputListeners.add(listener);
+    return () => {
+      this.#userInputListeners.delete(listener);
+    };
+  }
+
   /** Teardown. Called with the viewer. */
   destroyAisRenderer(): void {
     this.#aisRenderer?.destroy();
@@ -771,6 +889,25 @@ export class TacticalEngine {
   }
 
   #onCameraAltitude: ((metres: number | null) => void) | null = null;
+
+  /**
+   * Press-level zoom gestures for the AIS camera owner's manual-release path.
+   *
+   * WHEEL and PINCH_START only, deliberately NOT LEFT_DOWN: a mouse-down begins a click
+   * that may SELECT a contact, and releasing follow on it would destroy the
+   * switch-contact retarget. Wheel and pinch unambiguously move the camera, so they
+   * need no motion confirmation. Guarded against double-init like the viewer itself.
+   */
+  #installCameraInput(viewer: Viewer): void {
+    if (this.#cameraInputHandler) return;
+    const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+    this.#cameraInputHandler = handler;
+    const notify = (): void => {
+      for (const listener of [...this.#userInputListeners]) listener();
+    };
+    handler.setInputAction(notify, ScreenSpaceEventType.WHEEL);
+    handler.setInputAction(notify, ScreenSpaceEventType.PINCH_START);
+  }
 
   /** Called by the shell so camera telemetry reaches the store. */
   onCameraAltitude(handler: (metres: number | null) => void): void {

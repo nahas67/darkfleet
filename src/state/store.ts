@@ -215,7 +215,7 @@ export type State = {
    * The vessel under examination, independent of `selection` above. There is
    * exactly ONE MMSI field in the store -- this one -- so the camera lane's
    * follow identity reads `selectedAis?.mmsi` and no second field is ever added
-   * beside it. Follow BEHAVIOUR itself stays unwired (see `aisFollowMode`); this
+   * beside it. Follow BEHAVIOUR is owned by `globe/aisCamera.ts` (see `aisFollowMode`); this
    * field names the contact, not the camera mode.
    *
    * `observationAt` holds the EXACT raw observation timestamp when an
@@ -242,25 +242,18 @@ export type State = {
   cursor: { lat: number; lon: number } | null;
   viewMode: ViewMode;
   /**
-   * AIS camera-follow mode. DEFERRED TO DF-X9.6, AND NO CONTROL SETS IT.
+   * AIS camera-follow mode. WIRED BY DF-X9.6; the single camera owner writes it.
    *
-   * This field previously existed as `followingMmsi` and was written from two places --
-   * `select()` set it on every AIS selection, and the `H` key cleared it -- while NO code ever
-   * READ it. The camera did not follow anything.
+   * This field previously existed as `followingMmsi` and was written from two places while NO
+   * code ever read it. DF-X9.6 wires it fully instead: `globe/aisCamera.ts`
+   * (`AisCameraController`, driven by the one UI surface `AisPlaybackBar`) is the ONLY writer,
+   * and the controller's per-tick follow is the only reader.
    *
-   * Two ways to remove a dead write were available: wire it fully, or make the absence visible.
-   * Full follow needs chase and oblique camera modes, manual-release semantics and a temporal
-   * tick driving it, which is DF-X9.6's whole scope and explicitly deferred from DF-X9.3. So the
-   * field is RENAMED to describe what it now is -- a declared intent with no consumer -- and both
-   * writes are removed rather than left doing nothing.
+   *   OFF     no camera control; CENTER one-shot centering record; FOLLOW continuous
+   *           offset-retained tracking; CHASE reserved (no writer, treated as OFF).
    *
-   * A rename is chosen over deletion because a future implementer needs somewhere to land, and a
-   * comment saying "there is no control for this" is discoverable in a way that an absent field is
-   * not. No UI element writes it: there is no shipped operator control that appears to do
-   * something and does nothing, which is what DF-X9.3 section 66 forbids.
-   *
-   * FOLLOW IDENTITY, when it lands, reads `selectedAis?.mmsi` -- the AIS selection authority
-   * beside `selection`. No second MMSI field is ever added for it: one authority, one reader.
+   * FOLLOW IDENTITY reads `selectedAis?.mmsi` -- the AIS selection authority beside
+   * `selection`. No second MMSI field is ever added for it: one authority, one reader.
    */
   aisFollowMode: 'OFF' | 'CENTER' | 'FOLLOW' | 'CHASE';
   /** Camera altitude in metres, metres; null until the camera reports one. */

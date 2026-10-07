@@ -35,8 +35,10 @@ import {
   BillboardCollection,
   Cartesian2,
   Cartesian3,
+  Cartographic,
   Color,
   Material,
+  Math as CesiumMath,
   HorizontalOrigin,
   LabelCollection,
   NearFarScalar,
@@ -1040,6 +1042,29 @@ export class AisContactRenderer {
   /** All MMSIs currently drawn, in stable MMSI order. For the browser E2E. */
   drawnMmsis(): string[] {
     return [...this.#billboards.keys()].sort();
+  }
+
+  /**
+   * The retained DISPLAY position of one drawn contact, or null when it has no glyph.
+   *
+   * DISPLAY TRUTH, including interpolation: this is the billboard's live position as last
+   * written by `render` -- the interpolated point between two fixes when the reference
+   * instant sits inside a joinable interval, the earlier fix when it sits in a gap, the
+   * final fix after the last observation. Never a stored observation looked up behind the
+   * renderer's back, and never the predicted marker, which lives in its own collection.
+   *
+   * Null is NOT_YET_OBSERVED or otherwise undrawable, and the camera owner treats it as
+   * "suspend, never remember". Never (0, 0): an absent position is absent.
+   */
+  displayPositionOf(mmsi: string): { lat: number; lon: number } | null {
+    const billboard = this.#billboards.get(mmsi);
+    if (!billboard) return null;
+    const cartographic = Cartographic.fromCartesian(billboard.position);
+    if (!cartographic) return null;
+    const lat = CesiumMath.toDegrees(cartographic.latitude);
+    const lon = CesiumMath.toDegrees(cartographic.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon };
   }
 
   destroy(): void {

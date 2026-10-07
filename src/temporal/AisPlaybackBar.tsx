@@ -29,6 +29,7 @@ import {
   useTemporal,
   type PlaybackSpeed,
 } from './TemporalController';
+import { aisCamera } from '../globe/aisCamera';
 import { fmtDegrees, fmtInstant, fmtKnots, fmtLatLon, fmtText, NOT_ESTABLISHED } from '../design/format';
 import { describeAisFailure, type AisDiagnostics } from '../diagnostics/aisDiagnostics';
 import {
@@ -218,6 +219,25 @@ export function AisPlaybackBar(props: AisPlaybackBarProps) {
     temporal.seek(range.startMs + value * (range.endMs - range.startMs));
   }, [hasRange, range.startMs, range.endMs]);
 
+  /*
+   * FRAME CONTACT + FOLLOW, on this same surface.
+   *
+   * This bar is the ONE camera surface for AIS: it already owns FRAME TRACK, the gap/MMSI
+   * readout and the selected-contact summary, so follow controls anywhere else would be a
+   * second answer to one question. Both buttons drive the single camera owner
+   * (`globe/aisCamera.ts`), which is the ONLY writer of `aisFollowMode` -- selecting a
+   * contact never implies follow, and no other surface writes the mode.
+   *
+   * Availability is read off the RENDERER's drawn set (`drawnMmsis`), not the archive: a
+   * selected contact with no glyph (NOT_YET_OBSERVED) has nothing to frame or follow, and
+   * the buttons say so rather than flying nowhere.
+   */
+  const followMode = state.aisFollowMode;
+  const followMmsi = state.selectedAis?.mmsi ?? null;
+  const followDrawable = followMmsi !== null && diagnostics.drawnMmsis.includes(followMmsi);
+  const followActive = followMode === 'FOLLOW';
+  const followStatus = aisCamera.status;
+
   return (
     <div
       className="df-panel flex items-center gap-3 px-3 py-1.5"
@@ -257,6 +277,53 @@ export function AisPlaybackBar(props: AisPlaybackBarProps) {
         >
           FRAME TRACK
         </button>
+        <button
+          type="button"
+          className="df-btn px-2 py-0.5 text-[11px]"
+          disabled={!followDrawable}
+          aria-label={followDrawable
+            ? `Frame the selected AIS contact ${followMmsi}`
+            : 'Frame the selected AIS contact (unavailable: no drawn position)'}
+          title={followDrawable
+            ? `Centre the camera on ${followMmsi} once`
+            : 'Unavailable: the selected contact has no drawn position.'}
+          data-df-ais-frame-contact
+          onClick={() => aisCamera.frameContact()}
+        >
+          FRAME CONTACT
+        </button>
+        <button
+          type="button"
+          className="df-btn px-2 py-0.5 text-[11px]"
+          disabled={!followActive && !followDrawable}
+          aria-pressed={followActive}
+          aria-label={followActive ? 'Stop following the selected AIS contact' : 'Follow the selected AIS contact'}
+          title={followActive
+            ? 'Following. Drag, rotate, zoom or tilt the globe to release.'
+            : followDrawable
+              ? `Follow ${followMmsi}: the camera rides with its displayed position`
+              : 'Unavailable: the selected contact has no drawn position.'}
+          data-df-ais-follow={followActive ? 'ON' : 'OFF'}
+          onClick={() => aisCamera.setFollow(!followActive)}
+        >
+          FOLLOW {followActive ? 'ON' : 'OFF'}
+        </button>
+        {/*
+         * THE FOLLOW STATE, AS THE CAMERA OWNER REPORTS IT.
+         *
+         * Read per render from the controller, which this bar already re-renders alongside:
+         * every temporal tick and every store change re-reads it. TRACKING while riding the
+         * display position, HOLD_GAP through a reporting gap, HOLD_FINAL past the last fix,
+         * SUSPENDED before the first observation, CENTERED after a one-shot frame.
+         */}
+        <span
+          className="df-num text-[10px] text-ink-dim"
+          data-df-ais-follow-status={followStatus.label}
+          data-df-ais-follow-status-mmsi={followStatus.mmsi ?? ''}
+          title={followStatus.reason}
+        >
+          {followStatus.label}
+        </span>
       </div>
 
       {/* ---- scrub ---- */}

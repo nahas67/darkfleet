@@ -75,6 +75,11 @@ export function DarkFleetCommandApp() {
    * extent rather than on a 359-degree box. It is a single camera move: no subscription to the
    * playhead, because continuous follow is DF-X9.6's scope and a one-shot fit that quietly became
    * follow would take the camera away without anyone deciding to.
+   *
+   * This move is NOT routed through the camera owner: it deliberately bypasses its programmatic
+   * guard, so an active FOLLOW releases to OFF on the resulting camera motion -- someone aimed
+   * the camera at the whole track, and follow silently yanking it back would take the camera
+   * away without anyone deciding to. The mode readout on the playback bar shows the release.
    */
   const aisCanFrame = aisTrack.segments.some((s) => s.points.length >= 2);
   const aisFrameTrack = useCallback(() => {
