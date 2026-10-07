@@ -225,19 +225,17 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
   }, []);
 
   /*
-   * THE CAMERA OWNER'S LISTENERSHIP, for the lifetime of the globe view.
+   * THE CAMERA OWNER'S LISTENERSHIP, bound in the SAME effect that creates the viewer.
    *
-   * Declared AFTER the init effect so the viewer exists: the controller's camera
-   * subscriptions bind to the live camera object, which is created once and never
-   * reconstructed. StrictMode remounts re-attach to the SAME camera; detach on cleanup
-   * returns every count to baseline, and the follow mode itself survives in the store.
-   */
-  useEffect(() => {
-    aisCamera.attach();
-    return () => aisCamera.detach();
-  }, []);
-
-  useEffect(() => {
+   * A previous revision attached in a separate effect DECLARED before this one. Effects run
+   * in declaration order on mount, so the controller bound while `engine.#viewer` was still
+   * null: every camera port returned a noop unsubscriber, `attached` latched true on four
+   * noops, and no manual gesture ever released FOLLOW again (DF-X9.6 S57, reproduced live
+   * 3/3 runs). The attach call therefore lives here, after `engine.init` succeeds -- where
+   * the viewer provably exists -- and detach runs on unmount so counts return to baseline.
+   * StrictMode remounts re-attach to the SAME camera; the viewer itself is still never
+   * destroyed here, by the reasoning below.
+   */  useEffect(() => {
     const container = containerRef.current;
     if (!container || !webgl) return;
     try {
@@ -253,6 +251,7 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       // 2,400 km at -68 deg: the horizon lands near the top of the frame, so
       // the Earth fills the viewport instead of sitting in a starfield.
       engine.setViewMode('THEATER', 8, 105, 2_400_000);
+      aisCamera.attach();
       setInitError(null);
     } catch (error) {
       // The real reason is surfaced. An earlier revision discarded the exception
@@ -267,7 +266,10 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       // The Viewer is intentionally NOT destroyed here: it is created once for
       // the application lifetime. React StrictMode double-invokes effects in
       // development, so destroying on unmount would tear down a live viewer and
-      // leave the next mount with no globe.
+      // leave the next mount with no globe. The camera owner's listeners ARE
+      // detached here: unlike the viewer they are per-mount subscriptions, and
+      // leaving them bound would accumulate one set per StrictMode remount.
+      aisCamera.detach();
     };
   }, [webgl]);
 
