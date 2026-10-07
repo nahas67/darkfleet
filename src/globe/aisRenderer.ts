@@ -39,6 +39,7 @@ import {
   Material,
   HorizontalOrigin,
   LabelCollection,
+  NearFarScalar,
   PolylineCollection,
   VerticalOrigin,
   type Billboard,
@@ -48,7 +49,13 @@ import {
 import {
   arbitrateLabels,
   cameraFrameFromViewer,
+  estimateLabelBounds,
   glyphScreenRotation,
+  LABEL_SCALE_FAR_M,
+  LABEL_SCALE_FAR_VALUE,
+  LABEL_SCALE_NEAR_M,
+  LABEL_SCALE_NEAR_VALUE,
+  MAX_AIS_LABELS,
   type LabelClaim,
   type LabelPriority,
 } from './glyphGeometry';
@@ -625,16 +632,17 @@ export class AisContactRenderer {
         : contact.associated
           ? 'ASSOCIATED_AIS'
           : 'GENERIC_AIS';
+      const bounds = estimateLabelBounds(labelTextFor(contact));
       claims.push({
         id: contact.mmsi,
         priority,
         screen,
-        widthPx: 92,
-        heightPx: 15,
+        widthPx: bounds.widthPx,
+        heightPx: bounds.heightPx,
       });
     }
 
-    const decision = arbitrateLabels(claims);
+    const decision = arbitrateLabels(claims, { maxLabels: MAX_AIS_LABELS });
     stats.labelsShown = decision.shown.length;
     stats.labelsSuppressed = decision.suppressed.length;
 
@@ -656,6 +664,21 @@ export class AisContactRenderer {
         verticalOrigin: VerticalOrigin.BOTTOM,
         showBackground: true,
         backgroundColor: Color.fromCssColorString('#040705').withAlpha(0.55),
+        // DF-X9.5: shrink + fade with range so a global view declutters instead of stacking.
+        // Endpoints are the shared LABEL_SCALE_* constants; the pure helper interpolates them.
+        scaleByDistance: new NearFarScalar(
+          LABEL_SCALE_NEAR_M,
+          LABEL_SCALE_NEAR_VALUE,
+          LABEL_SCALE_FAR_M,
+          LABEL_SCALE_FAR_VALUE,
+        ),
+        translucencyByDistance: new NearFarScalar(4.0e6, 1.0, 8.0e6, 0.6),
+        pixelOffsetScaleByDistance: new NearFarScalar(
+          LABEL_SCALE_NEAR_M,
+          LABEL_SCALE_NEAR_VALUE,
+          LABEL_SCALE_FAR_M,
+          LABEL_SCALE_FAR_VALUE,
+        ),
       });
     }
   }

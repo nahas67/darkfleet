@@ -310,6 +310,57 @@ export function drawabilityOf(
 }
 
 /* ============================================================================================== *
+ * DF-X9.5 DECLUTTERING + LABEL SCALING
+ * ============================================================================================== */
+
+/**
+ * Production label budget. Matches the bound the scale test already measures (120), so the
+ * shipped globe cannot show an unbounded label set while the test proves a bounded one.
+ */
+export const MAX_AIS_LABELS = 120;
+
+/**
+ * Monospace collision-box estimate for 11px `ui-monospace` labels.
+ *
+ * The renderer draws `MMSI · COG · SOG`, whose length varies by ~2x. A fixed 92px slot
+ * underestimated full labels (overlap drawn as legible) and overestimated bare MMSIs.
+ * Advance 6.6px/char (0.6em at 11px) plus Cesium default background padding 7/5 is
+ * conservative: a slightly wide box suppresses, a narrow one overlaps.
+ */
+export function estimateLabelBounds(text: string): { widthPx: number; heightPx: number } {
+  const advancePx = 6.6;
+  const padX = 7;
+  const padY = 5;
+  const fontPx = 11;
+  return {
+    widthPx: Math.ceil(text.length * advancePx + padX * 2),
+    heightPx: Math.ceil(fontPx + padY * 2),
+  };
+}
+
+/**
+ * Distance scale for labels, mirroring the Cesium `NearFarScalar` used at draw time.
+ *
+ * 1.0 at close inspection, easing to 0.55 at global range (8.0e6 m), clamped beyond. Pure so
+ * the interpolation is unit-tested without a viewer; the renderer passes the same endpoints
+ * to Cesium rather than reimplementing them there.
+ */
+export const LABEL_SCALE_NEAR_M = 1.0e3;
+export const LABEL_SCALE_FAR_M = 8.0e6;
+export const LABEL_SCALE_NEAR_VALUE = 1.0;
+export const LABEL_SCALE_FAR_VALUE = 0.55;
+export function labelScaleForRangeMeters(rangeMeters: number): number {
+  const near = LABEL_SCALE_NEAR_M;
+  const far = LABEL_SCALE_FAR_M;
+  const nearValue = LABEL_SCALE_NEAR_VALUE;
+  const farValue = LABEL_SCALE_FAR_VALUE;
+  if (!Number.isFinite(rangeMeters) || rangeMeters <= near) return nearValue;
+  if (rangeMeters >= far) return farValue;
+  const t = (rangeMeters - near) / (far - near);
+  return nearValue + (farValue - nearValue) * t;
+}
+
+/* ============================================================================================== *
  * LABEL ARBITRATION
  * ============================================================================================== */
 
