@@ -434,6 +434,38 @@ describe('follow on fake ports', () => {
 });
 
 /* ================================================================================================
+ * CONTROLLER: status latching across unrelated store writes (S58 defect)
+ * ============================================================================================== */
+
+describe('status latching', () => {
+  it('an unrelated store write keeps the latched HOLD_GAP instead of resetting to TRACKING', () => {
+    // Live defect: ANY store write (camera-altitude telemetry from zoom inertia,
+    // cursor moves) refreshed status with an EMPTY context, so HOLD_GAP flipped
+    // to TRACKING 1.5 s after the tick proved the gap. The camera held correctly;
+    // only the label lied.
+    const { controller, store } = wired();
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+    controller.tick({ displayState: 'OBSERVED', inGap: true, isAfterLast: false });
+    expect(controller.status.label).toBe('HOLD_GAP');
+    store.fire();
+    expect(controller.status.label).toBe('HOLD_GAP');
+  });
+
+  it('an unrelated store write keeps the latched HOLD_FINAL', () => {
+    const { controller, store } = wired();
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+    controller.tick({ displayState: 'STALE', inGap: false, isAfterLast: true });
+    expect(controller.status.label).toBe('HOLD_FINAL');
+    store.fire();
+    expect(controller.status.label).toBe('HOLD_FINAL');
+  });
+});
+
+/* ================================================================================================
  * CONTROLLER: frame contact
  * ============================================================================================== */
 

@@ -309,6 +309,15 @@ export class AisCameraController {
   #ownFlights = 0;
   #recaptureAfterFlight = false;
   #status: FollowStatus = { mode: 'OFF', label: 'OFF', mmsi: null, reason: 'Follow is off.' };
+  /**
+   * The most recent tick's context, with the MMSI it was computed for.
+   *
+   * Store-change status refreshes reuse it when the selection is unchanged: an
+   * unrelated store write (camera-altitude telemetry, cursor moves) must never
+   * clobber a latched HOLD_GAP/HOLD_FINAL with an empty context's TRACKING.
+   * A different MMSI never inherits it -- only the next tick speaks for a new vessel.
+   */
+  #lastTickCtx: { ctx: FollowTickContext; mmsi: string | null } | null = null;
 
   constructor(camera?: AisCameraCameraPort | null, storePort?: AisCameraStorePort | null) {
     this.#camera = camera ?? defaultCameraPort();
@@ -381,7 +390,15 @@ export class AisCameraController {
       this.#offset = null;
       this.#offsetMmsi = null;
       this.#lastApplied = null;
-      this.#refreshStatus({ displayState: null, inGap: false, isAfterLast: false });
+      // Best known truth, not a guessed TRACKING: the latched tick context when it
+      // speaks for the selected vessel, else the next tick establishes it.
+      const mmsi = this.#store.getSelectedMmsi();
+      const latched = this.#lastTickCtx;
+      this.#refreshStatus(
+        latched !== null && latched.mmsi === mmsi
+          ? latched.ctx
+          : { displayState: null, inGap: false, isAfterLast: false },
+      );
       return;
     }
     if (this.#store.getFollowMode() === 'OFF') return;
@@ -434,6 +451,8 @@ export class AisCameraController {
    */
   tick(ctx: FollowTickContext): void {
     const mode = this.#store.getFollowMode();
+    const tickMmsi = this.#store.getSelectedMmsi();
+    this.#lastTickCtx = { ctx, mmsi: tickMmsi };
     if (mode !== 'FOLLOW') {
       this.#refreshStatus(ctx);
       return;
@@ -535,7 +554,14 @@ export class AisCameraController {
       this.#status = { mode: 'OFF', label: 'UNAVAILABLE', mmsi: null, reason: cause };
       return;
     }
-    this.#refreshStatus({ displayState: null, inGap: false, isAfterLast: false });
+    // Reuse the latched tick context when it still speaks for THIS vessel: an unrelated
+    // store write must refresh the label without resetting gap/final truth. A latched
+    // context for a different MMSI (selection just changed) is never inherited -- the
+    // next tick establishes the new vessel's state.
+    const latched = this.#lastTickCtx;
+    this.#refreshStatus(
+      latched !== null && latched.mmsi === mmsi ? latched.ctx : { displayState: null, inGap: false, isAfterLast: false },
+    );
   }
 
   #onCameraMoveStart(): void {
