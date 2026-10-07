@@ -53,11 +53,25 @@ export interface BuildIdentity {
   readonly mode: string;
 }
 
-/** Run a git command, returning null rather than throwing. A build must not fail for provenance. */
-function git(args: string[]): string | null {
+/**
+ * Run a git command IN `rootDir`, returning null rather than throwing.
+ *
+ * A build must not fail for provenance, so a missing git or a non-repository yields null rather
+ * than throwing.
+ *
+ * `cwd: rootDir` is load-bearing and was WRONG in the first version, which ran git in
+ * `process.cwd()` and accepted a `rootDir` it then ignored for the git calls only -- the contract
+ * hash used it correctly, so the option looked honoured. It happens to be harmless today because
+ * vite runs with cwd === rootDir, and it would silently misattribute a build the moment that stops
+ * being true: the gate would compare a build against whatever repository contains the process.
+ *
+ * An accepted parameter that does nothing is the same defect shape as the exported-but-unbound
+ * `ariaPressedFor` this checkpoint spent a day on, so it is worth naming rather than patching.
+ */
+function git(rootDir: string, args: string[]): string | null {
   try {
     return execFileSync('git', args, {
-      cwd: process.cwd(),
+      cwd: rootDir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 10_000,
@@ -68,8 +82,8 @@ function git(args: string[]): string | null {
 }
 
 export function readBuildIdentity(rootDir: string, mode: string): BuildIdentity {
-  const head = git(['rev-parse', 'HEAD']) ?? 'UNKNOWN';
-  const status = git(['status', '--porcelain']);
+  const head = git(rootDir, ['rev-parse', 'HEAD']) ?? 'UNKNOWN';
+  const status = git(rootDir, ['status', '--porcelain']);
   const dirty = status === null ? false : status.length > 0;
 
   let contractHash = 'UNKNOWN';

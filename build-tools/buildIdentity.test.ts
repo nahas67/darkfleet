@@ -16,6 +16,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -151,27 +152,81 @@ function identity_is_quoted(rendered: string): boolean {
  * ============================================================================================== */
 
 describe('a dirty tree cannot produce a verification build', () => {
-  it('strict mode ERRORS on a dirty tree', () => {
-    /*
-     * The defining gate. A recorded `dirty: true` is only useful if something acts on it, and the
-     * only thing that acts on it before the bytes are served is refusing to build.
-     *
-     * The tree IS dirty right now (this test file and the plugin are uncommitted), which makes the
-     * assertion directly observable rather than hypothetical.
-     */
-    const plugin = darkfleetBuildIdentity({ rootDir: ROOT, strict: true });
+  /**
+   * A throwaway git repository in a deliberately dirty state.
+   *
+   * THE FIRST VERSION OF THIS TEST ASSERTED AGAINST THE AMBIENT WORKING TREE and said so in its own
+   * failure message. It passed while the plugin was uncommitted and failed the moment I committed
+   * it -- a test that is only true while the repository is in one particular state, which is not a
+   * test of the gate but of my own commit schedule.
+   *
+   * The gate's behaviour does not depend on which repository it is pointed at, so neither does this
+   * test. A temp repo gives a guaranteed-dirty and a guaranteed-clean case with no dependence on
+   * what happens to be uncommitted when the suite runs.
+   */
+  function repoWithState(dirty: boolean): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'df-build-id-'));
+    const run = (...args: string[]) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    run('init', '-q');
+    run('config', 'user.email', 'test@example.invalid');
+    run('config', 'user.name', 'test');
+    fs.writeFileSync(path.join(dir, 'file.txt'), 'committed\n');
+    run('add', '-A');
+    run('commit', '-q', '-m', 'initial');
+    if (dirty) fs.writeFileSync(path.join(dir, 'file.txt'), 'modified\n');
+    return dir;
+  }
+
+  function startStrict(rootDir: string): { errors: string[]; warnings: string[] } {
     const errors: string[] = [];
+    const warnings: string[] = [];
+    const plugin = darkfleetBuildIdentity({ rootDir, strict: true });
     (plugin.buildStart as () => void).call({
-      warn: () => {},
+      warn: (m: string) => warnings.push(m),
       error: (m: string) => errors.push(m),
     } as never);
+    return { errors, warnings };
+  }
 
-    expect(
-      errors.length,
-      'strict buildStart must refuse a dirty tree; if this file is committed and the tree is clean, '
-      + 'this test is vacuous and must be re-examined rather than trusted',
-    ).toBeGreaterThan(0);
-    expect(errors.join(' ')).toContain('DIRTY');
+  it('strict mode ERRORS on a dirty tree', () => {
+    // The defining gate. A recorded `dirty: true` is only useful if something acts on it, and the
+    // only thing that acts on it before the bytes are served is refusing to build.
+    const dirty = repoWithState(true);
+    try {
+      const { errors } = startStrict(dirty);
+      expect(errors.join(' '), 'strict buildStart must refuse a dirty tree').toContain('DIRTY');
+    } finally {
+      fs.rmSync(dirty, { recursive: true, force: true });
+    }
+  });
+
+  it('strict mode ALLOWS a clean tree -- the gate must not simply always fail', () => {
+    /*
+     * The complement, and the one that catches the failure mode where a gate is "implemented" by
+     * erroring unconditionally. That version passes every refusal test and blocks all real builds.
+     */
+    const clean = repoWithState(false);
+    try {
+      const { errors } = startStrict(clean);
+      expect(errors, 'a clean tree must build under strict identity').toEqual([]);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the DIRTY repo\'s head as its own commit, not the outer repository\'s', () => {
+    // Otherwise `git rev-parse HEAD` runs in the process cwd and the gate compares a build against
+    // whatever repository happens to contain the test -- which is how a comparison can silently
+    // succeed while comparing nothing.
+    const dirty = repoWithState(true);
+    try {
+      const identity = readBuildIdentity(dirty, 'test');
+      expect(identity.head).not.toBe(readBuildIdentity(ROOT, 'test').head);
+      expect(identity.dirty).toBe(true);
+    } finally {
+      fs.rmSync(dirty, { recursive: true, force: true });
+    }
   });
 
   it('non-strict mode WARNS but builds, so a developer is never blocked', () => {
