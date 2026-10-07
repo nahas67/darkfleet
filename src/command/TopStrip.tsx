@@ -24,7 +24,7 @@ function useUtcClock(): string {
 
 function Counter({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="flex items-baseline gap-1.5 px-2" data-df-counter={label}>
+    <div className="flex shrink-0 items-baseline gap-1.5 whitespace-nowrap px-2" data-df-counter={label}>
       <span className="df-label text-[10px] text-ink-dim">{label}</span>
       <span className="df-num" style={tone ? { color: tone } : undefined}>
         {value}
@@ -78,10 +78,14 @@ export function TopStrip() {
       className="df-panel relative z-30 flex h-9 shrink-0 items-center border-x-0 border-t-0"
       data-df-top-strip
     >
-      <div className="flex items-center gap-2 px-3">
-        <span className="df-label text-[13px] tracking-[0.22em] text-ink">DARKFLEET</span>
-        <span className="h-3 w-px bg-structural" />
-        <span className="df-label text-[10px]" data-df-mission>
+      <div className="flex min-w-0 items-center gap-2 px-3">
+        <span className="df-label shrink-0 text-[13px] tracking-[0.22em] text-ink">DARKFLEET</span>
+        <span className="h-3 w-px shrink-0 bg-structural" />
+        <span
+          className="df-label min-w-0 max-w-24 truncate text-[10px] 2xl:max-w-56"
+          data-df-mission
+          title={state.scene?.item_id ?? 'NO MISSION'}
+        >
           {state.scene?.item_id ? state.scene.item_id : 'NO MISSION'}
         </span>
       </div>
@@ -104,7 +108,7 @@ export function TopStrip() {
         <Counter label="AIS-ONLY" value={hasScan ? String(state.aisOnly.length) : NOT_ESTABLISHED} />
       </div>
 
-      <div className="ml-auto flex items-center gap-3 px-3">
+      <div className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap px-3">
         <span className="df-label text-[10px]" data-df-stream-state>
           {hasScan ? `STAGE ${pipelinePosition}/${PIPELINE_LENGTH}` : 'IDLE'}
         </span>

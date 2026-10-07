@@ -216,3 +216,31 @@ The font link is a three-line change plus a decision about which weights to self
 three families is a binary-asset decision with a visual consequence that cannot be verified in a
 headless run. Guessing at it would be a change I could not honestly report as verified. The OSM
 egress is intentional and must not be "fixed" by deleting the keyless fallback.
+
+### Correction — DF-X9.4T (2026-10-07)
+
+The font dependency above **has been removed**, not self-hosted: `index.html` no longer requests
+Google Fonts; `src/design/tokens.css`, `tokens.ts`, and canvas labels use local/system font stacks.
+A regression test failed when the old Google Fonts link was temporarily reintroduced. The browser
+census on clean build `f0431f0` found **zero** Google Fonts requests while all public network was
+blocked at the CDP Fetch layer. Four-width font/layout screenshots accompany that run; the top
+provider status needed a narrower mission ID to keep `UNAVAILABLE` from splitting across lines
+at 1024px. That correction is included in the next clean build.
+
+The new acceptance rule is **zero UNDECLARED or FORBIDDEN egress**, not zero external requests.
+`mapSourceEgress.ts` classifies attempts by the URL template in the registered map source and its
+configuration state, not by hostname alone. With public network blocked, the browser attempted
+OSM tiles **5** times and Esri fallback tiles **5** times (both `DECLARED_PROVIDER`, purpose
+`BASEMAP`), then stopped: 10 attempts by 10 seconds, 10 at 20 seconds, 10 at 30 seconds and 10
+at 35 seconds. `SYSTEM` reported `data-df-basemap="none"` with the visible notice
+"No configured basemap source could be constructed. The globe will render without imagery."
+This is the acceptable air-gapped state, not a successful basemap. Local scan, AIS playback and
+seek, GhostSemantics, coastline, EEZ, HIGH_SEAS and maritime context continued to work. Full
+basemap **recovery after connectivity returns** remains deferred; this test proved exhaustion,
+not recovery.
+
+The deployment baseline's previously unexplained third field is **Windows FILETIME ticks** (100ns
+since 1601-01-01 UTC). Its value `639266744270954823` converts exactly to
+`(ticks - 621355968000000000) × 100 = 1791077627095482300` Unix nanoseconds, which equals
+`data/validation/.gitignore`'s measured `st_mtime_ns` byte-for-byte. It was not an unknown hash or
+an extra file. The file set/size and empty deployment AIS directory are unchanged.
