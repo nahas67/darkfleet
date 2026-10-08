@@ -589,6 +589,28 @@ export class AisCameraController {
       this.#refreshStatus(ctx);
       return;
     }
+    /*
+     * DO NOT FIGHT A FLIGHT THAT IS STILL ANIMATING (DF-X9.8B, browser-proven).
+     *
+     * Writing here while any programmatic flight is in progress loses twice. The flight
+     * overwrites this pose on its very next frame, so the `moveStart` the render loop then raises
+     * carries the FLIGHT's pose rather than this one; the pose-comparison guard therefore finds no
+     * pending write, reads the product's own framing as an operator drag, and releases FOLLOW with
+     * "Released: the camera was moved." Browser timeline: the list-click flight to the default
+     * 450,000 m ran alongside FOLLOW and released it at ~1.9 s, every time.
+     *
+     * Suspending also makes the pending writes truthful: any expectation recorded before the
+     * flight began describes a pose the flight has already discarded. They are dropped, and the
+     * next tick after the flight re-acquires from live truth.
+     *
+     * Status still refreshes, so HOLD_GAP/HOLD_FINAL stay on screen while the camera is busy --
+     * the vessel's reporting state is real regardless of what the camera is doing.
+     */
+    if (this.#ownFlights > 0 || (this.#camera.programmaticFlights?.() ?? 0) > 0) {
+      this.#ownWrites.length = 0;
+      this.#refreshStatus(ctx);
+      return;
+    }
     // Retarget keeps the retained offset vector: A->B rides by exactly the anchor delta.
     // First acquisition captures it from the live camera.
     if (this.#offset === null) {
