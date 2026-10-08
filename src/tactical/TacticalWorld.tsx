@@ -251,6 +251,8 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       // 2,400 km at -68 deg: the horizon lands near the top of the frame, so
       // the Earth fills the viewport instead of sitting in a starfield.
       engine.setViewMode('THEATER', 8, 105, 2_400_000);
+      (container as unknown as { projectCoordinates?: (lat: number, lon: number) => { x: number; y: number } | null }).projectCoordinates =
+        (lat, lon) => engine.projectToCanvas(lat, lon);
       aisCamera.attach();
       setInitError(null);
     } catch (error) {
@@ -269,6 +271,7 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       // leave the next mount with no globe. The camera owner's listeners ARE
       // detached here: unlike the viewer they are per-mount subscriptions, and
       // leaving them bound would accumulate one set per StrictMode remount.
+      delete (container as unknown as { projectCoordinates?: unknown }).projectCoordinates;
       aisCamera.detach();
     };
   }, [webgl]);

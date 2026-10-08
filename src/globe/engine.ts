@@ -744,6 +744,32 @@ export class TacticalEngine {
   }
 
   /**
+   * Project a lon/lat coordinate to canvas pixels.
+   *
+   * Used for deterministic hit testing, screen-space annotations and overlay positioning.
+   * Returns null when the point is off-screen, behind the globe horizon, or the viewer is
+   * uninitialised.
+   */
+  projectToCanvas(lat: number, lon: number): { x: number; y: number } | null {
+    const viewer = this.#viewer;
+    if (!viewer) return null;
+    const canvas = viewer.canvas;
+    if (!canvas || canvas.clientWidth === 0 || canvas.clientHeight === 0) return null;
+    const cartesian = Cartesian3.fromDegrees(lon, lat);
+    const canvasPos = viewer.scene.cartesianToCanvasCoordinates(cartesian);
+    if (!canvasPos) return null;
+    if (canvasPos.x < 0 || canvasPos.y < 0) return null;
+    if (canvasPos.x > canvas.clientWidth || canvasPos.y > canvas.clientHeight) return null;
+    // Check if behind the globe horizon (tangent plane check)
+    const cameraPos = viewer.camera.positionWC;
+    const localUp = Ellipsoid.WGS84.geodeticSurfaceNormal(cartesian);
+    if (!localUp) return null;
+    const toCamera = Cartesian3.subtract(cameraPos, cartesian, new Cartesian3());
+    if (Cartesian3.dot(localUp, toCamera) <= 0) return null; // behind horizon
+    return { x: Math.round(canvasPos.x), y: Math.round(canvasPos.y) };
+  }
+
+  /**
    * setView-style camera move: immediate, no animation.
    *
    * What per-tick follow uses. One-shot framing keeps the animated `flyTo`/`flyToBbox`:
