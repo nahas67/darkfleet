@@ -93,26 +93,56 @@ class AisArchive:
     def __init__(self, data_dir: str | Path):
         self.root = Path(data_dir) / "ais"
         self.root.mkdir(parents=True, exist_ok=True)
-        self._seen: set[str] = set()
-        for f in self.root.rglob("part-*.parquet"):
-            try:
-                t = pq.read_table(f, columns=["mmsi", "timestamp"])
-                for mmsi, ts in zip(t.column("mmsi").to_pylist(), t.column("timestamp").to_pylist()):
-                    self._seen.add(f"{mmsi}|{ts.isoformat()}")
-            except (OSError, ValueError, KeyError) as exc:
-                logger.warning("skipping unreadable archive part %s: %s", f, exc)
-                continue
+        # LAZY (DF-X9.8B). Built on first append(), never at construction. See _seen_index.
+        self._seen_cache: set[str] | None = None
+
+    def _seen_index(self) -> set[str]:
+        """The mmsi|timestamp dedup index, built from what is ALREADY on disk.
+
+        WHY THIS IS LAZY, AND WHY IT WAS NOT A COSMETIC CHANGE.
+
+        The index used to be built eagerly in ``__init__``. Because every API request builds a
+        fresh ``AisArchive`` (``routes._archive_for``), that meant **every request re-read every
+        parquet part in full and materialised one Python string per observation** -- on paths
+        that never append anything, so the result was discarded unread.
+
+        Measured on a 50,000-observation archive (DF-X9.8B): ``/api/scans/{id}/ais`` took
+        **121.6 s** and ``/api/ais/coverage`` did not answer inside **180 s**, while the query
+        and serialisation it was waiting on cost 0.36 s + 0.36 s in process. Construction alone
+        took 0.98-4.89 s per call and serialised across FastAPI's threadpool. A read-only
+        endpoint was paying a full-archive ingest to answer a question about file metadata.
+
+        Deferring the scan to the first ``append()`` keeps the behaviour this index exists for,
+        which is restart-dedup: a NEW instance over the same directory must still reject rows it
+        already holds (``test_archive_roundtrip_dedup_query_restart``). That test is the reason
+        this is lazy and not removed -- and it still passes, because the index is built from the
+        same files before the first append either way.
+        """
+        if self._seen_cache is None:
+            seen: set[str] = set()
+            for f in self.root.rglob("part-*.parquet"):
+                try:
+                    t = pq.read_table(f, columns=["mmsi", "timestamp"])
+                    for mmsi, ts in zip(t.column("mmsi").to_pylist(), t.column("timestamp").to_pylist()):
+                        seen.add(f"{mmsi}|{ts.isoformat()}")
+                except (OSError, ValueError, KeyError) as exc:
+                    logger.warning("skipping unreadable archive part %s: %s", f, exc)
+                    continue
+            self._seen_cache = seen
+        return self._seen_cache
 
     def append(self, obs: list[AisObservation]) -> dict[str, int]:
         """Dedup by mmsi|timestamp; returns {written, duplicates}."""
         written = duplicates = 0
         by_part: dict[Path, list[AisObservation]] = {}
+        # Built here, and only here, so that constructing an archive for a READ costs nothing.
+        seen = self._seen_index()
         for o in obs:
             key = o.dedup_key()
-            if key in self._seen:
+            if key in seen:
                 duplicates += 1
                 continue
-            self._seen.add(key)
+            seen.add(key)
             p = _part_path(self.root, o.timestamp, o.source or "unknown")
             by_part.setdefault(p, []).append(o)
             written += 1
