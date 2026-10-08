@@ -598,7 +598,10 @@ class Store {
       return;
     }
     const current = this.#state.selectedAis;
-    const observationAt = ref.observationAt ?? (current?.mmsi === ref.mmsi ? current.observationAt : null) ?? null;
+    const observationAt =
+      ref.observationAt !== undefined
+        ? ref.observationAt
+        : ((current?.mmsi === ref.mmsi ? current.observationAt : null) ?? null);
     if (current !== null && current.mmsi === ref.mmsi && current.observationAt === observationAt) return;
     this.set({ selectedAis: { mmsi: ref.mmsi, observationAt } });
   };

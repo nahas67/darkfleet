@@ -90,6 +90,16 @@ describe('DF-X9.6 section 7: target and AIS selection coexist', () => {
     expect(store.getState().selectedAis).toEqual({ mmsi: '555555555', observationAt: null });
   });
 
+  it('selectAis with explicit observationAt: null pivots back to vessel level', () => {
+    resetStore();
+    store.selectAis({ mmsi: '123456789', observationAt: '2026-03-01T08:08:00Z' });
+    store.selectAis({ mmsi: '123456789', observationAt: null });
+    expect(store.getState().selectedAis).toEqual({
+      mmsi: '123456789',
+      observationAt: null,
+    });
+  });
+
   it('selectAis(null) clears the AIS authority and leaves the target', () => {
     resetStore();
     store.select({ kind: 'target', targetId: 'DF-001', scanId: 'DF-0001' });

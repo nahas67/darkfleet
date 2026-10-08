@@ -991,6 +991,11 @@ export class TacticalEngine {
           return;
         }
         case 'AIS_CONTACT':
+          // Clicking the vessel glyph pivots to vessel level (§11 K), clearing observationAt.
+          store.selectAis({ mmsi: decoded.mmsi, observationAt: null });
+          store.set({ highlightedObservation: null });
+          this.#callbacks.onPick?.(null);
+          return;
         case 'AIS_TRACK':
         case 'AIS_PREDICTION':
           // The AIS authority, beside -- not instead of -- the SAR target (§7).
