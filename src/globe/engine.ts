@@ -188,10 +188,14 @@ export class TacticalEngine {
       // Refresh the callbacks so a remount is not left holding stale closures.
       this.#callbacks = callbacks;
       this.#container = container;
+      (container as unknown as { projectCoordinates?: (lat: number, lon: number) => { x: number; y: number } | null }).projectCoordinates =
+        (lat, lon) => this.projectToCanvas(lat, lon);
       return this.#viewer;
     }
     this.#container = container;
     this.#callbacks = callbacks;
+    (container as unknown as { projectCoordinates?: (lat: number, lon: number) => { x: number; y: number } | null }).projectCoordinates =
+      (lat, lon) => this.projectToCanvas(lat, lon);
 
     /*
      * The ion token is read from the environment rather than hardcoded to ''.

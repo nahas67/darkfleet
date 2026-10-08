@@ -33,8 +33,8 @@ describe('deterministic canvas coordinate projection (DF-X9.6 S53)', () => {
     expect(code).toContain('geodeticSurfaceNormal(');
   });
 
-  it('TacticalWorld binds projectCoordinates to the globe container element', () => {
-    const code = tacticalSource();
-    expect(code).toMatch(/\.projectCoordinates\s*=\s*\(lat,\s*lon\)\s*=>\s*engine\.projectToCanvas\(lat,\s*lon\)/);
+  it('engine.init binds projectCoordinates to the globe container element', () => {
+    const code = engineSource();
+    expect(code).toMatch(/\.projectCoordinates\s*=\s*\(lat,\s*lon\)\s*=>\s*this\.projectToCanvas\(lat,\s*lon\)/);
   });
 });
