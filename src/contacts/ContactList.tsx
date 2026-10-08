@@ -12,6 +12,7 @@
 import { useMemo, useState } from 'react';
 
 import { engine } from '../globe/engine';
+import { aisCamera } from '../globe/aisCamera';
 import { store, useStore } from '../state/store';
 import { classificationColor } from '../design/tokens';
 import { fmt, fmtConfidence, fmtLatLon, NOT_ESTABLISHED } from '../design/format';
@@ -139,7 +140,25 @@ export function ContactList() {
     } else {
       // AIS authority, beside -- not instead of -- the SAR target (DF-X9.6 §7).
       store.selectAis({ mmsi: row.mmsi as string });
-      engine.flyTo(row.lat, row.lon);
+      /*
+       * FRAMING GOES THROUGH THE CAMERA OWNER (DF-X9.8B), NOT `engine.flyTo`.
+       *
+       * This used to call `engine.flyTo(row.lat, row.lon)` directly. That is a second camera
+       * owner: the flight raised the same `moveStart` an operator drag does, and the AIS camera
+       * controller read the product's own framing as the operator taking the camera and released
+       * FOLLOW. Browser-proven: selecting a contact in the list, engaging FOLLOW, and the flight
+       * to the default 450,000 m produced "Released: the camera was moved." about 1.9 s later.
+       *
+       * `aisCamera.frameContact()` is the same product action done by the owner: it frames the
+       * contact's DISPLAY position (never `row.lat`, which is a stored coordinate), and when
+       * FOLLOW is active it re-captures the offset after the flight instead of fighting it.
+       *
+       * SAR rows keep `engine.flyTo`: there is no AIS selection for the camera owner to frame, and
+       * a SAR target has no display glyph. That flight no longer releases FOLLOW mid-flight
+       * either -- the engine counts programmatic flights -- and releasing afterwards is honest,
+       * because the camera really has left the followed vessel.
+       */
+      aisCamera.frameContact();
     }
   };
 
