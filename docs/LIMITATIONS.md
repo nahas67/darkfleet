@@ -257,3 +257,11 @@ since 1601-01-01 UTC). Its value `639266744270954823` converts exactly to
 `(ticks - 621355968000000000) × 100 = 1791077627095482300` Unix nanoseconds, which equals
 `data/validation/.gitignore`'s measured `st_mtime_ns` byte-for-byte. It was not an unknown hash or
 an extra file. The file set/size and empty deployment AIS directory are unchanged.
+
+### Completion — DF-X9.6 (2026-10-08)
+
+DF-X9.6 is fully closed.
+- **AIS Click-Selection:** Real Cesium `scene.pick` decodes tagged primitives (`AIS_CONTACT`, `AIS_OBSERVATION`, `AIS_TRACK`, `AIS_PREDICTION`) through `decodeAisPick`. `mmsiOf` retained as untagged billboard fallback. Empty ocean clicks clear AIS selection without disturbing the selected SAR target.
+- **Observation Marker Picking (S53):** Live browser proof physically clicked 7px observation markers on the Cesium canvas via deterministic `projectCoordinates`. Verified exact MMSI and timestamp, raw kinematic readout, null-field semantics (`not established`, never zero), marker highlighting, SAR target preservation, re-pick across observations, and contact-level pivot on glyph clicks.
+- **Camera Follow & Frame:** `AisCameraController` provides single-owner camera follow, one-shot `FRAME CONTACT`, and wrap-aware `FRAME TRACK`. Manual user gestures (wheel zoom, drag) release follow to `OFF` without camera fight or snap-back. Follow state machine correctly handles playback, pause, seek, gaps (`HOLD_GAP`), and after-last positions (`HOLD_FINAL`).
+- **Cleanliness:** Zero listener/timer leaks, 0 orphan Chrome processes, verified exact HEAD build freshness.
