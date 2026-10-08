@@ -52,7 +52,13 @@ export function DarkFleetCommandApp() {
    * is the figure an operator actually wants -- "4 gaps, 3,120 s of missing reporting" -- rather than a
    * count that reads like everything is fine.
    */
-  const aisTrack = useMemo(() => buildTrack(state.aisObservations), [state.aisObservations]);
+  const selectedMmsi = state.selectedAis?.mmsi ?? null;
+  const aisTrack = useMemo(() => {
+    const relevant = selectedMmsi
+      ? state.aisObservations.filter((o) => o.mmsi === selectedMmsi)
+      : state.aisObservations;
+    return buildTrack(relevant.length > 0 ? relevant : state.aisObservations);
+  }, [state.aisObservations, selectedMmsi]);
   const aisObservationsPresent = aisTrack.usableCount > 0;
   const aisObservationCount = aisTrack.usableCount;
   const aisTrackStatus = aisTrack.status;
