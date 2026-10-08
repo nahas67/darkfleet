@@ -265,3 +265,12 @@ DF-X9.6 is fully closed.
 - **Observation Marker Picking (S53):** Live browser proof physically clicked 7px observation markers on the Cesium canvas via deterministic `projectCoordinates`. Verified exact MMSI and timestamp, raw kinematic readout, null-field semantics (`not established`, never zero), marker highlighting, SAR target preservation, re-pick across observations, and contact-level pivot on glyph clicks.
 - **Camera Follow & Frame:** `AisCameraController` provides single-owner camera follow, one-shot `FRAME CONTACT`, and wrap-aware `FRAME TRACK`. Manual user gestures (wheel zoom, drag) release follow to `OFF` without camera fight or snap-back. Follow state machine correctly handles playback, pause, seek, gaps (`HOLD_GAP`), and after-last positions (`HOLD_FINAL`).
 - **Cleanliness:** Zero listener/timer leaks, 0 orphan Chrome processes, verified exact HEAD build freshness.
+
+### Completion — DF-X9.7 (2026-10-08)
+
+DF-X9.7 is fully closed.
+- **10K Contact Benchmarks:** Measured across 100, 1,000, 5,000, and 10,000 contacts. Total CPU time at 10,000 contacts is 106-114 ms (11.4 µs/contact), scaling strictly linearly without N² blowup. Retained billboard updates allocate 0 objects (vs N allocations for rebuild).
+- **Dense Label Decluttering:** Verified both in node unit benchmarks (10,000 contacts) and live in browser (500-contact dense cluster in AOI). Exactly <= 120 labels drawn (`MAX_AIS_LABELS = 120`). Selected contact label is guaranteed priority and always rendered in `shown`, even in a cluster of 500 overlapping contacts where thousands are suppressed.
+- **O(1) Contact Lookup Optimization:** Eliminated O(N) linear array search (`.find()`) during label placement in `AisContactRenderer` by indexing contacts in an O(1) Map. Replaced linear search in `mmsiOf` with an O(1) WeakMap (`#mmsiByBillboard`).
+- **Source-Switch Stability:** Tested 25 consecutive failure and recovery cycles (`OSM -> ESRI -> ALL_SOURCES_EXHAUSTED -> RECOVERY`). Resolved historical defect where `#attempted` failed sources were remembered indefinitely across recoveries, preventing fallback recovery. State, listeners, and imagery layers remain clean and bounded.
+- **Live Browser Proof:** 500 contacts, 2,500 observation markers, and 500 tracks rendered via batched Cesium collections. Verified selection latency, pick latency, distance scaling parameters (1,000m to 8,000,000m), sustained playback with follow, wheel release, and heap memory stability. Zero orphan processes.
