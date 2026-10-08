@@ -364,12 +364,19 @@ export class AisCameraController {
    * holding; the unit test passed only because its fake raised `moveStart` synchronously. Both
    * were wrong in the same way, so neither could see this.
    *
-   * So the guard is now STATE, not a flag: remember the pose we wrote, and treat a `moveStart`
-   * whose live pose matches it as our own echo. An operator drag produces a different pose and
-   * still releases, which is the behaviour that matters and the reason this is not simply
-   * "ignore moveStart while following".
+   * So the guard is now STATE, not a flag: remember the poses we wrote, and treat a `moveStart`
+   * whose live pose matches one of them as our own echo. An operator drag produces a different
+   * pose and still releases, which is the behaviour that matters and the reason this is not
+   * simply "ignore moveStart while following".
+   *
+   * A HISTORY rather than one slot, because follow can write more than once before the first
+   * echo arrives: the anchor moves as the renderer catches up with a seek, so the earlier write's
+   * `moveStart` arrives after a later write has already been recorded. With a single slot that
+   * echo compared against the wrong pose and released follow anyway -- browser timeline at
+   * a7cb6f1, mid-HOLD_GAP: altitude stepped 931,839 -> 632,034 -> 450,000 m over ~1.5 s (two
+   * writes), then "Released: the camera was moved."
    */
-  #ownWrite: CameraPose | null = null;
+  #ownWrites: CameraPose[] = [];
   #recaptureAfterFlight = false;
   #status: FollowStatus = { mode: 'OFF', label: 'OFF', mmsi: null, reason: 'Follow is off.' };
   /**
@@ -434,7 +441,7 @@ export class AisCameraController {
     this.#offset = null;
     this.#offsetMmsi = null;
     this.#lastApplied = null;
-    this.#ownWrite = null;
+    this.#ownWrites.length = 0;
     this.#ownFlights = 0;
     this.#recaptureAfterFlight = false;
     this.#status = { mode: 'OFF', label: 'OFF', mmsi: null, reason: 'Follow is off.' };
@@ -583,7 +590,10 @@ export class AisCameraController {
       orientation: pose.orientation,
     };
     this.#programmaticSync = true;
-    this.#ownWrite = next;
+    // Recorded as a PENDING ECHO, bounded: at most a few writes can be in flight between a
+    // setView and the render loop noticing, and an unbounded list would be a slow leak.
+    this.#ownWrites.push(next);
+    if (this.#ownWrites.length > 8) this.#ownWrites.shift();
     try {
       this.#camera.setView(next);
     } finally {
@@ -636,17 +646,22 @@ export class AisCameraController {
     if (this.#programmaticSync || this.#ownFlights > 0) return;
     // The deferred half of the same guard. Cesium raises moveStart from its render loop, so the
     // synchronous flag above has already been cleared by the time this arrives. A moveStart whose
-    // live pose IS the pose we just wrote is this controller's own echo; consume it. Anything else
-    // is the operator, and must release.
-    const own = this.#ownWrite;
-    if (own !== null) {
+    // live pose matches a write THIS controller made is its own echo; anything else is the
+    // operator, and must release.
+    const pending = this.#ownWrites;
+    if (pending.length > 0) {
       const live = this.#camera.getCameraPose();
-      if (live !== null && samePose(live, own)) {
-        this.#ownWrite = null;
+      const at = live === null ? -1 : pending.findIndex((p) => samePose(live, p));
+      if (at !== -1) {
+        // Our own echo. Everything up to and including that write has been reflected on screen,
+        // so retire those and keep whatever is still in flight. NOT consuming the whole list
+        // matters: Cesium latches moveStart on `_cameraStartFired`, which resets once the camera
+        // stops changing, so one write can provoke a second, equally-ours moveStart on settle.
+        pending.splice(0, at + 1);
         return;
       }
-      // Pose diverged: this is not the echo we were waiting for.
-      this.#ownWrite = null;
+      // No pending write produced this pose, so the operator has the camera.
+      pending.length = 0;
     }
     const mode = this.#store.getFollowMode();
     if (mode !== 'FOLLOW' && mode !== 'CENTER') return;
@@ -689,7 +704,7 @@ export class AisCameraController {
     this.#offset = null;
     this.#offsetMmsi = null;
     this.#lastApplied = null;
-    this.#ownWrite = null;
+    this.#ownWrites.length = 0;
     this.#recaptureAfterFlight = false;
     this.#status = { mode: 'OFF', label: 'OFF', mmsi: null, reason };
   }

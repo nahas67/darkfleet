@@ -589,6 +589,54 @@ describe('manual release', () => {
     expect(store.mode.value).toBe('FOLLOW');
   });
 
+  it('survives the settle-then-drift moveStart that a single write provokes twice', () => {
+    // DF-X9.8B browser timeline. One setView raises moveStart more than once: once as the camera
+    // moves, and again after `_cameraStartFired` resets because the camera stopped changing.
+    // Guarding only the first echo released follow ~1.9 s in, mid-HOLD_GAP, with the reason
+    // "Released: the camera was moved." -- an echo of our own write read as an operator drag.
+    const { controller, camera, store } = wired();
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+    controller.tick({ displayState: 'OBSERVED', inGap: true, isAfterLast: false });
+
+    camera.flushRender(); // camera moving -> moveStart (echo)
+    expect(store.mode.value).toBe('FOLLOW');
+    camera.flushRender(); // settled -> moveEnd, latch resets
+    camera.flushRender(); // post-settle drift -> moveStart AGAIN, still our pose
+    camera.flushRender();
+    camera.flushRender();
+    expect(store.mode.value).toBe('FOLLOW');
+    expect(store.mode.value).not.toBe('OFF');
+  });
+
+  it('recognises the FIRST write when a second write was recorded before its echo', () => {
+    // The failure the browser actually showed, at a7cb6f1 mid-HOLD_GAP. Altitude stepped
+    // 931,839 -> 632,034 -> 450,000 m over ~1.5 s: TWO writes, because the anchor moves as the
+    // renderer catches up with a seek. A single-slot guard overwrote itself, so the FIRST
+    // write's moveStart was compared against the SECOND pose, failed to match, and released
+    // follow with the reason "Released: the camera was moved."
+    //
+    // So the guard must hold a history and retire only up to the pose it matched.
+    const { controller, camera, store } = wired();
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+
+    controller.tick({ displayState: 'OBSERVED', inGap: true, isAfterLast: false }); // write P1
+    const firstWritten = camera.getPose();
+    camera.positions.set('A', { lat: A_POS.lat + 0.02, lon: A_POS.lon });
+    controller.tick({ displayState: 'OBSERVED', inGap: true, isAfterLast: false }); // write P2
+
+    // The render loop reports the camera at P1 -- the first write, not the newest.
+    camera.port.setView({
+      position: { ...firstWritten.position },
+      orientation: firstWritten.orientation,
+    });
+    camera.flushRender();
+    expect(store.mode.value).toBe('FOLLOW');
+  });
+
   it('but an operator drag that changes the pose still releases', () => {
     // The guard above recognises OUR OWN echo by pose. It must not become "ignore moveStart
     // while following", which would make the operator unable to take the camera back.
