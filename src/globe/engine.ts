@@ -1061,10 +1061,59 @@ export class TacticalEngine {
   flyTo(lat: number, lon: number, altitude = 450_000, duration = 1.4): void {
     const viewer = this.#viewer;
     if (!viewer || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    this.#beginProgrammaticFlight();
+    this.#releaseOnMoveEnd(viewer);
     viewer.camera.flyTo({
       destination: Cartesian3.fromDegrees(lon, lat, altitude),
       duration,
     });
+  }
+
+  /**
+   * Retires exactly one programmatic flight when the camera stops moving.
+   *
+   * Cesium's `flyTo` returns void in these typings, so completion cannot be awaited; `moveEnd` is
+   * the real signal that the flight finished. One self-removing listener per flight, so a burst of
+   * framings retires one flight each and the counter cannot leak upward.
+   */
+  #releaseOnMoveEnd(viewer: Viewer): void {
+    const release = (): void => {
+      this.#endProgrammaticFlight();
+      viewer.camera.moveEnd.removeEventListener(release);
+    };
+    viewer.camera.moveEnd.addEventListener(release);
+  }
+
+  /**
+   * In-flight PRODUCT-initiated camera moves, which the camera owner must not read as an
+   * operator gesture.
+   *
+   * WHY THIS EXISTS (DF-X9.8B, browser-proven). Several surfaces frame things for the operator --
+   * `ContactList` on a row click, `UnifiedSearch`, `MissionTimeline`, the keyboard shortcut,
+   * `ScanWorkflow`. Each called `engine.flyTo` directly, behind the camera owner's back. A flight
+   * raises the same `moveStart` an operator drag does, and the owner released FOLLOW on it.
+   *
+   * Browser timeline at a7cb6f1: clicking a contact row in the list started a 1.4 s flight to the
+   * default 450,000 m; FOLLOW was engaged straight after; the flight's `moveStart` arrived with a
+   * pose ~1.4 million m from anything the owner had written, so follow released with
+   * "Released: the camera was moved." Altitude had stepped 931,839 -> 632,034 -> 450,000 m.
+   *
+   * The count lives HERE, in the engine that owns the flights, so no surface has to remember to
+   * register and the layering stays acyclic: the camera owner asks the engine, it does not import
+   * the owner.
+   */
+  get programmaticCameraFlights(): number {
+    return this.#programmaticFlights;
+  }
+
+  #programmaticFlights = 0;
+
+  #beginProgrammaticFlight(): void {
+    this.#programmaticFlights += 1;
+  }
+
+  #endProgrammaticFlight(): void {
+    this.#programmaticFlights = Math.max(0, this.#programmaticFlights - 1);
   }
 
   /** Frame a bounding box, choosing an altitude that actually contains it. */
@@ -1076,6 +1125,8 @@ export class TacticalEngine {
     // offset range is floored rather than allowed to collapse to zero.
     const span = Math.max(Math.abs(maxLat - minLat), Math.abs(maxLon - minLon));
     const altitude = Math.max(25_000, span * 111_320 * 2.2);
+    this.#beginProgrammaticFlight();
+    this.#releaseOnMoveEnd(viewer);
     viewer.camera.flyToBoundingSphere(boundingSphereOf(bbox), {
       duration,
       offset: new HeadingPitchRange(0, CesiumMath.toRadians(-55), altitude),

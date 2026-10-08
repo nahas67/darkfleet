@@ -277,6 +277,15 @@ export type AisCameraCameraPort = {
   cartesianOf: (position: LatLon) => Vec3;
   /** setView-style move: immediate, no animation. What per-tick follow uses. */
   setView: (pose: CameraPose) => void;
+  /**
+   * Product-initiated camera flights currently in progress, across the WHOLE application.
+   *
+   * Not just this controller's own `flyTo`. Contact-list row clicks, search, the timeline and
+   * the keyboard shortcut all frame things for the operator, and each of those raises the same
+   * `moveStart` a drag does. Without this the owner cannot tell "the product framed the thing you
+   * just clicked" from "the operator took the camera", and it cancels FOLLOW on the former.
+   */
+  programmaticFlights?: () => number;
   /** Animated one-shot. What FRAME CONTACT uses. */
   flyTo: (position: LatLon) => void;
   onMoveStart: (cb: () => void) => () => void;
@@ -306,6 +315,7 @@ function defaultCameraPort(): AisCameraCameraPort {
     },
     cartesianOf: (position) => engine.cartesianOf(position.lat, position.lon),
     setView: (pose) => engine.setCameraPose(pose.position, pose.orientation),
+    programmaticFlights: () => engine.programmaticCameraFlights,
     flyTo: (position) => engine.flyTo(position.lat, position.lon),
     onMoveStart: (cb) => engine.onCameraMoveStart(cb),
     onMoveEnd: (cb) => engine.onCameraMoveEnd(cb),
@@ -644,6 +654,10 @@ export class AisCameraController {
     // are both guarded. Everything else moved the camera, so the operator (or another
     // surface acting for them) took it -- release.
     if (this.#programmaticSync || this.#ownFlights > 0) return;
+    // A flight the PRODUCT started is not the operator taking the camera. Product surfaces
+    // (contact list, search, timeline, keyboard) frame things via engine.flyTo, and those raise
+    // an identical moveStart. Without this the owner reads its own product's framing as a drag.
+    if ((this.#camera.programmaticFlights?.() ?? 0) > 0) return;
     // The deferred half of the same guard. Cesium raises moveStart from its render loop, so the
     // synchronous flag above has already been cleared by the time this arrives. A moveStart whose
     // live pose matches a write THIS controller made is its own echo; anything else is the

@@ -204,14 +204,14 @@ function makeStore(): {
   };
 }
 
-function wired(): {
+function wired(overrides: Partial<AisCameraCameraPort> = {}): {
   controller: AisCameraController;
   camera: ReturnType<typeof makeCamera>;
   store: ReturnType<typeof makeStore>;
 } {
   const camera = makeCamera();
   const store = makeStore();
-  const controller = new AisCameraController(camera.port, store.port);
+  const controller = new AisCameraController({ ...camera.port, ...overrides }, store.port);
   return { controller, camera, store };
 }
 
@@ -635,6 +635,37 @@ describe('manual release', () => {
     });
     camera.flushRender();
     expect(store.mode.value).toBe('FOLLOW');
+  });
+
+  it('does not release while a PRODUCT-initiated flight is in progress', () => {
+    // DF-X9.8B, second browser-proven defect. Clicking a contact row in the list flies the camera
+    // (ContactList -> engine.flyTo, default 450,000 m, 1.4 s) with no connection to the camera
+    // owner. That flight's moveStart is identical to a drag's, so FOLLOW was cancelled by the
+    // product's own framing -- reason "Released: the camera was moved."
+    let inFlight = 0;
+    const { controller, camera, store } = wired({
+      programmaticFlights: () => inFlight,
+    });
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+
+    // The operator clicked a row; the product is framing it.
+    inFlight = 1;
+    camera.positions.set('A', { lat: A_POS.lat + 0.05, lon: A_POS.lon });
+    controller.tick({ displayState: 'OBSERVED', inGap: false, isAfterLast: false });
+    camera.flushRender();
+    expect(store.mode.value).toBe('FOLLOW');
+
+    // Flight finishes, then the operator takes over: still releases.
+    inFlight = 0;
+    const dragged = camera.port.getCameraPose();
+    camera.port.setView({
+      position: { x: dragged!.position.x + 9_000_000, y: dragged!.position.y, z: dragged!.position.z },
+      orientation: dragged!.orientation,
+    });
+    camera.flushRender();
+    expect(store.mode.value).toBe('OFF');
   });
 
   it('but an operator drag that changes the pose still releases', () => {
