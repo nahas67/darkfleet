@@ -261,7 +261,7 @@ export class MapSourceController {
    * operator would see the imagery change under them for no legible reason.
    */
   maybeRecover(): MapSourceStatus {
-    if (this.#reason !== 'FALLBACK') return this.status();
+    if (this.#reason !== 'FALLBACK' && this.#reason !== 'ALL_SOURCES_EXHAUSTED') return this.status();
     const now = this.#now();
     if (this.#fallbackSince === null) return this.status();
     if (now - this.#fallbackSince < this.#policy.cooldownMs) return this.status();
@@ -277,6 +277,7 @@ export class MapSourceController {
       return attempt;
     }
     this.#failures = [];
+    this.#attempted = [];
     this.#fallbackSince = null;
     return attempt;
   }

@@ -262,7 +262,7 @@ function measureRebuiltUpdate(count: number): { ms: number; allocations: number 
   return { ms: bestOf(UPDATE_RUNS, body), allocations: vessels.length };
 }
 
-const SIZES = [100, 1000, 5000] as const;
+const SIZES = [100, 1000, 5000, 10000] as const;
 
 /*
  * Measured ONCE, at module scope, and shared by both describes.
@@ -297,8 +297,8 @@ const measurements = SIZES.map((size) => ({ size, m: measure(size) }));
 describe('AIS renderer performance', () => {
 
   it('measures every required size', () => {
-    // DF-X9.3 section 56. 10,000 is explicitly left to DF-X9.7.
-    expect(measurements.map((x) => x.size)).toEqual([100, 1000, 5000]);
+    // DF-X9.7 covers 100, 1,000, 5,000, and 10,000.
+    expect(measurements.map((x) => x.size)).toEqual([100, 1000, 5000, 10000]);
     for (const { m } of measurements) {
       expect(m.totalMs).toBeGreaterThan(0);
       expect(m.contacts).toBeGreaterThan(0);
@@ -307,15 +307,15 @@ describe('AIS renderer performance', () => {
 
   it('per-contact cost does not blow up with scale', () => {
     // THE ARCHITECTURAL CLAIM. Per-contact cost must stay broadly flat as the contact count grows
-    // 50x; if it rises steeply, some operation is quadratic and the architecture is wrong regardless
+    // 100x; if it rises steeply, some operation is quadratic and the architecture is wrong regardless
     // of how the absolute numbers look.
     //
-    // The two WARM rows are compared. The 100-contact row absorbs the most JIT warm-up and is the
+    // The warm rows are compared. The 100-contact row absorbs the most JIT warm-up and is the
     // least representative; gating on it would assert that a cold function looks expensive, which
     // is true and says nothing about whether the renderer scales.
     const thousand = measurements.find((x) => x.size === 1000)!.m.usPerContact;
-    const fiveThousand = measurements.find((x) => x.size === 5000)!.m.usPerContact;
-    expect(fiveThousand).toBeLessThan(thousand * 2);
+    const tenThousand = measurements.find((x) => x.size === 10000)!.m.usPerContact;
+    expect(tenThousand).toBeLessThan(thousand * 2);
   });
 
   it('update-in-place allocates nothing, while clear-and-rebuild allocates per contact', () => {
@@ -362,9 +362,9 @@ describe('AIS renderer performance', () => {
   });
 
   it('label arbitration is bounded by the budget, not by the contact count', () => {
-    // The declutter requirement as a measurable bound: with 5,000 contacts drawn, at most the
+    // The declutter requirement as a measurable bound: with 10,000 contacts drawn, at most the
     // budget of labels may appear.
-    const largest = measurements.find((x) => x.size === 5000)!.m;
+    const largest = measurements.find((x) => x.size === 10000)!.m;
     expect(largest.labelsShown).toBeLessThanOrEqual(120);
     expect(largest.labelsShown + largest.labelsSuppressed).toBeGreaterThan(0);
   });

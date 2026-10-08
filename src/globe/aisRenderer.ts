@@ -388,6 +388,8 @@ export class AisContactRenderer {
 
   /** Keyed by MMSI, holding the Billboard OBJECT. Stable identity, never array index. */
   #billboards = new Map<string, Billboard>();
+  /** Fast reverse lookup for untagged billboard picking (§27). WeakMap avoids retention leaks. */
+  #mmsiByBillboard = new WeakMap<object, string>();
   /**
    * Which glyph each contact currently shows: `true` = directional, `false` = unknown-ring.
    *
@@ -597,6 +599,7 @@ export class AisContactRenderer {
         horizontalOrigin: HorizontalOrigin.CENTER,
       });
       this.#billboards.set(contact.mmsi, added);
+      if (typeof added === 'object' && added !== null) this.#mmsiByBillboard.set(added, contact.mmsi);
       this.#glyphKind.set(contact.mmsi, hasDirection);
       drawn.add(contact.mmsi);
       stats.createdBillboards += 1;
@@ -651,7 +654,9 @@ export class AisContactRenderer {
     if (frame === null) return;
 
     const claims: LabelClaim[] = [];
+    const contactsByMmsi = new Map<string, RenderableContact>();
     for (const contact of contacts) {
+      contactsByMmsi.set(contact.mmsi, contact);
       const state = contact.state;
       if (state.lat === null || state.lon === null) continue;
       const screen = this.#project(state.lon, state.lat);
@@ -679,7 +684,7 @@ export class AisContactRenderer {
     stats.labelsSuppressed = decision.suppressed.length;
 
     for (const claim of decision.shown) {
-      const contact = contacts.find((c) => c.mmsi === claim.id);
+      const contact = contactsByMmsi.get(claim.id);
       if (!contact) continue;
       const state = contact.state;
       this.#labels.add({
@@ -1011,6 +1016,10 @@ export class AisContactRenderer {
    * never override a real identity.
    */
   mmsiOf(billboard: unknown): string | null {
+    if (typeof billboard === 'object' && billboard !== null) {
+      const fast = this.#mmsiByBillboard.get(billboard);
+      if (fast) return fast;
+    }
     for (const [mmsi, retained] of this.#billboards) {
       if (retained === billboard) return mmsi;
     }
