@@ -45,8 +45,19 @@ function makeCamera(): {
   fireMoveEnd: () => void;
   fireInput: () => void;
   getPose: () => CameraPose;
+  /**
+   * One render frame, as Cesium's loop performs it: raise moveStart the first time the camera
+   * is seen to have CHANGED, then moveEnd once it settles.
+   *
+   * `startFired` mirrors Cesium's `_cameraStartFired` latch, which is why a camera that changes
+   * on every frame raises moveStart once, not once per frame. Modelling the latch matters: an
+   * un-latched double would fire moveStart every render and hide a different class of bug.
+   */
+  flushRender: () => void;
 } {
   const calls: string[] = [];
+  let pendingMove = false;
+  let startFired = false;
   const positions = new Map<string, LatLon>([['A', A_POS]]);
   // Predicted markers exist in the product but the controller must never read them: the port
   // exposes no predicted accessor at all, and this map proves the fake HAS a different
@@ -79,9 +90,15 @@ function makeCamera(): {
     setView: (next) => {
       calls.push('setView');
       pose = next;
-      // Emulate Cesium raising moveStart/moveEnd synchronously around a setView.
-      for (const cb of [...moveStartCbs]) cb();
-      for (const cb of [...moveEndCbs]) cb();
+      // FAITHFUL TO CESIUM (DF-X9.8B). A setView does NOT raise moveStart. The single
+      // `moveStart.raiseEvent` in the shipped Cesium bundle lives in
+      // `View.checkForCameraUpdates`, which the RENDER LOOP calls on a later frame. An earlier
+      // revision of this double raised moveStart/moveEnd synchronously here, which is not what
+      // Cesium does -- and that wrong emulation is precisely why the real
+      // "follow cancels itself the moment the camera moves" defect survived 82 passing tests.
+      // `flushRender()` below is the render loop; tests drive it explicitly.
+      pendingMove = true;
+      startFired = false;
     },
     flyTo: () => {
       calls.push('flyTo');
@@ -124,6 +141,18 @@ function makeCamera(): {
       for (const cb of [...moveEndCbs]) cb();
     },
     getPose: () => pose,
+    flushRender: () => {
+      if (pendingMove && !startFired) {
+        startFired = true;
+        for (const cb of [...moveStartCbs]) cb();
+        // Still moving, so no moveEnd yet -- the camera has not settled.
+        return;
+      }
+      if (pendingMove) {
+        pendingMove = false;
+        for (const cb of [...moveEndCbs]) cb();
+      }
+    },
   };
 }
 
@@ -530,14 +559,58 @@ describe('manual release', () => {
     expect(store.mode.value).toBe('OFF');
   });
 
-  it('the controller’s own per-tick write does not self-cancel', () => {
+  it('the controller’s own per-tick write does not self-cancel once Cesium actually raises moveStart', () => {
+    // THE REGRESSION THAT MATTERS (DF-X9.8B). This test previously asserted the same thing
+    // against a double that raised moveStart synchronously inside setView -- which Cesium never
+    // does. The real sequence is: tick writes the camera, the render loop notices on a LATER
+    // frame and raises moveStart, by which time the synchronous guard has been cleared.
+    //
+    // Browser evidence for why this is not theoretical, at f7e940e with FOLLOW engaged:
+    //   camera holding, playback paused  -> mode=ON  status=TRACKING
+    //   playhead advances, camera moves  -> mode=OFF status=OFF
+    const { controller, camera, store } = wired();
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+
+    controller.tick({ displayState: 'OBSERVED', inGap: false, isAfterLast: false });
+    // The render loop's first look at the changed camera.
+    camera.flushRender();
+    expect(store.mode.value).toBe('FOLLOW');
+
+    // Sustained follow across many ticks and renders, each tick moving the vessel on.
+    for (let i = 0; i < 5; i += 1) {
+      camera.positions.set('A', { lat: A_POS.lat + (i + 1) * 0.01, lon: A_POS.lon });
+      controller.tick({ displayState: 'OBSERVED', inGap: false, isAfterLast: false });
+      camera.flushRender();
+      camera.flushRender(); // settle
+      expect(store.mode.value).toBe('FOLLOW');
+    }
+    expect(store.mode.value).toBe('FOLLOW');
+  });
+
+  it('but an operator drag that changes the pose still releases', () => {
+    // The guard above recognises OUR OWN echo by pose. It must not become "ignore moveStart
+    // while following", which would make the operator unable to take the camera back.
     const { controller, camera, store } = wired();
     controller.attach();
     store.selectedMmsi.value = 'A';
     controller.setFollow(true);
     controller.tick({ displayState: 'OBSERVED', inGap: false, isAfterLast: false });
-    // The fake raises moveStart synchronously inside setView; the guard must hold.
+    camera.flushRender();
     expect(store.mode.value).toBe('FOLLOW');
+
+    // The operator moves the camera somewhere else entirely.
+    camera.getPose();
+    const dragged = camera.port.getCameraPose();
+    expect(dragged).not.toBeNull();
+    camera.port.setView({
+      position: { x: dragged!.position.x + 5_000_000, y: dragged!.position.y, z: dragged!.position.z },
+      orientation: dragged!.orientation,
+    });
+    camera.flushRender();
+
+    expect(store.mode.value).toBe('OFF');
   });
 
   it('the controller’s own frame flight does not self-cancel', () => {

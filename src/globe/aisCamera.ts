@@ -81,6 +81,42 @@ export type CameraOrientation = { heading: number; pitch: number; roll: number }
 export type CameraPose = { position: Vec3; orientation: CameraOrientation };
 
 /**
+ * Is `live` the pose `written` asked for? Used to recognise our own `setView` echo.
+ *
+ * POSITION IS COMPARED RELATIVELY. ECEF coordinates are ~6.4e6 m, so an absolute epsilon would
+ * either be uselessly tight (sub-millimetre, defeated by float round-trip through Cesium's
+ * matrices) or uselessly loose (hundreds of metres, which is exactly the operator drag we must
+ * still catch). Relative-to-magnitude is the only comparison that means the same thing at
+ * every altitude.
+ *
+ * ANGLES ARE COMPARED IN DEGREES, absolutely: a hundredth of a degree of heading drift is not
+ * an operator gesture, and Cesium normalises heading to [0, 2pi) so a plain subtract is unsafe
+ * across the 0/360 wrap.
+ */
+export function samePose(live: CameraPose, written: CameraPose): boolean {
+  const magnitude = Math.max(
+    1,
+    Math.abs(written.position.x),
+    Math.abs(written.position.y),
+    Math.abs(written.position.z),
+  );
+  const positionOk =
+    Math.abs(live.position.x - written.position.x) / magnitude < 1e-9 &&
+    Math.abs(live.position.y - written.position.y) / magnitude < 1e-9 &&
+    Math.abs(live.position.z - written.position.z) / magnitude < 1e-9;
+  if (!positionOk) return false;
+  const turn = (a: number, b: number): number => {
+    const wrapped = Math.abs(((a - b) % 360) + 360) % 360;
+    return Math.min(wrapped, 360 - wrapped);
+  };
+  return (
+    turn(live.orientation.heading, written.orientation.heading) < 1e-6 &&
+    turn(live.orientation.pitch, written.orientation.pitch) < 1e-6 &&
+    turn(live.orientation.roll, written.orientation.roll) < 1e-6
+  );
+}
+
+/**
  * The retained offset: camera position minus target position, in world coordinates.
  *
  * Captured once (when FOLLOW engages or the first display position arrives) and re-applied
@@ -307,6 +343,33 @@ export class AisCameraController {
   #lastApplied: LatLon | null = null;
   #programmaticSync = false;
   #ownFlights = 0;
+  /**
+   * The pose THIS controller last wrote, awaiting the `moveStart` it provokes.
+   *
+   * WHY THIS EXISTS (DF-X9.8B, browser-proven defect -- do not remove).
+   *
+   * `#programmaticSync` guards the synchronous window around `setView`. That window is the wrong
+   * shape for the job, because **Cesium does not raise `moveStart` inside `setView`**. Verified
+   * against the shipped bundle: `moveStart.raiseEvent` appears exactly once, inside
+   * `View.checkForCameraUpdates`, which runs from `Scene.render` -- one or more frames AFTER the
+   * write. By then `finally` has already cleared the flag.
+   *
+   * The consequence was that camera FOLLOW cancelled itself the first time the camera genuinely
+   * moved. Live browser evidence at `f7e940e`, contact 257000002, FOLLOW on:
+   *
+   *   paused, camera holding     mode=ON  status=TRACKING   (alt 599,329 -> 450,000)
+   *   playhead advances 1 s      mode=OFF status=OFF        <-- released itself, immediately
+   *
+   * An earlier checkpoint's S56 passed only because it sampled while the camera was still
+   * holding; the unit test passed only because its fake raised `moveStart` synchronously. Both
+   * were wrong in the same way, so neither could see this.
+   *
+   * So the guard is now STATE, not a flag: remember the pose we wrote, and treat a `moveStart`
+   * whose live pose matches it as our own echo. An operator drag produces a different pose and
+   * still releases, which is the behaviour that matters and the reason this is not simply
+   * "ignore moveStart while following".
+   */
+  #ownWrite: CameraPose | null = null;
   #recaptureAfterFlight = false;
   #status: FollowStatus = { mode: 'OFF', label: 'OFF', mmsi: null, reason: 'Follow is off.' };
   /**
@@ -371,6 +434,7 @@ export class AisCameraController {
     this.#offset = null;
     this.#offsetMmsi = null;
     this.#lastApplied = null;
+    this.#ownWrite = null;
     this.#ownFlights = 0;
     this.#recaptureAfterFlight = false;
     this.#status = { mode: 'OFF', label: 'OFF', mmsi: null, reason: 'Follow is off.' };
@@ -519,6 +583,7 @@ export class AisCameraController {
       orientation: pose.orientation,
     };
     this.#programmaticSync = true;
+    this.#ownWrite = next;
     try {
       this.#camera.setView(next);
     } finally {
@@ -569,6 +634,20 @@ export class AisCameraController {
     // are both guarded. Everything else moved the camera, so the operator (or another
     // surface acting for them) took it -- release.
     if (this.#programmaticSync || this.#ownFlights > 0) return;
+    // The deferred half of the same guard. Cesium raises moveStart from its render loop, so the
+    // synchronous flag above has already been cleared by the time this arrives. A moveStart whose
+    // live pose IS the pose we just wrote is this controller's own echo; consume it. Anything else
+    // is the operator, and must release.
+    const own = this.#ownWrite;
+    if (own !== null) {
+      const live = this.#camera.getCameraPose();
+      if (live !== null && samePose(live, own)) {
+        this.#ownWrite = null;
+        return;
+      }
+      // Pose diverged: this is not the echo we were waiting for.
+      this.#ownWrite = null;
+    }
     const mode = this.#store.getFollowMode();
     if (mode !== 'FOLLOW' && mode !== 'CENTER') return;
     this.#releaseToOperator('Released: the camera was moved.');
@@ -610,6 +689,7 @@ export class AisCameraController {
     this.#offset = null;
     this.#offsetMmsi = null;
     this.#lastApplied = null;
+    this.#ownWrite = null;
     this.#recaptureAfterFlight = false;
     this.#status = { mode: 'OFF', label: 'OFF', mmsi: null, reason };
   }
