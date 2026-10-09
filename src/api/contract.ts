@@ -30,7 +30,7 @@ export interface ScoreDecomposition {
   readonly spatialScore: number;
   readonly temporalScore: number;
   readonly headingScore: number;
-  readonly sizeScore: number;
+  readonly sizeScore?: number | null;
   readonly compositeScore: number;
   readonly matchRadiusMeters: number;
   readonly distanceOffsetMeters: number;

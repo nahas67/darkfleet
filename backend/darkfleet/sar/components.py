@@ -52,7 +52,7 @@ def analyse_wake_guarded(
     cy: float,
     cx: float,
     orient: float,
-    pixel_spacing_m: float,
+    pixel_spacing_m: float | None = None,
 ) -> WakeAnalysis:
     """Run the wake detector, converting any failure into a reported state.
 
@@ -89,7 +89,7 @@ def extract_components(
     db: np.ndarray,
     min_pixels: int = 3,
     max_pixels: int = 1000,
-    pixel_spacing_m: float = 1.0,
+    pixel_spacing_m: float | None = None,
 ) -> list[dict[str, Any]]:
     height, width = mask.shape
     labeled, n = label(mask, structure=np.ones((3, 3), dtype=int))

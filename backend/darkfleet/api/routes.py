@@ -423,7 +423,7 @@ def _scene_from_asset(asset: SarAsset, bbox: tuple[float, float, float, float]) 
         "product": asset.product,
         "polarization": asset.polarization,
         "acquisitionTime": asset.acquisition_time,
-        "resolutionMeters": asset.resolution_meters or 10.0,
+        "resolutionMeters": asset.resolution_meters,
         "bbox": list(bbox),
     }
 

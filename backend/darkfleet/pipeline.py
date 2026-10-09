@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -313,9 +314,15 @@ def run_scan(
     comps = extract_components(
         det["mask"], filtered,
         min_pixels=cfar_config["min_pixels"], max_pixels=cfar_config["max_pixels"],
-        # Wake apparent lengths are reported in METRES, so the detector needs the
-        # ground sample distance. The default of 1.0 would silently report pixels.
-        pixel_spacing_m=float(raster_meta["resolution_m"] or 1.0),
+        # Wake apparent lengths are reported in METRES when resolution is known.
+        # When unknown, it is left None rather than fabricating an arbitrary pixel spacing.
+        pixel_spacing_m=(
+            float(raster_meta["resolution_m"])
+            if raster_meta.get("resolution_m") is not None
+            and math.isfinite(float(raster_meta["resolution_m"]))
+            and float(raster_meta["resolution_m"]) > 0
+            else None
+        ),
     )
     _an = sum(1 for c in comps if (c.get("wakeAnalysis") or {}).get("detected"))
     log_stage(
@@ -378,7 +385,17 @@ def run_scan(
     # transform. No width/height/bbox is passed, so correlation cannot reintroduce
     # AOI interpolation. `grid_w`/`grid_h`/`grid_bbox` are gone for that reason.
     out = correlate(
-        comps, ais_rows, acq, float(raster_meta["resolution_m"] or 10.0), "PENDING",
+        comps,
+        ais_rows,
+        acq,
+        (
+            float(raster_meta["resolution_m"])
+            if raster_meta.get("resolution_m") is not None
+            and math.isfinite(float(raster_meta["resolution_m"]))
+            and float(raster_meta["resolution_m"]) > 0
+            else None
+        ),
+        "PENDING",
     )
     targets = out["targets"]
     matched = sum(1 for t in targets if t["cls"] == "SAR_MATCHED_AIS")

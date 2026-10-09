@@ -216,9 +216,9 @@ class TestRealHullLengthDrivesTheSizeTerm:
         assert float(terms["sizeScore"]) == pytest.approx(0.5, abs=1e-6)
 
     def test_the_size_term_responds_to_the_real_hull_length(self, archive_dir: Path) -> None:
-        # MUTATION GUARD. Re-run S2 with the hull length REMOVED from the archive rows. The size
-        # term must fall back to the default, proving the value above came from `length_m` and not
-        # from the default that happens to sit nearby.
+        # MUTATION GUARD (DF-X9.8-H3). Re-run S2 with the hull length REMOVED from the archive rows.
+        # The size term must be None (unobserved), proving the value above came from `length_m`
+        # and was not defaulted to an unearned 0.8.
         result = run_scenario("S2", archive_dir)
         assert float(decomposition(result["output"])["sizeScore"]) == pytest.approx(0.5, abs=1e-6)
 
@@ -228,10 +228,11 @@ class TestRealHullLengthDrivesTheSizeTerm:
         mutated = correlate(
             [components()[SCENARIOS["S2"]["comp"]]], stripped, ACQUISITION, RESOLUTION_M, "MUTANT"
         )
-        assert float(decomposition(mutated)["sizeScore"]) == pytest.approx(0.8, abs=1e-6), (
-            "removing length_m did not restore the default, so the size term is reading something else"
+        # DF-X9.8-H3: removing length_m leaves sizeScore as None (unobserved), never a fake 0.8 default
+        assert decomposition(mutated)["sizeScore"] is None, (
+            "removing length_m must leave sizeScore None, not an unearned 0.8 default"
         )
-        assert float(decomposition(mutated)["sizeScore"]) != float(decomposition(result["output"])["sizeScore"])
+        assert decomposition(mutated)["compositeScore"] != decomposition(result["output"])["compositeScore"]
 
     def test_a_zero_length_is_read_as_absent_not_as_a_zero_metre_vessel(self) -> None:
         # A 0 m hull would make the size guard skip, which is the defect. It must read as absent so

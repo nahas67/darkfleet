@@ -320,8 +320,10 @@ def _signed_axis_delta(heading_deg: float, axis_deg: float) -> float:
     return round(delta if delta <= 180.0 else 360.0 - delta, 1)
 
 
-def _arm_length(chip: np.ndarray, angle_deg: float, pixel_spacing_m: float) -> float | None:
+def _arm_length(chip: np.ndarray, angle_deg: float, pixel_spacing_m: float | None) -> float | None:
     """Apparent arm length: contiguous radial run above the local background."""
+    if pixel_spacing_m is None or not math.isfinite(pixel_spacing_m) or pixel_spacing_m <= 0:
+        return None
     size = chip.shape[0]
     c = (size - 1) / 2.0
     for pair_sign in (1.0, -1.0):
@@ -347,7 +349,7 @@ def analyse_wake(
     cy: float,
     cx: float,
     orientation_deg: float,
-    pixel_spacing_m: float,
+    pixel_spacing_m: float | None = 1.0,
     half_chip: int = 24,
 ) -> WakeAnalysis:
     """Search a target chip for a Kelvin arm pair.

@@ -251,7 +251,7 @@ def correlate(
     components: list[dict[str, Any]],
     ais: list[dict[str, Any]],
     acquisition_iso: str,
-    resolution_m: float,
+    resolution_m: float | None,
     scan_id: str,
     weights: tuple[float, float, float, float] = (0.45, 0.25, 0.15, 0.15),
     base_radius_m: float = 1200.0,
@@ -272,10 +272,16 @@ def correlate(
     acq = _as_utc(acquisition_iso).timestamp()
     w_sp, w_tm, w_hd, w_sz = weights
 
+    valid_res = (
+        float(resolution_m)
+        if resolution_m is not None and math.isfinite(float(resolution_m)) and float(resolution_m) > 0
+        else None
+    )
+
     cands: list[Candidate] = []
     for idx, comp in enumerate(components):
         lat, lon = component_position(comp)
-        apparent_len = round(comp["major"] * resolution_m)
+        apparent_len = round(comp["major"] * valid_res) if valid_res is not None else None
         for ob in ais:
             ob_ts = _as_utc(str(ob["timestamp"])).timestamp()
             dt = acq - ob_ts
@@ -304,24 +310,24 @@ def correlate(
             # that reported nothing directionally out-score one that did, and reading it as 0
             # degrees would assert a course north that the vessel never gave.
             hdg = max(0.0, 1 - orient_diff(eff_hdg, cog_deg) / 90) if cog_deg is not None else 0.0
-            # THE SIZE TERM WAS DEAD IN PRODUCTION.
+            # SIZE COMPATIBILITY TERM (DF-X9.8-H2, DF-X9.8-H3).
             #
-            # It read `ob.get("length", 0)` and `ob["length"]`, but `AisArchive` stores the
-            # column as `length_m` and `AisObservation` names the field `length_m`. On every
-            # real archive row `ob.get("length", 0)` returned 0, the guard skipped, and `size`
-            # stayed pinned at its 0.8 default -- so a 0.15-weighted term contributed a
-            # constant and the vessel's actual dimensions never influenced correlation.
+            # When both apparent length and reported hull length are known, score dimension
+            # agreement. When either is absent (missing length_m on GFW/raw rows or unavailable
+            # sensor resolution), do NOT award an unearned 0.8 default. That defect made missing
+            # data score HIGHER than a measured disagreement (240m vs 120m -> 0.5), which out-scored
+            # real evidence.
             #
-            # The golden fixture uses `length`, which is why it looked exercised. Both spellings
-            # are now read, canonical first, because the golden run's parity must not change:
-            # a fixture that says `length` and an archive that says `length_m` are the same
-            # vessel, and picking one arbitrarily would silently move the score for whichever
-            # spelling was missed.
+            # When unobserved, the size term is excluded and the remaining evidence weights
+            # (spatial, temporal, heading) are renormalised to 1.0, treating missingness as neutral.
             hull_length = _hull_length_m(ob)
-            size = 0.8
-            if hull_length is not None and hull_length > 0:
-                size = max(0.0, 1 - abs(apparent_len - hull_length) / max(hull_length, 50))
-            composite = w_sp * spatial + w_tm * temporal + w_hd * hdg + w_sz * size
+            if apparent_len is not None and hull_length is not None and hull_length > 0:
+                size_val: float | None = max(0.0, 1 - abs(apparent_len - hull_length) / max(hull_length, 50))
+                composite = w_sp * spatial + w_tm * temporal + w_hd * hdg + w_sz * size_val
+            else:
+                size_val = None
+                avail_w = w_sp + w_tm + w_hd
+                composite = (w_sp * spatial + w_tm * temporal + w_hd * hdg) / avail_w if avail_w > 0 else 0.0
             cands.append(
                 {
                     "idx": idx,
@@ -333,7 +339,7 @@ def correlate(
                     "spatial": spatial,
                     "temporal": temporal,
                     "heading": hdg,
-                    "size": size,
+                    "size": size_val,
                     "radius": radius,
                 }
             )
@@ -381,9 +387,9 @@ def correlate(
     targets: list[dict[str, Any]] = []
     for idx, comp in enumerate(components):
         lat, lon = component_position(comp)
-        apparent_len = round(comp["major"] * resolution_m)
-        apparent_wid = round(comp["minor"] * resolution_m)
-        len_unc = max(10, round(apparent_len * 0.22))
+        apparent_len = round(comp["major"] * valid_res) if valid_res is not None else None
+        apparent_wid = round(comp["minor"] * valid_res) if valid_res is not None else None
+        len_unc = max(10, round(apparent_len * 0.22)) if apparent_len is not None else None
         sar_conf = _sar_confidence(comp)
         aspect = comp["major"] / max(1.0, comp["minor"])
         # No wake term. This used to be `... and not comp["wake"]`, which let an
@@ -501,7 +507,7 @@ def correlate(
                 "spatialScore": round(m["spatial"], 3),
                 "temporalScore": round(m["temporal"], 3),
                 "headingScore": round(m["heading"], 3),
-                "sizeScore": round(m["size"], 3),
+                "sizeScore": round(m["size"], 3) if m["size"] is not None else None,
                 "compositeScore": round(m["score"], 3),
                 "matchRadiusMeters": round(m["radius"]),
                 "distanceOffsetMeters": round(m["dist"]),

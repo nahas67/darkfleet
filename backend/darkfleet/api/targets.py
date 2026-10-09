@@ -89,7 +89,7 @@ class ScoreDecomposition(BaseModel):
     spatial_score: float = Field(alias="spatialScore")
     temporal_score: float = Field(alias="temporalScore")
     heading_score: float = Field(alias="headingScore")
-    size_score: float = Field(alias="sizeScore")
+    size_score: float | None = Field(default=None, alias="sizeScore")
     composite_score: float = Field(alias="compositeScore")
     match_radius_meters: float = Field(alias="matchRadiusMeters")
     distance_offset_meters: float = Field(alias="distanceOffsetMeters")
