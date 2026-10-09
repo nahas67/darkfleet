@@ -152,3 +152,50 @@ def test_corrupt_part_is_tolerated_by_the_index_but_not_by_reads(tmp_path: Path)
     # Reads do not tolerate it. Asserted as the current contract, not desired behaviour.
     with pytest.raises(Exception):  # noqa: B017 - DuckDB's exact type is not the subject here
         archive.coverage()
+
+
+def test_concurrent_reads_and_appends(tmp_path: Path) -> None:
+    """DF-X9.8-H6: Concurrent reads while an archive is appended across threads."""
+    import threading
+
+    from darkfleet.ais.models import AisObservation
+
+    _write_archive(tmp_path, vessels=50, fixes=5)
+    archive = AisArchive(tmp_path)
+    errors: list[Exception] = []
+
+    def reader() -> None:
+        try:
+            for _ in range(5):
+                a = AisArchive(tmp_path)
+                a.coverage()
+                a.query(T0 - timedelta(hours=1), T0 + timedelta(hours=1))
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    def writer(idx: int) -> None:
+        try:
+            a = AisArchive(tmp_path)
+            rows = [
+                AisObservation(
+                    timestamp=T0 + timedelta(seconds=idx * 10),
+                    mmsi=f"25709{idx:04d}",
+                    lat=1.2,
+                    lon=103.5,
+                    source="file-import",
+                )
+            ]
+            a.append(rows)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=reader) for _ in range(4)] + [
+        threading.Thread(target=writer, args=(i,)) for i in range(4)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert archive.coverage()["observations"] >= 250
