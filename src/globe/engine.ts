@@ -306,6 +306,10 @@ export class TacticalEngine {
     this.#basemap?.dispose();
     this.#basemap = null;
 
+    this.#cameraTelemetryUnsub?.();
+    this.#cameraTelemetryUnsub = null;
+    this.#flightDestinations = [];
+
     /*
      * The AIS renderer owns five collections added to `scene.primitives`. They are destroyed
      * EXPLICITLY here rather than left to the viewer's teardown, because a retained collection that
@@ -915,8 +919,14 @@ export class TacticalEngine {
     // percentageChanged (0.5% of camera height).
     viewer.camera.changed.addEventListener(publish);
     viewer.camera.moveEnd.addEventListener(publish);
+    this.#cameraTelemetryUnsub = () => {
+      viewer.camera.changed.removeEventListener(publish);
+      viewer.camera.moveEnd.removeEventListener(publish);
+    };
     publish();
   }
+
+  #cameraTelemetryUnsub: (() => void) | null = null;
 
   #onCameraAltitude: ((metres: number | null) => void) | null = null;
 
@@ -1078,10 +1088,39 @@ export class TacticalEngine {
    */
   #releaseOnMoveEnd(viewer: Viewer): void {
     const release = (): void => {
+      const pos = viewer.camera.positionWC;
+      this.#flightDestinations.push({ x: pos.x, y: pos.y, z: pos.z });
+      if (this.#flightDestinations.length > 8) this.#flightDestinations.shift();
       this.#endProgrammaticFlight();
       viewer.camera.moveEnd.removeEventListener(release);
     };
     viewer.camera.moveEnd.addEventListener(release);
+  }
+
+  /**
+   * Settle destinations of recently completed programmatic flights.
+   *
+   * When a flight finishes, Cesium raises moveEnd, but its settle latch (_cameraStartFired)
+   * resets to false. A camera settle frame shortly after moveEnd raises moveStart at the
+   * flight's resting pose. By verifying that live pose matches a recent flight destination, the
+   * camera owner attributes this echo to the product's flight rather than an operator drag.
+   */
+  #flightDestinations: Array<{ x: number; y: number; z: number }> = [];
+
+  isFlightDestination(pos: { x: number; y: number; z: number }, epsilon = 0.005): boolean {
+    const idx = this.#flightDestinations.findIndex((target) => {
+      const mag = Math.max(1, Math.abs(target.x), Math.abs(target.y), Math.abs(target.z));
+      return (
+        Math.abs(pos.x - target.x) / mag < epsilon &&
+        Math.abs(pos.y - target.y) / mag < epsilon &&
+        Math.abs(pos.z - target.z) / mag < epsilon
+      );
+    });
+    if (idx !== -1) {
+      this.#flightDestinations.splice(0, idx + 1);
+      return true;
+    }
+    return false;
   }
 
   /**

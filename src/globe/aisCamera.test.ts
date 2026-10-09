@@ -668,6 +668,40 @@ describe('manual release', () => {
     expect(store.mode.value).toBe('OFF');
   });
 
+  it('does not release when moveStart fires at a settled programmatic flight destination', () => {
+    // DF-X9.8-H5: Flight reaches destination, Cesium raises moveEnd, then settle loop raises
+    // moveStart at the flight's resting pose. Attributed to the flight destination rather than a drag.
+    let flightDest: Vec3 | null = null;
+    const { controller, camera, store } = wired({
+      isFlightDestination: (pos) =>
+        flightDest !== null &&
+        pos.x === flightDest.x &&
+        pos.y === flightDest.y &&
+        pos.z === flightDest.z,
+    });
+    controller.attach();
+    store.selectedMmsi.value = 'A';
+    controller.setFollow(true);
+
+    const dest = { x: 1234567, y: 7654321, z: 999999 };
+    flightDest = dest;
+    camera.port.setView({
+      position: dest,
+      orientation: { heading: 0, pitch: -90, roll: 0 },
+    });
+    camera.flushRender();
+    expect(store.mode.value).toBe('FOLLOW');
+
+    // Genuine operator drag to an unrelated position: releases to OFF
+    flightDest = null;
+    camera.port.setView({
+      position: { x: 9999999, y: 8888888, z: 7777777 },
+      orientation: { heading: 0, pitch: -90, roll: 0 },
+    });
+    camera.flushRender();
+    expect(store.mode.value).toBe('OFF');
+  });
+
   it('but an operator drag that changes the pose still releases', () => {
     // The guard above recognises OUR OWN echo by pose. It must not become "ignore moveStart
     // while following", which would make the operator unable to take the camera back.

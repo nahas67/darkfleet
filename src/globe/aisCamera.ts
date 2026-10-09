@@ -286,6 +286,8 @@ export type AisCameraCameraPort = {
    * just clicked" from "the operator took the camera", and it cancels FOLLOW on the former.
    */
   programmaticFlights?: () => number;
+  /** True when `pos` matches the destination of a recently settled programmatic flight. */
+  isFlightDestination?: (pos: Vec3) => boolean;
   /** Animated one-shot. What FRAME CONTACT uses. */
   flyTo: (position: LatLon) => void;
   onMoveStart: (cb: () => void) => () => void;
@@ -316,6 +318,7 @@ function defaultCameraPort(): AisCameraCameraPort {
     cartesianOf: (position) => engine.cartesianOf(position.lat, position.lon),
     setView: (pose) => engine.setCameraPose(pose.position, pose.orientation),
     programmaticFlights: () => engine.programmaticCameraFlights,
+    isFlightDestination: (pos) => engine.isFlightDestination(pos),
     flyTo: (position) => engine.flyTo(position.lat, position.lon),
     onMoveStart: (cb) => engine.onCameraMoveStart(cb),
     onMoveEnd: (cb) => engine.onCameraMoveEnd(cb),
@@ -680,13 +683,17 @@ export class AisCameraController {
     // (contact list, search, timeline, keyboard) frame things via engine.flyTo, and those raise
     // an identical moveStart. Without this the owner reads its own product's framing as a drag.
     if ((this.#camera.programmaticFlights?.() ?? 0) > 0) return;
+    const live = this.#camera.getCameraPose();
+    if (live !== null && (this.#camera.isFlightDestination?.(live.position) ?? false)) {
+      // Settle echo of a flight that just arrived at its destination: consume it.
+      return;
+    }
     // The deferred half of the same guard. Cesium raises moveStart from its render loop, so the
     // synchronous flag above has already been cleared by the time this arrives. A moveStart whose
     // live pose matches a write THIS controller made is its own echo; anything else is the
     // operator, and must release.
     const pending = this.#ownWrites;
     if (pending.length > 0) {
-      const live = this.#camera.getCameraPose();
       const at = live === null ? -1 : pending.findIndex((p) => samePose(live, p));
       if (at !== -1) {
         // Our own echo. Everything up to and including that write has been reflected on screen,
@@ -707,21 +714,13 @@ export class AisCameraController {
   #onCameraMoveEnd(): void {
     if (this.#ownFlights > 0) {
       this.#ownFlights -= 1;
-      if (this.#recaptureAfterFlight && this.#store.getFollowMode() === 'FOLLOW') {
-        // A FRAME CONTACT during FOLLOW re-aimed the camera; the retained offset belongs
-        // to the new framing, not the old one.
-        //
-        // KNOWN EDGE, DOCUMENTED NOT FIXED: an operator drag DURING the ~1.4 s flight has
-        // its moveStart suppressed by the flight guard, so the mode stays FOLLOW -- but the
-        // outcome is still honest, not a yank-back. Cesium cancels the flight on input, this
-        // moveEnd re-anchors the offset at the operator's dragged pose, and follow continues
-        // from there. Press-level wheel/pinch during the flight releases immediately through
-        // the input path regardless.
-        this.#offset = null;
-        this.#offsetMmsi = null;
-        this.#lastApplied = null;
-        this.#recaptureAfterFlight = false;
-      }
+    }
+    if (this.#store.getFollowMode() === 'FOLLOW') {
+      // Re-anchor follow offset at the new camera pose after any flight completes
+      this.#offset = null;
+      this.#offsetMmsi = null;
+      this.#lastApplied = null;
+      this.#recaptureAfterFlight = false;
     }
   }
 
