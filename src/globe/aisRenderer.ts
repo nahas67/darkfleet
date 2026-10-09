@@ -877,6 +877,12 @@ export class AisContactRenderer {
   ): void {
     this.#track.removeAll();
     this.#gaps = [];
+    const dashMaterial = Material.fromType('PolylineDash', {
+      color: COLOUR_STALE.withAlpha(0.7),
+      gapColor: Color.TRANSPARENT,
+      gapAlpha: 0,
+      dashLength: 12,
+    });
 
     for (const [mmsi, fixes] of tracks) {
       /*
@@ -952,12 +958,7 @@ export class AisContactRenderer {
                * a tinted solid line still reads as continuous observation to anyone not told
                * otherwise. Colour alone is not an encoding.
                */
-              material: Material.fromType('PolylineDash', {
-                color: COLOUR_STALE.withAlpha(0.7),
-                gapColor: Color.TRANSPARENT,
-                gapAlpha: 0,
-                dashLength: 12,
-              }),
+              material: dashMaterial,
             });
             this.#gaps.push({
               mmsi,

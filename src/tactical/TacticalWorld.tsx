@@ -49,7 +49,7 @@ function buildTrackGeometries(
 ): Map<string, Array<{ lat: number; lon: number; at: string }>> {
   const byMmsi = new Map<string, Array<{ lat: number; lon: number; at: string }>>();
   for (const observation of [...observations].sort(
-    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+    (a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0),
   )) {
     if (
       observation.lat == null ||
