@@ -95,13 +95,13 @@ function buildRows(state: ReturnType<typeof useStore>): Row[] {
 function compare(a: Row, b: Row, key: SortKey): number {
   switch (key) {
     case 'id':
-      return a.id.localeCompare(b.id);
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     case 'classification':
-      return a.classification.localeCompare(b.classification);
+      return a.classification < b.classification ? -1 : a.classification > b.classification ? 1 : 0;
     case 'confidence':
       return b.confidence - a.confidence;
     case 'distance': {
-      if (a.distance === null && b.distance === null) return a.id.localeCompare(b.id);
+      if (a.distance === null && b.distance === null) return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       if (a.distance === null) return 1;
       if (b.distance === null) return -1;
       return a.distance - b.distance;

@@ -24,7 +24,7 @@ import type { PredictedPoint } from '../globe/aisRenderer';
 import type { AisObservationOut, VesselTarget } from '../api/contract';
 import { rangeFromTimestamps, temporal, temporalNowIso, useTemporal } from '../temporal/TemporalController';
 import { displayStateOf, inTimeOrder, segmentTrack } from '../ais/displayState';
-import { describeAisFailure } from '../diagnostics/aisDiagnostics';
+import { describeAisFailure, sameAisDiagnostics } from '../diagnostics/aisDiagnostics';
 
 /**
  * Observed track polylines, one per MMSI.
@@ -388,7 +388,10 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
      * registry in `diagnostics/aisDiagnostics.ts` names this consumer and a test fails if the bar stops
      * reading them.
      */
-    store.set({ aisDiagnostics: engine.aisDiagnostics });
+    const nextDiag = engine.aisDiagnostics;
+    if (!sameAisDiagnostics(state.aisDiagnostics, nextDiag)) {
+      store.set({ aisDiagnostics: nextDiag });
+    }
 
     // The setters above CLEAR and re-add their entities, and Cesium gives every new
     // entity `show = true`. Without this the layer toggles would be authoritative only

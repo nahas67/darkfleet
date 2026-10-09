@@ -93,6 +93,31 @@ export const EMPTY_AIS_DIAGNOSTICS: AisDiagnostics = {
   drawnMmsis: [],
 };
 
+export function sameAisDiagnostics(a: AisDiagnostics, b: AisDiagnostics): boolean {
+  if (a === b) return true;
+  if (a.failure !== b.failure) return false;
+  if (
+    a.counts.contacts !== b.counts.contacts ||
+    a.counts.labels !== b.counts.labels ||
+    a.counts.observationMarkers !== b.counts.observationMarkers ||
+    a.counts.trackPrimitives !== b.counts.trackPrimitives ||
+    a.counts.predictedMarkers !== b.counts.predictedMarkers
+  ) {
+    return false;
+  }
+  if (a.gaps.length !== b.gaps.length) return false;
+  for (let i = 0; i < a.gaps.length; i += 1) {
+    if (a.gaps[i].mmsi !== b.gaps[i].mmsi || a.gaps[i].spanSeconds !== b.gaps[i].spanSeconds) {
+      return false;
+    }
+  }
+  if (a.drawnMmsis.length !== b.drawnMmsis.length) return false;
+  for (let i = 0; i < a.drawnMmsis.length; i += 1) {
+    if (a.drawnMmsis[i] !== b.drawnMmsis[i]) return false;
+  }
+  return true;
+}
+
 /**
  * A one-line, operator-readable statement of an AIS refusal.
  *
