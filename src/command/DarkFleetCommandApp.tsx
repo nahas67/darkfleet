@@ -54,14 +54,13 @@ export function DarkFleetCommandApp() {
    */
   const selectedMmsi = state.selectedAis?.mmsi ?? null;
   const aisTrack = useMemo(() => {
-    const relevant = selectedMmsi
-      ? state.aisObservations.filter((o) => o.mmsi === selectedMmsi)
-      : state.aisObservations;
-    return buildTrack(relevant.length > 0 ? relevant : state.aisObservations);
+    if (!selectedMmsi) return null;
+    const relevant = state.aisObservations.filter((o) => o.mmsi === selectedMmsi);
+    return relevant.length > 0 ? buildTrack(relevant) : null;
   }, [state.aisObservations, selectedMmsi]);
-  const aisObservationsPresent = aisTrack.usableCount > 0;
-  const aisObservationCount = aisTrack.usableCount;
-  const aisTrackStatus = aisTrack.status;
+  const aisObservationsPresent = state.aisObservations.length > 0;
+  const aisObservationCount = selectedMmsi ? (aisTrack?.usableCount ?? 0) : state.aisObservations.length;
+  const aisTrackStatus = aisTrack?.status ?? 'NO_OBSERVATIONS';
   /*
    * GAP COUNTS ARE NO LONGER DERIVED HERE.
    *
@@ -87,8 +86,9 @@ export function DarkFleetCommandApp() {
    * the camera at the whole track, and follow silently yanking it back would take the camera
    * away without anyone deciding to. The mode readout on the playback bar shows the release.
    */
-  const aisCanFrame = aisTrack.segments.some((s) => s.points.length >= 2);
+  const aisCanFrame = aisTrack !== null && aisTrack.segments.some((s) => s.points.length >= 2);
   const aisFrameTrack = useCallback(() => {
+    if (!aisTrack) return;
     const points = pointsOfSegments(aisTrack.segments);
     if (points.length === 0) return;
     frameTrack(
