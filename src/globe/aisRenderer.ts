@@ -406,6 +406,10 @@ export class AisContactRenderer {
    */
   /** The highlighted observation, so a probe can see the highlight exist. */
   #highlighted: { mmsi: string; at: string } | null = null;
+  #lastMarkers: unknown = null;
+  #lastHighlighted: unknown = null;
+  #lastTracks: unknown = null;
+  #lastPredicted: unknown = null;
   #gaps: Array<{
     mmsi: string;
     from: { lat: number; lon: number };
@@ -622,10 +626,27 @@ export class AisContactRenderer {
     }
 
     this.#renderLabels(options.contacts, frame, stats);
-    this.#highlighted = options.highlightedObservation ?? null;
-    this.#renderObservationMarkers(options.observationMarkers ?? [], this.#highlighted);
-    this.#renderPredicted(options.predicted);
-    this.#renderTracks(options.tracks ?? new Map());
+
+    const highlighted = options.highlightedObservation ?? null;
+    const markers = options.observationMarkers ?? [];
+    if (markers !== this.#lastMarkers || highlighted !== this.#lastHighlighted) {
+      this.#highlighted = highlighted;
+      this.#lastMarkers = markers;
+      this.#lastHighlighted = highlighted;
+      this.#renderObservationMarkers(markers, highlighted);
+    }
+
+    if (options.predicted !== this.#lastPredicted) {
+      this.#lastPredicted = options.predicted;
+      this.#renderPredicted(options.predicted);
+    }
+
+    const tracks = options.tracks ?? new Map();
+    if (tracks !== this.#lastTracks) {
+      this.#lastTracks = tracks;
+      this.#renderTracks(tracks);
+    }
+
     this.#applyVisibility(options.visibility);
 
     stats.billboards = this.#contacts.length;
@@ -1088,6 +1109,10 @@ export class AisContactRenderer {
     // explicit destruction precisely by "a per-contact Map".
     this.#glyphKind.clear();
     this.#drawnRotation.clear();
+    this.#lastMarkers = null;
+    this.#lastHighlighted = null;
+    this.#lastTracks = null;
+    this.#lastPredicted = null;
     this.#gaps = [];
   }
 }
