@@ -492,10 +492,18 @@ export function AisPlaybackBar(props: AisPlaybackBarProps) {
            * failed on its first run -- the same "exposed is not reachable" defect the gate exists to
            * catch, introduced while fixing the previous two instances of it.
            */
-          data-df-ais-drawn-mmsis={diagnostics.drawnMmsis.join(',')}
-          title={diagnostics.drawnMmsis.length === 0
-            ? 'No vessel currently has a glyph.'
-            : `Vessels with a glyph: ${diagnostics.drawnMmsis.join(', ')}`}
+          data-df-ais-drawn-mmsis={
+            diagnostics.drawnMmsis.length <= 200
+              ? diagnostics.drawnMmsis.join(',')
+              : diagnostics.drawnMmsis.slice(0, 200).join(',')
+          }
+          title={
+            diagnostics.drawnMmsis.length === 0
+              ? 'No vessel currently has a glyph.'
+              : diagnostics.drawnMmsis.length <= 100
+                ? `Vessels with a glyph: ${diagnostics.drawnMmsis.join(', ')}`
+                : `Vessels with a glyph: ${diagnostics.drawnMmsis.slice(0, 100).join(', ')} ... (${diagnostics.drawnMmsis.length} total)`
+          }
         >
           {diagnostics.drawnMmsis.length} CONTACT{diagnostics.drawnMmsis.length === 1 ? '' : 'S'}
           {' · '}
