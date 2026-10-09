@@ -515,33 +515,27 @@ export class TacticalEngine {
      * has, and a contact with no series falls back to its own reported values -- which is enough
      * for HEADING and COG but not for DERIVED_TRACK.
      */
-    const seriesByMmsi = new Map<string, AisObservationOut[]>();
-    for (const contact of contacts) {
-      const series: AisObservationOut[] = [
-        {
-          timestamp: contact.timestamp,
-          mmsi: contact.mmsi,
-          lat: contact.lat,
-          lon: contact.lon,
-          sog: contact.sog,
-          cog: contact.cog,
-          heading: contact.heading,
-          ship_name: contact.shipName,
-          source: null,
-        },
-      ];
-      seriesByMmsi.set(contact.mmsi, series);
-    }
-    for (const [mmsi, extra] of this.#aisSeriesByMmsi) {
-      const existing = seriesByMmsi.get(mmsi);
-      if (existing) seriesByMmsi.set(mmsi, [...extra, ...existing]);
-    }
-
     const renderable: AisRenderableContact[] = [];
+    const reference = options?.referenceTimeIso ?? null;
     for (const contact of contacts) {
       if (!Number.isFinite(contact.lat) || !Number.isFinite(contact.lon)) continue;
-      const series = seriesByMmsi.get(contact.mmsi) ?? [];
-      const reference = options?.referenceTimeIso ?? null;
+      const archiveSeries = this.#aisSeriesByMmsi.get(contact.mmsi);
+      const series =
+        archiveSeries !== undefined && archiveSeries.length > 0
+          ? archiveSeries
+          : [
+              {
+                timestamp: contact.timestamp,
+                mmsi: contact.mmsi,
+                lat: contact.lat,
+                lon: contact.lon,
+                sog: contact.sog,
+                cog: contact.cog,
+                heading: contact.heading,
+                ship_name: contact.shipName,
+                source: null,
+              },
+            ];
       const display =
         contact.display ??
         // No reference instant means freshness is UNKNOWN, so the state cannot be asserted. The
@@ -592,17 +586,10 @@ export class TacticalEngine {
   setAisObservationSeries(
     series: ReadonlyMap<string, readonly AisObservationOut[]>,
   ): void {
-    // COPIED, not aliased. The caller hands over objects from the store, and the renderer's
-    // orientation logic must never be able to reach back and mutate an observation.
-    //
-    // The ARRAY is copied and the ROWS are shared. A first version aliased both, which left an
-    // untested aliasing boundary between the store and the renderer: safe today only because
-    // nothing mutates a row, and "nothing does today" is not a property a reader can verify.
+    // The Map structure is copied, and the observation arrays are copied per vessel so
+    // external mutations to caller arrays cannot affect the renderer.
     this.#aisSeriesByMmsi = new Map(
-      [...series.entries()].map(([mmsi, rows]) => [
-        mmsi,
-        rows.map((row) => ({ ...row })),
-      ]),
+      [...series.entries()].map(([mmsi, rows]) => [mmsi, rows.slice()]),
     );
   }
 
