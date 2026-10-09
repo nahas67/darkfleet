@@ -294,6 +294,8 @@ export async function loadScanResults(scanId: string): Promise<void> {
     // `undefined` and renders as a plausible-looking blank. A violation throws
     // and is surfaced; it is never treated as "no data yet".
     const raw = await api.get<unknown>(`/api/scans/${scanId}/targets`);
+    const currentScanId = store.getState().scanId;
+    if (currentScanId !== null && currentScanId !== scanId) return;
     const payload: ScanTargetsResponse = validateScanTargetsResponse(raw);
     if (!assertReal(payload)) {
       store.set({
@@ -467,6 +469,8 @@ function windowEndOf(payload: ScanAisResponse): string | null {
 export async function loadScanAis(scanId: string): Promise<void> {
   try {
     const raw = await api.get<unknown>(`/api/scans/${scanId}/ais`);
+    const currentScanId = store.getState().scanId;
+    if (currentScanId !== null && currentScanId !== scanId) return;
     const payload = validateScanAisResponse(raw);
 
     // A coverage state is stored even when it is NO_COVERAGE, so the interface
@@ -535,9 +539,30 @@ export async function loadScanAis(scanId: string): Promise<void> {
       (store.getState().scene?.acquisition_time ?? null);
     const referenceTime = acquisition ?? windowEndOf(payload) ?? null;
 
+    /*
+     * DETERMINISTIC BIDIRECTIONAL MERGE (DF-X9.8-H4).
+     *
+     * `loadScanResults` and `loadScanAis` run concurrently on scan complete.
+     * `payload.ais_only` (from targets endpoint) carries correlation unmatched vessels.
+     * `observations` (from scan ais endpoint) carries full archive window observations with kinematics.
+     *
+     * To prevent response arrival order from changing the final contact set:
+     * Archive contacts win on overlap (they have sog/cog/heading).
+     * Any unmatched contact only present in payload.ais_only is preserved.
+     */
+    const existingContacts = store.getState().aisOnly;
+    const mergedAis = new Map<string, AisContact>();
+    for (const contact of existingContacts) {
+      mergedAis.set(contact.mmsi, contact);
+    }
+    for (const contact of aisOnly) {
+      mergedAis.set(contact.mmsi, contact);
+    }
+    const aisOnlyMerged = [...mergedAis.values()];
+
     store.set({
       aisCoverage: coverage,
-      aisOnly,
+      aisOnly: aisOnlyMerged,
       aisObservations: observations,
       aisReferenceTime: referenceTime,
     });

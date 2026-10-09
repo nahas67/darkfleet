@@ -67,7 +67,7 @@ function observation(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   getMock.mockReset();
-  store.set({ aisOnly: [], aisObservations: [] });
+  store.set({ scanId: null, aisOnly: [], aisObservations: [] });
 });
 
 describe('the route that used to discard the evidence', () => {
@@ -169,6 +169,55 @@ describe('the route that used to discard the evidence', () => {
     return loadScanAis('S1').then(() => {
       expect(store.getState().aisOnly[0].lat).toBe(1.004);
     });
+  });
+
+  it('merges deterministically with existing ais_only without dropping unmatched contacts', async () => {
+    // DF-X9.8-H4: Store already has an unmatched contact from targets payload.ais_only
+    store.set({
+      scanId: 'S1',
+      aisOnly: [
+        {
+          mmsi: '257000999',
+          lat: 1.5,
+          lon: 103.9,
+          timestamp: at(0),
+          shipName: 'MV UNMATCHED',
+          sog: null,
+          cog: null,
+          heading: null,
+        },
+      ],
+    });
+
+    getMock.mockResolvedValue(
+      response([
+        observation({ mmsi: '257000001', timestamp: at(4), lat: 1.004, sog: 12.0 }),
+      ]),
+    );
+
+    await loadScanAis('S1');
+
+    const contacts = store.getState().aisOnly;
+    const byMmsi = new Map(contacts.map((c) => [c.mmsi, c]));
+    // Both survive: the archive contact AND the unmatched contact from targets
+    expect(byMmsi.has('257000001')).toBe(true);
+    expect(byMmsi.has('257000999')).toBe(true);
+    expect(byMmsi.get('257000001')!.sog).toBe(12.0);
+  });
+
+  it('discards a response when the active scanId has changed', async () => {
+    // Active scan moved on to S2
+    store.set({ scanId: 'S2', aisObservations: [] });
+
+    getMock.mockResolvedValue(
+      response([observation({ mmsi: '257000001', timestamp: at(4), lat: 1.004 })]),
+    );
+
+    // Stale S1 response returns
+    await loadScanAis('S1');
+
+    // S2 state is not clobbered by stale S1 response
+    expect(store.getState().aisObservations).toHaveLength(0);
   });
 });
 

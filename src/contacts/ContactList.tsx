@@ -55,6 +55,15 @@ const FILTERS: ReadonlyArray<{ id: string; label: string; match: (row: Row) => b
 ];
 
 function buildRows(state: ReturnType<typeof useStore>): Row[] {
+  // A vessel matched to a SAR target by correlation is already in the list under its
+  // target row with the canonical classification (SAR_MATCHED_AIS). Deduplicate against
+  // those matched MMSIs so that a matched vessel is never shown twice and never mislabelled
+  // as AIS_ONLY (DF-X9.8-H4). Only truly unmatched vessels appear as AIS_ONLY.
+  const matchedMmsis = new Set(
+    state.targets
+      .map((t) => t.mmsi)
+      .filter((mmsi): mmsi is string => mmsi !== null && mmsi !== undefined && mmsi.length > 0),
+  );
   const sar: Row[] = state.targets.map((target) => ({
     kind: 'sar',
     key: `sar:${target.id}`,
@@ -66,17 +75,19 @@ function buildRows(state: ReturnType<typeof useStore>): Row[] {
     confidence: target.sarConf,
     distance: target.distanceOffsetMeters,
   }));
-  const ais: Row[] = state.aisOnly.map((contact) => ({
-    kind: 'ais',
-    key: `ais:${contact.mmsi}`,
-    id: contact.mmsi,
-    mmsi: contact.mmsi,
-    classification: 'AIS_ONLY',
-    lat: contact.lat,
-    lon: contact.lon,
-    confidence: 0,
-    distance: null,
-  }));
+  const ais: Row[] = state.aisOnly
+    .filter((contact) => !matchedMmsis.has(contact.mmsi))
+    .map((contact) => ({
+      kind: 'ais',
+      key: `ais:${contact.mmsi}`,
+      id: contact.mmsi,
+      mmsi: contact.mmsi,
+      classification: 'AIS_ONLY',
+      lat: contact.lat,
+      lon: contact.lon,
+      confidence: 0,
+      distance: null,
+    }));
   return [...sar, ...ais];
 }
 
