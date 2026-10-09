@@ -10,7 +10,7 @@
  * "no contacts here".
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useCoastlineGeometry, useZoneGeometry } from '../globe/maritimeGeometry';
 
@@ -192,6 +192,47 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
    * working FRAME TRACK path lived in `DarkFleetCommandApp`. One surface, one path.
    */
 
+  const memoizedContacts = useMemo(
+    () =>
+      state.aisOnly.map((contact) => ({
+        mmsi: contact.mmsi,
+        lat: contact.lat,
+        lon: contact.lon,
+        sog: contact.sog,
+        cog: contact.cog,
+        heading: contact.heading,
+        timestamp: contact.timestamp,
+        shipName: contact.shipName,
+      })),
+    [state.aisOnly],
+  );
+
+  const memoizedMarkers = useMemo(
+    () =>
+      state.aisObservations
+        .filter(
+          (o): o is typeof o & { lat: number; lon: number } =>
+            o.lat != null && o.lon != null && Number.isFinite(o.lat) && Number.isFinite(o.lon),
+        )
+        .map((o) => ({
+          mmsi: o.mmsi,
+          lat: o.lat,
+          lon: o.lon,
+          at: o.timestamp,
+        })),
+    [state.aisObservations],
+  );
+
+  const memoizedTracks = useMemo(
+    () => buildTrackGeometries(state.aisObservations),
+    [state.aisObservations],
+  );
+
+  const memoizedPredicted = useMemo(
+    () => collectPredictedPoints(state.targetDetail),
+    [state.targetDetail],
+  );
+
   /*
    * The AIS observation history, handed to the renderer so orientation can use more than one fix.
    * `AisContact` carries only the latest fix per vessel, and DERIVED_TRACK orientation needs two
@@ -328,32 +369,13 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       (temporalState.range.source === 'OBSERVATIONS' ? temporalNowIso(temporalState) : null)
       ?? state.aisReferenceTime;
     engine.setAisContacts(
-      state.aisOnly.map((contact) => ({
-        mmsi: contact.mmsi,
-        lat: contact.lat,
-        lon: contact.lon,
-        sog: contact.sog,
-        cog: contact.cog,
-        heading: contact.heading,
-        timestamp: contact.timestamp,
-        shipName: contact.shipName,
-      })),
+      memoizedContacts,
       {
-      referenceTimeIso,
+        referenceTimeIso,
         highlightedObservation: state.highlightedObservation,
-        observationMarkers: state.aisObservations
-          .filter(
-            (o): o is typeof o & { lat: number; lon: number } =>
-              o.lat != null && o.lon != null && Number.isFinite(o.lat) && Number.isFinite(o.lon),
-          )
-          .map((o) => ({
-            mmsi: o.mmsi,
-            lat: o.lat,
-            lon: o.lon,
-            at: o.timestamp,
-          })),
-        tracks: buildTrackGeometries(state.aisObservations),
-        predicted: collectPredictedPoints(state.targetDetail),
+        observationMarkers: memoizedMarkers,
+        tracks: memoizedTracks,
+        predicted: memoizedPredicted,
       },
     );
     /*

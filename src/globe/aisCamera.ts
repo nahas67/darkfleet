@@ -332,13 +332,22 @@ function defaultStorePort(): AisCameraStorePort {
     getFollowMode: () => store.getState().aisFollowMode,
     setFollowMode: (mode) => store.set({ aisFollowMode: mode }),
     isContactsVisible: () => store.getState().layerState.AIS_CONTACTS?.visible ?? true,
-    contactKnown: (mmsi) => {
-      const state = store.getState();
-      return (
-        state.aisOnly.some((c) => c.mmsi === mmsi) ||
-        state.aisObservations.some((o) => o.mmsi === mmsi)
-      );
-    },
+    contactKnown: (() => {
+      let cachedAisOnly: unknown = null;
+      let cachedObs: unknown = null;
+      let cachedSet = new Set<string>();
+      return (mmsi: string): boolean => {
+        const state = store.getState();
+        if (state.aisOnly !== cachedAisOnly || state.aisObservations !== cachedObs) {
+          cachedAisOnly = state.aisOnly;
+          cachedObs = state.aisObservations;
+          cachedSet = new Set<string>();
+          for (const c of state.aisOnly) cachedSet.add(c.mmsi);
+          for (const o of state.aisObservations) cachedSet.add(o.mmsi);
+        }
+        return cachedSet.has(mmsi);
+      };
+    })(),
     subscribe: (cb) => store.subscribe(cb),
   };
 }
