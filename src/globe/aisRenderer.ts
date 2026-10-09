@@ -625,7 +625,9 @@ export class AisContactRenderer {
       stats.removedBillboards += 1;
     }
 
+    const t_contacts_end = performance.now();
     this.#renderLabels(options.contacts, frame, stats);
+    const t_labels_end = performance.now();
 
     const highlighted = options.highlightedObservation ?? null;
     const markers = options.observationMarkers ?? [];
@@ -635,6 +637,7 @@ export class AisContactRenderer {
       this.#lastHighlighted = highlighted;
       this.#renderObservationMarkers(markers, highlighted);
     }
+    const t_obs_end = performance.now();
 
     if (options.predicted !== this.#lastPredicted) {
       this.#lastPredicted = options.predicted;
@@ -646,12 +649,22 @@ export class AisContactRenderer {
       this.#lastTracks = tracks;
       this.#renderTracks(tracks);
     }
+    const t_tracks_end = performance.now();
 
     this.#applyVisibility(options.visibility);
 
     stats.billboards = this.#contacts.length;
     stats.labels = this.#labels.length;
     stats.lastBuildMs = performance.now() - started;
+    if (options.contacts.length >= 500) {
+      console.log(
+        `[AIS_PROFILE] ${options.contacts.length} contacts: total=${stats.lastBuildMs.toFixed(0)}ms `
+        + `contacts=${(t_contacts_end - started).toFixed(0)}ms `
+        + `labels=${(t_labels_end - t_contacts_end).toFixed(0)}ms `
+        + `obs=${(t_obs_end - t_labels_end).toFixed(0)}ms `
+        + `tracks=${(t_tracks_end - t_obs_end).toFixed(0)}ms`,
+      );
+    }
     this.#lastStats = stats;
     return stats;
   }
