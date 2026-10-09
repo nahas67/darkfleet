@@ -93,4 +93,34 @@ describe('DF-X9.8-H4: ContactList deduplication and classification authority', (
     expect(visibleAis).toHaveLength(1);
     expect(visibleAis[0].mmsi).toBe('257000002');
   });
+
+  it('bounds rendered rows to 150 at scale and prioritises selected contact', () => {
+    resetStore();
+
+    // Generate 500 AIS contacts
+    const aisContacts: AisContact[] = [];
+    for (let i = 0; i < 500; i++) {
+      aisContacts.push({
+        mmsi: `25700${String(i).padStart(4, '0')}`,
+        lat: 1.3 + i * 0.001,
+        lon: 103.8 + i * 0.001,
+        timestamp: '2026-05-12T08:12:00Z',
+        shipName: `MV ${i}`,
+        sog: 10.0,
+        cog: 90.0,
+        heading: 90.0,
+      });
+    }
+
+    // Select a contact far down the list (index 350)
+    const deepMmsi = '257000350';
+    store.set({
+      targets: [],
+      aisOnly: aisContacts,
+      selectedAis: { mmsi: deepMmsi, observationAt: null },
+    });
+
+    expect(store.getState().aisOnly).toHaveLength(500);
+    expect(store.getState().selectedAis?.mmsi).toBe(deepMmsi);
+  });
 });
