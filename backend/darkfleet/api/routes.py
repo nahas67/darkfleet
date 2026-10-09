@@ -45,6 +45,7 @@ from darkfleet.ais.delivery import (
 from darkfleet.ais.delivery import (
     AisCoverageOut,
     AisCoverageState,
+    AisObservationOut,
     ScanAisResponse,
     ScanAisWindow,
     TargetAisResponse,
@@ -2761,7 +2762,12 @@ def scan_ais(scan_id: str, state: State) -> ScanAisResponse:
         )
 
     rows = archive.query(window.start, window.end, bbox=box)  # type: ignore[arg-type]
-    delivered = [to_out(row) for row in rows]
+    delivered: list[AisObservationOut] = []
+    for row in rows:
+        try:
+            delivered.append(to_out(row))
+        except ValueError:
+            continue
     return ScanAisResponse(
         scan_id=scan_id,
         coverage=coverage_for(archive, window.start, window.end, len(delivered)),
@@ -2829,7 +2835,12 @@ def target_ais_observations(
         )
 
     rows = archive.query(window.start, window.end, mmsi=str(mmsi))
-    delivered = [to_out(row) for row in rows]
+    delivered: list[AisObservationOut] = []
+    for row in rows:
+        try:
+            delivered.append(to_out(row))
+        except ValueError:
+            continue
     return TargetAisResponse(
         target_id=target_id,
         mmsi=str(mmsi),
@@ -2883,7 +2894,12 @@ def vessel_track(mmsi: str, state: State) -> VesselTrackResponse:
         newest + timedelta(days=1),
         mmsi=normalised,
     )
-    delivered = [to_out(row) for row in rows]
+    delivered: list[AisObservationOut] = []
+    for row in rows:
+        try:
+            delivered.append(to_out(row))
+        except ValueError:
+            continue
     identity = identity_from(delivered)
     return VesselTrackResponse(
         mmsi=normalised,

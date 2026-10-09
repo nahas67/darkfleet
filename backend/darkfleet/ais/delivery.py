@@ -37,6 +37,7 @@ second. See :mod:`darkfleet.ais.models`.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -44,6 +45,20 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .archive import AisArchive
+
+
+class PositionStatus(StrEnum):
+    """Explicit position validity diagnostic (DF-X9.8-H1).
+
+    Distinguishes:
+    - POSITION_AVAILABLE: a real measured latitude and longitude (including measured 0.0, 0.0)
+    - POSITION_UNAVAILABLE: coordinates missing or null in source observation
+    - INVALID_COORDINATE: coordinate present but non-finite or out of [-90,90] / [-180,180] bounds
+    """
+
+    POSITION_AVAILABLE = "POSITION_AVAILABLE"
+    POSITION_UNAVAILABLE = "POSITION_UNAVAILABLE"
+    INVALID_COORDINATE = "INVALID_COORDINATE"
 
 
 class AisCoverageState(StrEnum):
@@ -66,12 +81,18 @@ class AisObservationOut(BaseModel):
 
     Every field except identity, position and time is nullable, and ``None``
     means "the source did not report this" -- never a zero.
+    Position is nullable when unavailable or invalid, diagnosed explicitly by
+    position_status -- never silently fabricated as (0.0, 0.0) Null Island.
     """
 
     timestamp: datetime
     mmsi: str
-    lat: float
-    lon: float
+    lat: float | None = Field(default=None, description="degrees north; null when unavailable")
+    lon: float | None = Field(default=None, description="degrees east; null when unavailable")
+    position_status: PositionStatus = Field(
+        default=PositionStatus.POSITION_AVAILABLE,
+        description="Explicit position validity: POSITION_AVAILABLE, POSITION_UNAVAILABLE, or INVALID_COORDINATE",
+    )
     sog: float | None = Field(default=None, description="knots; null when not reported")
     cog: float | None = Field(default=None, description="degrees true; null when not reported")
     heading: float | None = Field(
@@ -190,13 +211,60 @@ def _optional_str(value: Any) -> str | None:
     return text or None
 
 
+def _parse_coordinate(value: Any, min_val: float, max_val: float) -> tuple[float | None, bool]:
+    """Parse a coordinate value, returning (float_or_none, is_invalid).
+
+    Distinguishes:
+    - valid measured coordinate (including 0.0) -> (float, False)
+    - missing/None coordinate -> (None, False)
+    - invalid coordinate (out of bounds, non-finite, unparseable) -> (None, True)
+    """
+    if value is None:
+        return None, False
+    try:
+        f = float(value)
+        if not math.isfinite(f) or f < min_val or f > max_val:
+            return None, True
+        return f, False
+    except (TypeError, ValueError):
+        return None, True
+
+
 def to_out(row: dict[str, Any]) -> AisObservationOut:
-    """One archive row -> the delivered shape, preserving absence."""
+    """One archive row -> the delivered shape, preserving absence.
+
+    Never fabricates Null Island (0.0, 0.0) when position is absent or unparseable.
+    A genuine (0.0, 0.0) observation is preserved as POSITION_AVAILABLE.
+    """
+    ts = as_utc(row.get("timestamp"))
+    if ts is None:
+        raise ValueError(f"Observation row missing valid timestamp: {row.get('timestamp')!r}")
+    mmsi = str(row.get("mmsi") or "").strip()
+    if not mmsi:
+        raise ValueError(f"Observation row missing valid MMSI: {row.get('mmsi')!r}")
+
+    lat_val, lat_invalid = _parse_coordinate(row.get("lat"), -90.0, 90.0)
+    lon_val, lon_invalid = _parse_coordinate(row.get("lon"), -180.0, 180.0)
+
+    if lat_invalid or lon_invalid:
+        pos_status = PositionStatus.INVALID_COORDINATE
+        lat_out = None
+        lon_out = None
+    elif lat_val is None or lon_val is None:
+        pos_status = PositionStatus.POSITION_UNAVAILABLE
+        lat_out = None
+        lon_out = None
+    else:
+        pos_status = PositionStatus.POSITION_AVAILABLE
+        lat_out = lat_val
+        lon_out = lon_val
+
     return AisObservationOut(
-        timestamp=as_utc(row.get("timestamp")) or datetime.fromtimestamp(0, tz=UTC),
-        mmsi=str(row.get("mmsi", "")),
-        lat=float(row.get("lat", 0.0)),
-        lon=float(row.get("lon", 0.0)),
+        timestamp=ts,
+        mmsi=mmsi,
+        lat=lat_out,
+        lon=lon_out,
+        position_status=pos_status,
         sog=_optional_float(row.get("sog")),
         cog=_optional_float(row.get("cog")),
         heading=_optional_float(row.get("heading")),
@@ -347,6 +415,7 @@ __all__ = [
     "AisCoverageOut",
     "AisCoverageState",
     "AisObservationOut",
+    "PositionStatus",
     "ScanAisResponse",
     "ScanAisWindow",
     "TargetAisResponse",

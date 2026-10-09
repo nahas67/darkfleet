@@ -132,7 +132,9 @@ export function AisTab({ targetRef }: { targetRef: TargetRef }) {
                   header: 'Lat, Lon',
                   render: (row) => (
                     <span className="df-num">
-                      {row.lat.toFixed(4)}, {row.lon.toFixed(4)}
+                      {row.lat != null && row.lon != null
+                        ? `${row.lat.toFixed(4)}, ${row.lon.toFixed(4)}`
+                        : 'not established'}
                     </span>
                   ),
                 },

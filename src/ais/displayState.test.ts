@@ -312,7 +312,7 @@ describe('derived heading needs a real separation', () => {
     // direction) from it would invent an orientation.
     const a = obs({ timestamp: at(0), lat: 1.0, lon: 103.0 });
     const b = obs({ timestamp: at(4), lat: 1.00001, lon: 103.0 });
-    expect(surfaceDistanceM(a.lat, a.lon, b.lat, b.lon)).toBeLessThan(
+    expect(surfaceDistanceM(a.lat!, a.lon!, b.lat!, b.lon!)).toBeLessThan(
       MIN_DERIVED_DISPLACEMENT_M,
     );
     expect(resolveOrientation([a, b]).source).toBe('UNKNOWN');
@@ -321,7 +321,7 @@ describe('derived heading needs a real separation', () => {
   it('accepts a separation just above the threshold', () => {
     const a = obs({ timestamp: at(0), lat: 1.0, lon: 103.0 });
     const b = obs({ timestamp: at(4), lat: 1.0, lon: 103.0005 });
-    expect(surfaceDistanceM(a.lat, a.lon, b.lat, b.lon)).toBeGreaterThanOrEqual(
+    expect(surfaceDistanceM(a.lat!, a.lon!, b.lat!, b.lon!)).toBeGreaterThanOrEqual(
       MIN_DERIVED_DISPLACEMENT_M,
     );
     expect(resolveOrientation([a, b]).source).toBe('DERIVED_TRACK');

@@ -215,15 +215,15 @@ function measureRetainedUpdate(count: number): { ms: number; allocations: number
   const vessels = makeVessels(count);
   const retained: FakeBillboard[] = vessels.map((series) => {
     const latest = series[series.length - 1];
-    return { lat: latest.lat, lon: latest.lon, rotation: 0 };
+    return { lat: latest.lat ?? 0, lon: latest.lon ?? 0, rotation: 0 };
   });
 
   const body = (): void => {
     for (let i = 0; i < vessels.length; i += 1) {
       const latest = vessels[i][vessels[i].length - 1];
       const billboard = retained[i];
-      billboard.lat = latest.lat + 0.0001;
-      billboard.lon = latest.lon + 0.0001;
+      billboard.lat = (latest.lat ?? 0) + 0.0001;
+      billboard.lon = (latest.lon ?? 0) + 0.0001;
       billboard.rotation = (i % 360) * (Math.PI / 180);
     }
   };
@@ -244,7 +244,7 @@ function measureRebuiltUpdate(count: number): { ms: number; allocations: number 
   // not for a fresh 5,000-object array each time -- which flatters it, deliberately.
   let live: FakeBillboard[] = vessels.map((series) => {
     const latest = series[series.length - 1];
-    return { lat: latest.lat, lon: latest.lon, rotation: 0 };
+    return { lat: latest.lat ?? 0, lon: latest.lon ?? 0, rotation: 0 };
   });
 
   const body = (): void => {
@@ -252,8 +252,8 @@ function measureRebuiltUpdate(count: number): { ms: number; allocations: number 
     for (let i = 0; i < vessels.length; i += 1) {
       const latest = vessels[i][vessels[i].length - 1];
       live.push({
-        lat: latest.lat + 0.0001,
-        lon: latest.lon + 0.0001,
+        lat: (latest.lat ?? 0) + 0.0001,
+        lon: (latest.lon ?? 0) + 0.0001,
         rotation: (i % 360) * (Math.PI / 180),
       });
     }

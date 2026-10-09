@@ -51,6 +51,14 @@ function buildTrackGeometries(
   for (const observation of [...observations].sort(
     (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
   )) {
+    if (
+      observation.lat == null ||
+      observation.lon == null ||
+      !Number.isFinite(observation.lat) ||
+      !Number.isFinite(observation.lon)
+    ) {
+      continue;
+    }
     const fixes = byMmsi.get(observation.mmsi) ?? [];
     // `at` is carried because the renderer needs it to tell an observed interval from a reporting
     // GAP. Without it the track is one polyline through everything, which is the defect
@@ -333,12 +341,17 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
       {
       referenceTimeIso,
         highlightedObservation: state.highlightedObservation,
-        observationMarkers: state.aisObservations.map((o) => ({
-          mmsi: o.mmsi,
-          lat: o.lat,
-          lon: o.lon,
-          at: o.timestamp,
-        })),
+        observationMarkers: state.aisObservations
+          .filter(
+            (o): o is typeof o & { lat: number; lon: number } =>
+              o.lat != null && o.lon != null && Number.isFinite(o.lat) && Number.isFinite(o.lon),
+          )
+          .map((o) => ({
+            mmsi: o.mmsi,
+            lat: o.lat,
+            lon: o.lon,
+            at: o.timestamp,
+          })),
         tracks: buildTrackGeometries(state.aisObservations),
         predicted: collectPredictedPoints(state.targetDetail),
       },
@@ -440,7 +453,11 @@ export function TacticalWorld({ fallback }: TacticalWorldProps) {
      * draw, and `predicted` is still `null` because the analytical predicted geometry comes from
      * the renderer's own collection off the scan record.
      */
-    const observed = (track?.observed ?? []).map((fix) => ({ lat: fix.lat, lon: fix.lon }));
+    const observed = (track?.observed ?? [])
+      .filter((fix): fix is typeof fix & { lat: number; lon: number } =>
+        fix.lat != null && fix.lon != null && Number.isFinite(fix.lat) && Number.isFinite(fix.lon),
+      )
+      .map((fix) => ({ lat: fix.lat, lon: fix.lon }));
     engine.setTrack(observed, null);
     engine.refreshLayers();
   }, [track, webgl, initError]);

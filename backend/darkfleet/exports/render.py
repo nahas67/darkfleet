@@ -231,7 +231,7 @@ def render_pdf(
         corr = t.get("corr", {}) or {}
         dec = corr.get("scoreDecomposition") or {}
         observed = [
-            ("Position", f"{t.get('lat')}, {t.get('lon')}"),
+            ("Position", f"{t.get('lat')}, {t.get('lon')}" if t.get("lat") is not None and t.get("lon") is not None else "not established"),
             ("Apparent length", f"{t.get('lenM')} m +/- {t.get('lenUncM')} m"),
             ("Orientation", f"{t.get('hdg')} deg"),
             ("Mean / peak backscatter", f"{t.get('meanDb')} / {t.get('maxDb')} dB"),

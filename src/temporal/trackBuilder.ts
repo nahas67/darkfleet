@@ -166,8 +166,8 @@ export function buildTrack(observations: readonly AisObservationOut[]): TrackBui
       continue;
     }
     points.push({
-      lat: observation.lat,
-      lon: observation.lon,
+      lat: observation.lat as number,
+      lon: observation.lon as number,
       at: observation.timestamp,
       observationIndex: index,
     });

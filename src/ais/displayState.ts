@@ -345,6 +345,14 @@ export function isMoving(observations: readonly AisObservationOut[]): boolean {
   // anywhere? Two fixes further apart than a vessel length describe movement, not noise.
   if (ordered.length < 2) return false;
   const previous = ordered[ordered.length - 2];
+  if (
+    previous.lat == null ||
+    previous.lon == null ||
+    latest.lat == null ||
+    latest.lon == null
+  ) {
+    return false;
+  }
   return (
     surfaceDistanceM(previous.lat, previous.lon, latest.lat, latest.lon) >=
     MIN_DERIVED_DISPLACEMENT_M
@@ -420,14 +428,21 @@ export function resolveOrientation(observations: readonly AisObservationOut[]): 
   // 3. Derived from observed movement. Needs two well-separated fixes.
   if (ordered.length >= 2) {
     const previous = ordered[ordered.length - 2];
-    const separation = surfaceDistanceM(previous.lat, previous.lon, latest.lat, latest.lon);
-    if (separation >= MIN_DERIVED_DISPLACEMENT_M) {
-      return {
-        source: 'DERIVED_TRACK',
-        degrees: initialBearingDeg(previous.lat, previous.lon, latest.lat, latest.lon),
-        observedAt: latest.timestamp,
-        reason: `Derived from observed movement over ${Math.round(separation)} m.`,
-      };
+    if (
+      previous.lat != null &&
+      previous.lon != null &&
+      latest.lat != null &&
+      latest.lon != null
+    ) {
+      const separation = surfaceDistanceM(previous.lat, previous.lon, latest.lat, latest.lon);
+      if (separation >= MIN_DERIVED_DISPLACEMENT_M) {
+        return {
+          source: 'DERIVED_TRACK',
+          degrees: initialBearingDeg(previous.lat, previous.lon, latest.lat, latest.lon),
+          observedAt: latest.timestamp,
+          reason: `Derived from observed movement over ${Math.round(separation)} m.`,
+        };
+      }
     }
   }
 
@@ -607,8 +622,26 @@ export function interpolateForDisplay(
   to: AisObservationOut,
   fraction: number,
 ): { lat: number; lon: number } | null {
-  if (!Number.isFinite(from.lat) || !Number.isFinite(from.lon)) return null;
-  if (!Number.isFinite(to.lat) || !Number.isFinite(to.lon)) return null;
+  if (
+    from.lat == null ||
+    from.lon == null ||
+    !Number.isFinite(from.lat) ||
+    !Number.isFinite(from.lon)
+  ) {
+    return null;
+  }
+  if (
+    to.lat == null ||
+    to.lon == null ||
+    !Number.isFinite(to.lat) ||
+    !Number.isFinite(to.lon)
+  ) {
+    return null;
+  }
+  const fromLat = from.lat;
+  const fromLon = from.lon;
+  const toLat = to.lat;
+  const toLon = to.lon;
 
   const fromAt = epochSeconds(from.timestamp);
   const toAt = epochSeconds(to.timestamp);
@@ -618,7 +651,7 @@ export function interpolateForDisplay(
   // The gap check. Not `>=`: an interval of exactly the limit is within the limit.
   if (interval > MAX_INTERPOLATION_INTERVAL_S) return null;
 
-  let dLon = to.lon - from.lon;
+  let dLon = toLon - fromLon;
   while (dLon > 180) dLon -= 360;
   while (dLon < -180) dLon += 360;
   // Exactly antipodal: two equally short ways round, and picking one would be an invention.
@@ -626,8 +659,8 @@ export function interpolateForDisplay(
 
   const clamped = Math.min(1, Math.max(0, fraction));
   return {
-    lat: from.lat + (to.lat - from.lat) * clamped,
-    lon: normalizeDegrees(from.lon + dLon * clamped),
+    lat: fromLat + (toLat - fromLat) * clamped,
+    lon: normalizeDegrees(fromLon + dLon * clamped),
   };
 }
 
@@ -701,8 +734,8 @@ export function displayStateOf(
     // Unparseable reference time. Draw the latest real fix rather than guessing at an instant.
     return {
       ...base,
-      lat: latest.lat,
-      lon: latest.lon,
+      lat: latest.lat ?? null,
+      lon: latest.lon ?? null,
       state: freshness.tier === 'CURRENT' ? 'OBSERVED' : 'STALE',
       at: latest.timestamp,
       sourceObservationTimestamps: [latest.timestamp],
@@ -745,8 +778,8 @@ export function displayStateOf(
           : 'OBSERVED';
     return {
       ...base,
-      lat: latest.lat,
-      lon: latest.lon,
+      lat: latest.lat ?? null,
+      lon: latest.lon ?? null,
       state,
       at: latest.timestamp,
       sourceObservationTimestamps: [latest.timestamp],
@@ -761,8 +794,8 @@ export function displayStateOf(
     if (epochSeconds(candidate.timestamp) === referenceAt) {
       return {
         ...base,
-        lat: candidate.lat,
-        lon: candidate.lon,
+        lat: candidate.lat ?? null,
+        lon: candidate.lon ?? null,
         state: 'OBSERVED',
         at: candidate.timestamp,
         sourceObservationTimestamps: [candidate.timestamp],
@@ -805,8 +838,8 @@ export function displayStateOf(
   // observation at or before the reference time and is therefore not extrapolated.
   return {
     ...base,
-    lat: before.lat,
-    lon: before.lon,
+    lat: before.lat ?? null,
+    lon: before.lon ?? null,
     state: 'OBSERVED',
     at: before.timestamp,
     sourceObservationTimestamps: [before.timestamp],
@@ -938,6 +971,22 @@ export function segmentTrack(
   for (let i = 0; i < ordered.length - 1; i += 1) {
     const a = ordered[i];
     const b = ordered[i + 1];
+    if (
+      a.lat == null ||
+      a.lon == null ||
+      b.lat == null ||
+      b.lon == null ||
+      !Number.isFinite(a.lat) ||
+      !Number.isFinite(a.lon) ||
+      !Number.isFinite(b.lat) ||
+      !Number.isFinite(b.lon)
+    ) {
+      continue;
+    }
+    const aLat = a.lat;
+    const aLon = a.lon;
+    const bLat = b.lat;
+    const bLon = b.lon;
     const at = epochSeconds(a.timestamp);
     const bt = epochSeconds(b.timestamp);
     const span = Number.isFinite(at) && Number.isFinite(bt) ? bt - at : null;
@@ -956,17 +1005,17 @@ export function segmentTrack(
       }
       run.kind = 'OBSERVED';
       if (run.points.length === 0) {
-        run.points.push({ lat: a.lat, lon: a.lon });
+        run.points.push({ lat: aLat, lon: aLon });
         run.fromTimestamp = a.timestamp;
       }
-      run.points.push({ lat: b.lat, lon: b.lon });
+      run.points.push({ lat: bLat, lon: bLon });
       run.toTimestamp = b.timestamp;
       run.spanSeconds = (run.spanSeconds ?? 0) + (span ?? 0);
     } else {
       flush();
       segments.push({
         kind: 'GAP',
-        points: [{ lat: a.lat, lon: a.lon }, { lat: b.lat, lon: b.lon }],
+        points: [{ lat: aLat, lon: aLon }, { lat: bLat, lon: bLon }],
         fromTimestamp: a.timestamp,
         toTimestamp: b.timestamp,
         // Null, not zero and not the raw span: the span is unknown, and inventing one is what

@@ -311,8 +311,12 @@ export interface LayerStats {
 export interface AisObservationOut {
   readonly timestamp: string;
   readonly mmsi: string;
-  readonly lat: number;
-  readonly lon: number;
+  /** degrees north; null when unavailable */
+  readonly lat?: number | null;
+  /** degrees east; null when unavailable */
+  readonly lon?: number | null;
+  /** Explicit position validity: POSITION_AVAILABLE, POSITION_UNAVAILABLE, or INVALID_COORDINATE */
+  readonly position_status?: PositionStatus;
   /** knots; null when not reported */
   readonly sog?: number | null;
   /** degrees true; null when not reported */
@@ -789,6 +793,9 @@ export interface ScanRecordDocument {
   readonly created_at: string;
 }
 
+/** Explicit position validity diagnostic (DF-X9.8-H1). Distinguishes: - POSITION_AVAILABLE: a real measured latitude and longitude (including measured 0.0, 0.0) - POSITION_UNAVAILABLE: coordinates missing or null in source observation - INVALID_COORDINATE: coordinate present but non-finite or out of... */
+export type PositionStatus = "POSITION_AVAILABLE" | "POSITION_UNAVAILABLE" | "INVALID_COORDINATE";
+
 /** Whether the archive can answer a question, and how completely. */
 export type AisCoverageState = "AVAILABLE" | "PARTIAL" | "NO_COVERAGE" | "NOT_CONFIGURED";
 
@@ -1188,6 +1195,7 @@ export type ContractSchemaName =
   | 'ProviderStatus'
   | 'ScanStage'
   | 'ScanRecordDocument'
+  | 'PositionStatus'
   | 'AisCoverageState'
   | 'LicenseKind'
   | 'ContextStatus'
@@ -1621,6 +1629,7 @@ export const AISOBSERVATIONOUT_FIELDS = [
   'mmsi',
   'lat',
   'lon',
+  'position_status',
   'sog',
   'cog',
   'heading',

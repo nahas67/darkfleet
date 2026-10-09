@@ -52,8 +52,9 @@ import { useStore } from '../state/store';
  */
 export type SelectedAisObservationSummary = {
   at: string;
-  lat: number;
-  lon: number;
+  lat: number | null;
+  lon: number | null;
+  positionStatus?: string;
   sog: number | null;
   cog: number | null;
   heading: number | null;
@@ -138,8 +139,9 @@ export function buildSelectedAisSummary(
         ? null
         : {
             at: rawRow.timestamp,
-            lat: rawRow.lat,
-            lon: rawRow.lon,
+            lat: rawRow.lat ?? null,
+            lon: rawRow.lon ?? null,
+            positionStatus: rawRow.position_status,
             sog: speedKnots(rawRow),
             cog: courseOverGround(rawRow),
             heading: trueHeading(rawRow),

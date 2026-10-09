@@ -424,13 +424,15 @@ function describe(error: unknown): string {
  */
 function latestPerVessel(
   observations: readonly AisObservationOut[],
-): AisObservationOut[] {
-  const byVessel = new Map<string, AisObservationOut>();
+): Array<AisObservationOut & { lat: number; lon: number }> {
+  const byVessel = new Map<string, AisObservationOut & { lat: number; lon: number }>();
   for (const observation of observations) {
+    if (observation.lat == null || observation.lon == null) continue;
     if (!Number.isFinite(observation.lat) || !Number.isFinite(observation.lon)) continue;
+    const validObs = observation as AisObservationOut & { lat: number; lon: number };
     const existing = byVessel.get(observation.mmsi);
     if (existing === undefined) {
-      byVessel.set(observation.mmsi, observation);
+      byVessel.set(observation.mmsi, validObs);
       continue;
     }
     const incomingAt = Date.parse(observation.timestamp);
@@ -439,7 +441,7 @@ function latestPerVessel(
     // malformed record silently blank a real contact.
     if (!Number.isFinite(incomingAt)) continue;
     if (!Number.isFinite(existingAt) || incomingAt > existingAt) {
-      byVessel.set(observation.mmsi, observation);
+      byVessel.set(observation.mmsi, validObs);
     }
   }
   return [...byVessel.values()];

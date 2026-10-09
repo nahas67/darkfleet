@@ -220,3 +220,73 @@ def test_ais_heading_sentinel_is_not_clamped_to_zero() -> None:
     assert observation.cog is None, observation.cog
     # A genuine zero speed IS a measurement and survives.
     assert observation.sog == 0.0
+
+
+# ------------------------------------------------------------- Null Island elimination (DF-X9.8-H1)
+
+
+def test_to_out_missing_position_never_fabricates_null_island() -> None:
+    """Missing coordinates must be explicitly POSITION_UNAVAILABLE, never (0.0, 0.0)."""
+    from darkfleet.ais.delivery import PositionStatus, to_out
+
+    # Both coordinates missing
+    row_both_none = {"timestamp": "2026-03-01T12:00:00Z", "mmsi": "123456789"}
+    out1 = to_out(row_both_none)
+    assert out1.lat is None
+    assert out1.lon is None
+    assert out1.position_status == PositionStatus.POSITION_UNAVAILABLE
+
+    # Only lat missing
+    row_no_lat = {"timestamp": "2026-03-01T12:00:00Z", "mmsi": "123456789", "lat": None, "lon": 103.8}
+    out2 = to_out(row_no_lat)
+    assert out2.lat is None
+    assert out2.lon is None
+    assert out2.position_status == PositionStatus.POSITION_UNAVAILABLE
+
+    # Only lon missing
+    row_no_lon = {"timestamp": "2026-03-01T12:00:00Z", "mmsi": "123456789", "lat": 1.3, "lon": None}
+    out3 = to_out(row_no_lon)
+    assert out3.lat is None
+    assert out3.lon is None
+    assert out3.position_status == PositionStatus.POSITION_UNAVAILABLE
+
+
+def test_to_out_genuine_null_island_preserved() -> None:
+    """A genuine measured position at (0.0, 0.0) is valid and must NOT be treated as missing."""
+    from darkfleet.ais.delivery import PositionStatus, to_out
+
+    row_zero = {"timestamp": "2026-03-01T12:00:00Z", "mmsi": "123456789", "lat": 0.0, "lon": 0.0}
+    out = to_out(row_zero)
+    assert out.lat == 0.0
+    assert out.lon == 0.0
+    assert out.position_status == PositionStatus.POSITION_AVAILABLE
+
+
+def test_to_out_invalid_coordinates() -> None:
+    """Out of bounds or non-finite coordinates diagnose as INVALID_COORDINATE."""
+    from darkfleet.ais.delivery import PositionStatus, to_out
+
+    for bad_lat, bad_lon in [
+        (95.0, 0.0),
+        (-91.0, 0.0),
+        (0.0, 185.0),
+        (0.0, -181.0),
+        (float("nan"), 100.0),
+        (10.0, float("inf")),
+    ]:
+        row = {"timestamp": "2026-03-01T12:00:00Z", "mmsi": "123456789", "lat": bad_lat, "lon": bad_lon}
+        out = to_out(row)
+        assert out.lat is None
+        assert out.lon is None
+        assert out.position_status == PositionStatus.INVALID_COORDINATE
+
+
+def test_to_out_rejects_missing_timestamp_or_mmsi() -> None:
+    """Timestamp and MMSI are required and must not be fabricated (e.g. 1970-01-01)."""
+    from darkfleet.ais.delivery import to_out
+
+    with pytest.raises(ValueError, match="missing valid timestamp"):
+        to_out({"mmsi": "123456789", "lat": 1.0, "lon": 103.0})
+
+    with pytest.raises(ValueError, match="missing valid MMSI"):
+        to_out({"timestamp": "2026-03-01T12:00:00Z", "lat": 1.0, "lon": 103.0})
