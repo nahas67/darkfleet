@@ -3,6 +3,8 @@
 Requires an ALREADY RUNNING DarkFleet Vite server and hardware-backed Chrome.
 No application repository files, browser user profile or backend data are changed.
 Default action is inspection only; pass --run after coordinating exclusive timing.
+--longitudinal adds bounded independent load/render/clear/destroy cycles using
+reused synthetic fixture arrays, forced GC, DOM counters and GL call deltas.
 
 Examples:
   python -B build-tools/ais_webgl_hardware_benchmark.py
@@ -18,6 +20,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
@@ -126,21 +129,24 @@ INSTALL = r"""async () => {
     const create=gl[createName],del=gl[deleteName];
     if(typeof create!=='function'||typeof del!=='function')continue;
     const created=new WeakSet(),deleted=new WeakSet();
-    const stats={created:0,deleted:0,net:0};resources[kind]=stats;
+    const stats={created:0,deleted:0,net:0,hooksAttached:false};resources[kind]=stats;
     try {
-      gl[createName]=function(...args){
+      const wrappedCreate=function(...args){
         const output=create.apply(gl,args);
         if(output!==null&&typeof output==='object'){
           created.add(output);stats.created++;stats.net++;
         }
         return output;
       };
-      gl[deleteName]=function(value){
+      const wrappedDelete=function(value){
         if(value&&created.has(value)&&!deleted.has(value)){
           deleted.add(value);stats.deleted++;stats.net--;
         }
         return del.call(gl,value);
       };
+      gl[createName]=wrappedCreate;
+      gl[deleteName]=wrappedDelete;
+      stats.hooksAttached=gl[createName]===wrappedCreate&&gl[deleteName]===wrappedDelete;
     }catch(err){resources[kind]={unavailable:String(err)};}
   }
   const snapshot=()=>({
@@ -173,6 +179,8 @@ INSTALL = r"""async () => {
     canvasSameAsDom:document.querySelector('.cesium-widget canvas')===canvas,
     documentVisible:document.visibilityState, initialWorkspace:store.getState().workspace,
     previousAisStats, primitivesBeforeIsolation,
+    resourceHooksAttached:Object.fromEntries(Object.entries(resources)
+      .map(([kind,stats])=>[kind,stats.hooksAttached===true])),
     resourceTrackingNote:'WebGL API call deltas AFTER instrument installation, not all native resources / VRAM.',
     before:snapshot(),engineUrl,storeUrl,
     sourceFixture:'src/globe/aisRenderer.perf.test.ts: makeVessels (transcribed)',
@@ -287,6 +295,92 @@ CASE = r"""async ({count,frames,timeoutMs}) => {
 }"""
 
 
+# This must remain a separate option so the historical 36-frame per-density
+# benchmark is comparable byte-for-byte with its pre-longitudinal results.
+# Fixed fixture arrays are intentionally reused within a density: changes in
+# post-GC empty-scene memory cannot be ascribed to 10k new JS fixture objects
+# allocated on each cycle. After the density we release even these references.
+LONG_CYCLE = r"""async ({count,cycle,timeoutMs}) => {
+  const b=window.__dfGpuBench;
+  if(!b?.viewer?.scene || !b?.gl) throw new Error('No real initialized Cesium canvas');
+  const {engine,viewer,snapshot,at}=b;
+  if(!b.longitudinalFleet || b.longitudinalFleetCount!==count){
+    b.longitudinalFleet=b.makeFleet(count);
+    b.longitudinalFleetCount=count;
+  }
+  const fleet=b.longitudinalFleet;
+  const before=snapshot();
+  if(before.primitives!==0 || before.aisStats?.billboards!==0 || before.webglContextLost)
+    throw new Error('NONEMPTY_START_OR_CONTEXT_LOSS_'+count+'_'+cycle);
+  const nextRendered=label=>new Promise((resolve,reject)=>{
+    let done=false;
+    const off=viewer.scene.postRender.addEventListener(()=>{
+      if(done)return;done=true;off();clearTimeout(timer);resolve(performance.now());
+    });
+    const timer=setTimeout(()=>{
+      if(done)return;done=true;off();reject(new Error('POST_RENDER_TIMEOUT_'+label+'_'+count+'_'+cycle));
+    },timeoutMs);
+    viewer.scene.requestRender();
+  });
+  // Actual app renderer, 5 synthetic observation fixes per contact. This
+  // test has no network-backed AIS input, React click or invented SAR scene.
+  const start=performance.now();
+  engine.setAisObservationSeries(fleet.rows);
+  b.setFrame(fleet,8);
+  const afterLoad=snapshot();
+  if(afterLoad.aisStats?.billboards!==count || afterLoad.primitives!==5)
+    throw new Error('RENDERER_DENSITY_COUNT_INVALID_'+count+'_'+cycle);
+  await nextRendered('load');
+  const loadedRenderAt=performance.now();
+  engine.setAisSelection(null);
+  engine.setAisContacts([],{referenceTimeIso:at(10),tracks:new Map(),
+    observationMarkers:[],predicted:[]});
+  engine.setAisObservationSeries(new Map());
+  const afterClear=snapshot();
+  if(afterClear.aisStats?.billboards!==0)
+    throw new Error('RENDERER_DID_NOT_CLEAR_'+count+'_'+cycle);
+  await nextRendered('clear');
+  engine.destroyAisRenderer();
+  await nextRendered('destroy');
+  const afterDestroy=snapshot();
+  if(afterDestroy.primitives!==0 || afterDestroy.webglContextLost)
+    throw new Error('RENDERER_PRIMITIVE_LEAK_OR_CONTEXT_LOST_'+count+'_'+cycle);
+  return {count,cycle,fixtureRows:count*5,loadedBillboards:afterLoad.aisStats.billboards,
+    renderToFirstPostRenderMs:+(loadedRenderAt-start).toFixed(2),
+    lifecycleMs:+(performance.now()-start).toFixed(2),
+    before:{primitives:before.primitives,billboards:before.aisStats.billboards},
+    afterClear:{primitives:afterClear.primitives,billboards:afterClear.aisStats.billboards},
+    afterDestroy:{primitives:afterDestroy.primitives,billboards:afterDestroy.aisStats?.billboards,
+      webglContextLost:afterDestroy.webglContextLost,
+      observedGlCallsSinceInstall:afterDestroy.webglCallsSinceInstall},
+    pass:true};
+}"""
+
+LONG_RELEASE = r"""() => {
+  const b=window.__dfGpuBench;
+  b.longitudinalFleet=null;b.longitudinalFleetCount=null;
+  return {primitives:b.viewer.scene.primitives.length,
+    canvasSameAsDom:b.canvas===document.querySelector('.cesium-widget canvas')};
+}"""
+
+LONG_GC = r"""() => {
+  const b=window.__dfGpuBench;
+  const available=typeof window.gc==='function';
+  if(available){window.gc();window.gc();}
+  return {gcAvailable:available,heapBytes:performance.memory?.usedJSHeapSize??null,
+    heapLimitBytes:performance.memory?.jsHeapSizeLimit??null,
+    domElements:document.querySelectorAll('*').length,
+    domCanvases:document.querySelectorAll('canvas').length,
+    widgetCount:document.querySelectorAll('.cesium-widget').length,
+    canvasConnected:b.canvas.isConnected,
+    canvasSameAsDom:b.canvas===document.querySelector('.cesium-widget canvas'),
+    primitives:b.viewer.scene.primitives.length,
+    entities:b.viewer.entities.values.length,
+    webglContextLost:b.gl.isContextLost(),
+    observedGlCallsSinceInstall:b.snapshot().webglCallsSinceInstall};
+}"""
+
+
 def git(*args: str) -> str:
     out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=10)
     return out.stdout.strip() if out.returncode == 0 else "UNKNOWN"
@@ -310,8 +404,15 @@ def self_test() -> dict:
     checks['hardware_fail_closed_software_markers'] = all(
         tag in INSTALL.lower() for tag in ('swiftshader', 'llvmpipe', 'lavapipe', 'microsoft basic render'))
     checks['synthetic_explicit'] = 'SYNTHETIC' in INSTALL and 'SYNTHETIC' in CASE.upper()
+    checks['longitudinal_disposes_renderer_every_cycle'] = ('engine.destroyAisRenderer()' in LONG_CYCLE and
+        "await nextRendered('destroy')" in LONG_CYCLE)
+    checks['longitudinal_reuses_fixture_array'] = ('b.longitudinalFleet=b.makeFleet(count)' in LONG_CYCLE and
+        'b.longitudinalFleet=null' in LONG_RELEASE)
+    checks['longitudinal_requires_real_scene_render'] = 'viewer.scene.postRender.addEventListener' in LONG_CYCLE
+    checks['longitudinal_gc_dom_and_gl'] = ('window.gc();window.gc()' in LONG_GC and
+        'observedGlCallsSinceInstall' in LONG_GC and 'domElements' in LONG_GC)
     try:
-        parsed = subprocess.run(['node','--check','-'], input='const install='+INSTALL+';\nconst stage='+CASE+';\nconst served='+SERVED_SOURCE+';\n',
+        parsed = subprocess.run(['node','--check','-'], input='const install='+INSTALL+';\nconst stage='+CASE+';\nconst served='+SERVED_SOURCE+';\nconst longCycle='+LONG_CYCLE+';\nconst longRelease='+LONG_RELEASE+';\nconst longGc='+LONG_GC+';\n',
                                 text=True,capture_output=True,timeout=20,check=False)
         checks['javascript_parses_in_node'] = parsed.returncode == 0
         note = parsed.stderr.strip()[:500]
@@ -323,7 +424,7 @@ def self_test() -> dict:
             'caveat':'Static checks; NO real browser/GPU canvas was exercised.'}
 
 
-def run(url: str, frames: int, timeout: int) -> dict:
+def run(url: str, frames: int, timeout: int, cycles: tuple[int, ...] | None = None) -> dict:
     if urlsplit(url).hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise ValueError("Only localhost Vite URLs are allowed")
     result = {"status":"UNVERIFIED", "utc":datetime.now(timezone.utc).isoformat(),"url":url,
@@ -332,6 +433,11 @@ def run(url: str, frames: int, timeout: int) -> dict:
               "sizes":list(SIZES),"rows":[],"errors":[],"cdp":{},"storageWrites":"NONE_REQUESTED",
               "browserConsoleErrors":[],
               "browser":"disposable single isolated headless Chrome process; no existing user profile"}
+    if cycles:
+        result["longitudinal"] = {"requestedCyclesBySize":dict(zip(SIZES,cycles)),
+                                  "requestedTotalCycles":sum(cycles),"stages":[],
+                                  "method":"real Cesium postRender on load/clear/destroy; reused fixed synthetic fleet per size; CDP GC + two window.gc + 175ms settled empty-scene snapshot",
+                                  "gpuVramBytes":"NOT_AVAILABLE"}
     if not CHROME.is_file():
         result["errors"].append(f"Installed Chrome binary missing: {CHROME}")
         return result
@@ -340,9 +446,31 @@ def run(url: str, frames: int, timeout: int) -> dict:
                                             args=["--enable-gpu", "--enable-webgl", "--ignore-gpu-blocklist",
                                                   "--disable-software-rasterizer", "--use-angle=d3d11",
                                                   "--enable-precise-memory-info", "--js-flags=--expose-gc"])
-        context = browser.new_context(viewport={"width":1440,"height":900}, device_scale_factor=1)
-        context.route("**/*",lambda route: route.continue_() if urlsplit(route.request.url).hostname in
-                      {"localhost","127.0.0.1","::1"} else route.abort())
+        # Playwright request routing cannot intercept ServiceWorker-owned fetch;
+        # disable ServiceWorkers so this isolated browser cannot bypass the
+        # localhost-only network policy via a page-installed worker.
+        context = browser.new_context(viewport={"width":1440,"height":900},
+                                      service_workers="block", device_scale_factor=1)
+        result["externalEgress"] = {"blockedCount":0,"blockedHosts":[],"allowedHostnames":["localhost","127.0.0.1","::1"]}
+        def restrict_route(route):
+            hostname = urlsplit(route.request.url).hostname
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                route.continue_()
+            else:
+                result["externalEgress"]["blockedCount"] += 1
+                if hostname and hostname not in result["externalEgress"]["blockedHosts"] and len(result["externalEgress"]["blockedHosts"]) < 20:
+                    result["externalEgress"]["blockedHosts"].append(hostname)
+                route.abort()
+        context.route("**/*",restrict_route)
+        result["externalEgress"]["webSocketsBlockedCount"] = 0
+        def restrict_websocket(route):
+            hostname=urlsplit(route.url).hostname
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                route.connect_to_server()
+            else:
+                result["externalEgress"]["webSocketsBlockedCount"] += 1
+                route.close(code=1008,reason="external network disallowed in GPU benchmark")
+        context.route_web_socket("**/*",restrict_websocket)
         page = context.new_page()
         page.on("pageerror",lambda err: result["errors"].append("PAGE_ERROR: "+str(err)[:500]))
         page.on("console",lambda msg: result["browserConsoleErrors"].append(msg.text[:500])
@@ -362,6 +490,12 @@ def run(url: str, frames: int, timeout: int) -> dict:
             result["hardware"]=hardware
             if hardware.get("error") or not hardware.get("canvasSameAsDom") or not hardware.get("canvasConnected"):
                 raise RuntimeError(f"HARDWARE_OR_APP_CANVAS_GATE_FAILED: {hardware}")
+            if cycles and ("AMD" not in str(hardware.get("renderer","")) or
+                           "Direct3D11" not in str(hardware.get("renderer","")) or
+                           hardware.get('documentVisible') != 'visible'):
+                raise RuntimeError('LONGITUDINAL_REQUIRES_VISIBLE_AMD_D3D11_WEBGL2')
+            if cycles and not all(hardware.get('resourceHooksAttached',{}).get(k) for k in ('Buffer','Texture','VertexArray','Program')):
+                raise RuntimeError('LONGITUDINAL_GL_CALL_TRACKING_HOOKS_NOT_ATTACHED')
             result["emptySceneBaselineAfterGc"]=page.evaluate("""() => {
               const available=typeof window.gc==='function';
               if(available) window.gc();
@@ -398,6 +532,58 @@ def run(url: str, frames: int, timeout: int) -> dict:
                 except Exception as exc:
                     result["errors"].append(f"{count}: {type(exc).__name__}: {str(exc)[:1000]}")
                     break
+            if cycles and not result["errors"]:
+                longitudinal=result["longitudinal"]
+                total_started=time.monotonic()
+                def collect_settled():
+                    # CDP GC is independent of window.gc; neither proves
+                    # that all user/native/GPU object lifetimes were reclaimed.
+                    if cdp:
+                        try:
+                            cdp.send('HeapProfiler.collectGarbage')
+                        except Exception as exc:
+                            longitudinal.setdefault('gcWarnings',[]).append(str(exc)[:120])
+                    page.wait_for_timeout(175)
+                    snap=page.evaluate(LONG_GC)
+                    if cdp:
+                        try:
+                            snap['cdpDomCounters']=cdp.send('Memory.getDOMCounters')
+                        except Exception as exc:
+                            longitudinal.setdefault('domWarnings',[]).append(str(exc)[:120])
+                    return snap
+                longitudinal['initialEmptySceneAfterGc']=collect_settled()
+                for count,ncycles in zip(SIZES,cycles):
+                    stage={"count":count,"cycles":[],"fixtureReusedWithinDensity":True}
+                    longitudinal['stages'].append(stage)
+                    for index in range(1,ncycles+1):
+                        if time.monotonic()-total_started > 210:
+                            result['errors'].append(f'LONGITUDINAL_GLOBAL_TIME_BUDGET_210S_EXCEEDED_{count}_{index}')
+                            break
+                        try:
+                            cycle=page.evaluate(LONG_CYCLE,{"count":count,"cycle":index,"timeoutMs":15000})
+                            cycle['emptyAfterGc']=collect_settled()
+                            stage['cycles'].append(cycle)
+                            if not (cycle['pass'] and cycle['afterDestroy']['primitives']==0 and
+                                    cycle['afterClear']['billboards']==0 and
+                                    cycle['emptyAfterGc']['canvasConnected'] and
+                                    cycle['emptyAfterGc']['primitives']==0 and
+                                    not cycle['emptyAfterGc']['webglContextLost']):
+                                result['errors'].append(f'LONGITUDINAL_LIFECYCLE_GATE_FAILED_{count}_{index}')
+                                break
+                            print(f'LONGITUDINAL {count} {index}/{ncycles} heap={cycle["emptyAfterGc"]["heapBytes"]} primitives={cycle["emptyAfterGc"]["primitives"]}',
+                                  file=sys.stderr,flush=True)
+                        except Exception as exc:
+                            result['errors'].append(f'LONGITUDINAL_{count}_{index}: {type(exc).__name__}: {str(exc)[:1000]}')
+                            break
+                    if result['errors']:
+                        break
+                    stage['release']=page.evaluate(LONG_RELEASE)
+                    stage['afterFixtureReleaseGc']=collect_settled()
+                longitudinal['actualTotalCycles']=sum(len(stage['cycles']) for stage in longitudinal['stages'])
+                longitudinal['elapsedSeconds']=round(time.monotonic()-total_started,3)
+                if longitudinal['actualTotalCycles']!=sum(cycles):
+                    result['errors'].append('LONGITUDINAL_INCOMPLETE_CYCLE_COUNT')
+                longitudinal['complete']=longitudinal['actualTotalCycles']==sum(cycles) and not result['errors']
             if cdp:
                 result["cdp"]["after"]=cdp.send('Performance.getMetrics')
                 result["cdp"]["domCountersAfter"]=cdp.send('Memory.getDOMCounters')
@@ -414,7 +600,10 @@ def run(url: str, frames: int, timeout: int) -> dict:
         result["errors"].append("SOURCE_CHANGED_DURING_HARDWARE_TEST")
     if result.get("servedSourceSha256End") is not None and result.get("servedSourceSha256End") != result.get("sourceSha256End"):
         result["errors"].append("SERVED_VITE_SOURCE_DRIFTED_FROM_LOCAL_DURING_HARDWARE_TEST")
-    result["status"]="MEASURED" if len(result["rows"])==len(SIZES) and not result["errors"] else "UNVERIFIED"
+    valid=len(result["rows"])==len(SIZES) and not result["errors"]
+    if cycles:
+        valid=valid and result.get('longitudinal',{}).get('complete',False)
+    result["status"]=("MEASURED_LONGITUDINAL" if cycles else "MEASURED") if valid else "UNVERIFIED"
     return result
 
 
@@ -425,6 +614,8 @@ def main() -> int:
     parser.add_argument('--url',default='http://localhost:5174/')
     parser.add_argument('--frames',type=int,default=36,help='Number of active postRender intervals per fleet size')
     parser.add_argument('--timeout',type=int,default=90,help='Seconds allowed for each active postRender sample')
+    parser.add_argument('--longitudinal',action='store_true',help='Add bounded hardware GC/GL/DOM repeated lifecycle cycles after standard 4x36 active frames')
+    parser.add_argument('--cycles-per-size',default='3,3,3,8',help='With --longitudinal: four 1..12 counts totaling 12..20 (default 3,3,3,8)')
     options=parser.parse_args()
     if options.self_test:
         report=self_test()
@@ -438,11 +629,19 @@ def main() -> int:
         return 0
     if options.frames<8 or options.frames>500 or options.timeout<5 or options.timeout>300:
         parser.error('frames must be 8-500 and timeout must be 5-300 seconds')
-    try: outcome=run(options.url,options.frames,options.timeout)
+    cycles = None
+    if options.longitudinal:
+        try:
+            cycles=tuple(int(x) for x in options.cycles_per_size.split(','))
+        except ValueError:
+            parser.error('cycles-per-size must be four integers')
+        if len(cycles)!=len(SIZES) or not all(1<=n<=12 for n in cycles) or not 12<=sum(cycles)<=20:
+            parser.error('cycles-per-size needs four 1..12 integers totaling 12..20')
+    try: outcome=run(options.url,options.frames,options.timeout,cycles)
     except Exception as exc:
         outcome={"status":"UNVERIFIED","errors":[f"{type(exc).__name__}: {str(exc)[:1200]}"]}
     print(json.dumps(outcome,indent=2,default=str))
-    return 0 if outcome['status']=='MEASURED' else 1
+    return 0 if outcome['status'] in {'MEASURED','MEASURED_LONGITUDINAL'} else 1
 
 
 if __name__=='__main__':
