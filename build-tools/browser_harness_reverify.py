@@ -47,6 +47,33 @@ def git(*args: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else "UNKNOWN"
 
 
+FRAME_SAMPLE = """async () => {
+  const canvas = document.querySelector('.cesium-widget canvas');
+  const gl = canvas?.getContext('webgl2');
+  const raf = [];
+  let lastRaf = null;
+  await new Promise(resolve => {
+    const step = now => {
+      if (lastRaf !== null) raf.push(now - lastRaf);
+      lastRaf = now;
+      if (raf.length < 90) requestAnimationFrame(step);
+      else resolve();
+    };
+    requestAnimationFrame(step);
+  });
+  const percentile = (values, fraction) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return Math.round(sorted[Math.ceil(fraction * sorted.length) - 1] * 100) / 100;
+  };
+  return {visibility: document.visibilityState,
+    canvasConnected: !!canvas?.isConnected, canvasWebgl2: !!gl,
+    canvasPixels: canvas ? [canvas.width,canvas.height] : null,
+    raf: {intervalCount:raf.length,p50Ms:percentile(raf,.5),p95Ms:percentile(raf,.95)},
+    note:'Browser requestAnimationFrame intervals only, NOT Cesium postRender or GPU draw durations'};
+}"""
+
+
 def run() -> dict:
     result: dict = {
         "timestampUtc": datetime.now(timezone.utc).isoformat(),
@@ -164,6 +191,37 @@ def run() -> dict:
                     "imgs => imgs.map(x => ({complete:x.complete,width:x.naturalWidth,height:x.naturalHeight,src:x.getAttribute('src')}))")
                 imagery["text"] = page.locator("[data-df-imagery-result]").inner_text()[:420]
             result["sceneImagery"] = imagery
+            # Closing each page unloads the app. The next page creates a fresh
+            # app + Cesium canvas. Three bounded lifecycle observations only.
+            result["repeatCycles"] = []
+            page.close()
+            for cycle in range(1, 4):
+                page = context.new_page()
+                page.goto(URL, wait_until="domcontentloaded", timeout=20000)
+                page.locator("[data-df-app]").wait_for(timeout=15000)
+                page.locator(".cesium-widget canvas").first.wait_for(timeout=15000)
+                sample = page.evaluate(FRAME_SAMPLE)
+                page.locator('[data-df-rail-entry="ADVANCED"]').click(timeout=5000)
+                page.evaluate("""() => {
+                  window.__dfRailInput = null;
+                  const target = document.querySelector('[data-df-rail-entry="TACTICAL"]');
+                  target.addEventListener('click', () => {
+                    const clickedAt = performance.now();
+                    requestAnimationFrame(() => {window.__dfRailInput = {
+                      clickToNextRafMs: Math.round((performance.now()-clickedAt)*100)/100,
+                      targetActiveAtNextRaf:target.getAttribute('aria-pressed')==='true'};});
+                  }, {once:true});
+                }""")
+                page.locator('[data-df-rail-entry="TACTICAL"]').click(timeout=5000)
+                page.wait_for_function("() => window.__dfRailInput !== null", timeout=5000)
+                sample["input"] = page.evaluate("window.__dfRailInput")
+                page.locator('[data-df-rail-entry="LAYERS"]').click(timeout=5000)
+                page.locator('[data-df-rail-entry="TACTICAL"]').click(timeout=5000)
+                sample["canvasAfterNavigation"] = page.locator(".cesium-widget canvas").count()
+                sample["cycle"] = cycle
+                result["repeatCycles"].append(sample)
+                page.close()
+
             images = imagery.get("sourceImages", [])
             full_check = (
                 len(result["workspaces"]) == len(WORKSPACES)
@@ -178,6 +236,12 @@ def run() -> dict:
                 and all(image["complete"] and image["width"] > 0 and image["height"] > 0
                         for image in images)
                 and not result["pageErrors"]
+                and len(result["repeatCycles"]) == 3
+                and all(sample["canvasConnected"] and sample["canvasWebgl2"]
+                        and sample["raf"]["intervalCount"] == 90
+                        and sample["input"]["targetActiveAtNextRaf"]
+                        and sample["canvasAfterNavigation"] == 1
+                        for sample in result["repeatCycles"])
             )
             result["status"] = "BROWSER_EXECUTED" if full_check else "PARTIAL_OR_BLOCKED"
             if not full_check:

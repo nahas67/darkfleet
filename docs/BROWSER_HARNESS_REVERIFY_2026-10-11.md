@@ -56,3 +56,21 @@ Even with raw-module hash equality, the dirty checkout does not justify the clai
 5. **Companion Chrome control path is unreliable:** the original tab's first DOM snapshot displayed DarkFleet, but subsequent snapshots alternated to `about:blank` despite tab inventory showing localhost:5174. `browser_evaluate` returned an argument-mapping error (`expected string ... at function`), `browser_screenshot` returned `UNKNOWN_TOOL`, and navigation returned stale-page errors. The independently run Python Playwright smoke test succeeded and did not depend on those controls. These are browser connector/harness limitations, not demonstrated product failures.
 
 No application-source changes, data writes, destructive commands, or external browser requests were made by this audit. All findings apply to the observed local runtime and stated revision, and should be reverified after integration of concurrent source changes.
+
+## Additional browser timing and bounded restart observations
+
+The prime agent requested real browser scheduling/input measurements and three load/clear cycles. The harness was extended and rerun successfully at `2026-10-10T21:11:52Z` on observed HEAD **`77eb6b51526325646cc25d254f737be643355094`** (HEAD stable during this individual run; worktree still dirty due to concurrent changes). Chrome 154, the same AMD D3D11 WebGL2 adapter, 1440×900. The final script output was `BROWSER_EXECUTED` with no uncaught JavaScript or console errors.
+
+Each cycle closed the previous headless browser *page*, opened a new page in the same bounded Chrome process, mounted the product, observed the real Cesium DOM canvas and its WebGL2 context, measured 90 consecutive `requestAnimationFrame` callback intervals, clicked Advanced → Tactical → Layers → Tactical, and verified that exactly one Cesium canvas remained mounted. Canvas backing size was **998×790 pixels** in all three cycles. Closing a page unloads its app; this is browser lifecycle evidence, not a direct assertion about internal GPU resource disposal.
+
+| Cycle | RAF intervals | RAF p50 | RAF p95 | Real click → next RAF | Tactical active at next RAF | Cesium canvases after nav |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| 1 | 90 | 13.9 ms | 48.6 ms | 20.3 ms | yes | 1 |
+| 2 | 90 | 13.9 ms | 27.8 ms | 11.5 ms | yes | 1 |
+| 3 | 90 | 13.8 ms | 27.6 ms | 14.0 ms | yes | 1 |
+
+**Measurement boundary:** the click timing is from the browser's real click handler event to its following RAF callback, with the requested rail's `aria-pressed=true` observed at that callback. It is not whole input-to-photon latency. RAF values are browser callback intervals with the DarkFleet canvas mounted and visible; they are **not** Cesium `postRender` intervals, GPU draw time, 3D scene frame rate, an AIS 10K performance measurement, or evidence of external tile success. A previous probe trying a separately imported dev-server engine singleton returned no Cesium viewer and was invalidated; no Cesium postRender or FPS claim is derived from it.
+
+The follow-up also repeated the Vite `?raw` byte-hash match of the same two source modules, with all five tracked test-source hashes unchanged through capture, and reproduced both READY RTC imagery panels with fully decoded 223×221 PNGs. Transient `net::ERR_ABORTED` GETs reflect panel unmount request cancellation; no HTTP 5xx or application exception was observed.
+
+**Outstanding release gate remains unchanged:** a newly built, clean-tree production bundle whose manifest HEAD, clean flag and recomputed digest match the exact served artifact. Rebuilding during concurrent dirty verification would introduce an unverifiable result and was intentionally deferred to the prime integration checkpoint.
