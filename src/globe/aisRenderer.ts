@@ -1132,6 +1132,11 @@ export class AisContactRenderer {
     return this.#observations.length;
   }
 
+  /** Actual Cesium layer visibility, not a potentially stale React preference. */
+  observationMarkersVisible(): boolean {
+    return this.#observations.show;
+  }
+
   /** Track polylines currently drawn, including gap connectors. */
   drawnTrackPrimitiveCount(): number {
     return this.#track.length;

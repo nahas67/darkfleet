@@ -170,3 +170,35 @@ export function decodeAisPick(
 
   return { kind: 'UNKNOWN' };
 }
+
+/**
+ * A Cesium track can be topmost exactly at an observed-fix marker pixel. In
+ * that case `scene.pick` returns AIS_TRACK even though `scene.drillPick` at
+ * the SAME physical pixel contains a tagged AIS_OBSERVATION underneath.
+ *
+ * Prefer a single, unambiguous, visible observation from the SAME MMSI only
+ * when the topmost hit is AIS_TRACK. Never promote a contact glyph (whose
+ * operator action is intentionally vessel-level), SAR target, prediction,
+ * foreign/unknown overlay, hidden layer or cross-vessel marker. Multiple
+ * distinct observed times stacked at one pixel are ambiguous: remain at the
+ * track level rather than inventing which recorded fix the operator meant.
+ * This function does not project, search nearby pixels or manufacture `at`.
+ */
+export function decodeAisClickStack(
+  topmost: unknown,
+  underlying: readonly unknown[],
+  observationsVisible: boolean,
+  resolveUntaggedBillboard?: (primitive: unknown) => string | null,
+): AisPickResult {
+  const primary = decodeAisPick(topmost, resolveUntaggedBillboard);
+  if (!observationsVisible || primary.kind !== 'AIS_TRACK') return primary;
+
+  let candidate: Extract<AisPickResult, { kind: 'AIS_OBSERVATION' }> | null = null;
+  for (const hit of underlying) {
+    const decoded = decodeAisPick(hit, resolveUntaggedBillboard);
+    if (decoded.kind !== 'AIS_OBSERVATION' || decoded.mmsi !== primary.mmsi) continue;
+    if (candidate !== null && candidate.at !== decoded.at) return primary;
+    candidate = decoded;
+  }
+  return candidate ?? primary;
+}

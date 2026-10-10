@@ -52,7 +52,7 @@ import type { AisObservationOut } from '../api/contract';
 import type { GeometryInput, GeometryOut } from '../api/contract';
 import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
-import { decodeAisPick } from './aisPick';
+import { decodeAisClickStack, decodeAisPick } from './aisPick';
 import { store, toBBox, type BBox, type SarTarget, type ViewMode } from '../state/store';
 
 const TARGET_LAYER = 'targets';
@@ -987,9 +987,12 @@ export class TacticalEngine {
    * AIS picks also clear a stale target hover: the hover HUD names SAR targets only, so leaving
    * it up after the operator picked a contact would describe a target nobody is looking at.
    *
-   * OVERLAP IS DETERMINISTIC BY CONSTRUCTION. `scene.pick` returns the topmost primitive at
-   * the pixel, so the vessel on top wins and repeated clicks re-select the same contact. There
-   * is deliberately no pick cycling: two identical clicks must never mean two different things.
+   * OVERLAP REMAINS DETERMINISTIC. When an AIS track polyline obscures an actual
+   * observation marker at the SAME pixel, `scene.drillPick` may reveal its typed
+   * exact-source `at`; a unique same-MMSI observation takes priority over the
+   * track. Direct contact glyphs, SAR targets, unknown overlays and ambiguous
+   * multiple observation times keep their existing behavior. No click cycling,
+   * nearest-point guessing, or synthetic observation selection is permitted.
    *
    * The engine writes the store here because the pick event originates in Cesium, not in a
    * component: routing it out through a callback and back in would add a round trip that can
@@ -1015,9 +1018,24 @@ export class TacticalEngine {
         return;
       }
       const picked = viewer.scene.pick(movement.position);
-      const decoded = decodeAisPick(
+      const fallback = (primitive: unknown) => this.#aisRenderer?.mmsiOf(primitive) ?? null;
+      const primary = decodeAisPick(picked, fallback);
+      let underlying: unknown[] = [];
+      // Expensive drillPick is restricted to operator clicks on an actual AIS
+      // track with visible observations, never run on mousemove/render frames.
+      if (primary.kind === 'AIS_TRACK' && this.#aisRenderer?.observationMarkersVisible()) {
+        try {
+          underlying = viewer.scene.drillPick(movement.position, 32);
+        } catch {
+          // A failed GPU pick never invents data or blocks the topmost tag.
+          underlying = [];
+        }
+      }
+      const decoded = decodeAisClickStack(
         picked,
-        (primitive) => this.#aisRenderer?.mmsiOf(primitive) ?? null,
+        underlying,
+        this.#aisRenderer?.observationMarkersVisible() ?? false,
+        fallback,
       );
       switch (decoded.kind) {
         case 'SAR_TARGET': {
