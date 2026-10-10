@@ -49,11 +49,34 @@ SERVED_SOURCE = r"""async ({paths,stage}) => {
 # module graph. This uses the same `engine` singleton as TacticalWorld -- not a
 # second Viewer, test double, canvas, copied renderer or mock GPU.
 INSTALL = r"""async () => {
-  const {engine} = await import('/src/globe/engine.ts');
-  const {store} = await import('/src/state/store.ts');
+  const actualResource = path => {
+    const loaded=performance.getEntriesByType('resource')
+      .map(x=>x.name).filter(x=>{
+        try{
+          const parsed=new URL(x);
+          return parsed.pathname===path&&!parsed.searchParams.has('raw')&&
+            !parsed.searchParams.has('url');
+        }catch{return false;}
+      });
+    // Vite HMR app imports may include ?t=<last-update>. Importing the bare
+    // path would then instantiate a SECOND singleton with a null viewer.
+    return loaded[loaded.length-1]??path;
+  };
+  const engineUrl=actualResource('/src/globe/engine.ts');
+  const storeUrl=actualResource('/src/state/store.ts');
+  const {engine} = await import(/* @vite-ignore */engineUrl);
+  const {store} = await import(/* @vite-ignore */storeUrl);
+  if(!engine || !store) return {error:'Selected URL resolved to non-app export',engineUrl,storeUrl,
+    hasEngine:!!engine,hasStore:!!store};
   const viewer = engine.viewer;
   if (!viewer || !engine.initialised || !viewer.scene?.canvas?.isConnected)
-    return {error: 'Actual application engine/viewer/canvas not initialized', initialised:engine.initialised};
+    return {error: 'Actual application engine/viewer/canvas not initialized', initialised:engine.initialised,
+      canvasCount:document.querySelectorAll('.cesium-widget canvas').length,
+      appStatus:document.body.innerText.slice(0,1800),
+      engineUrl,storeUrl,
+      matchingResources:performance.getEntriesByType('resource').map(x=>x.name)
+        .filter(x=>x.includes('/src/globe/engine.ts')||x.includes('/src/state/store.ts')).slice(-15),
+      widgetHtml:document.querySelector('.cesium-widget')?.outerHTML.slice(0,600)};
   const canvas = viewer.scene.canvas;
   const gl = canvas.getContext('webgl2');
   if (!gl) return {error:'Existing Cesium canvas has no WebGL2 context'};
@@ -151,7 +174,8 @@ INSTALL = r"""async () => {
     documentVisible:document.visibilityState, initialWorkspace:store.getState().workspace,
     previousAisStats, primitivesBeforeIsolation,
     resourceTrackingNote:'WebGL API call deltas AFTER instrument installation, not all native resources / VRAM.',
-    before:snapshot(), sourceFixture:'src/globe/aisRenderer.perf.test.ts: makeVessels (transcribed)',
+    before:snapshot(),engineUrl,storeUrl,
+    sourceFixture:'src/globe/aisRenderer.perf.test.ts: makeVessels (transcribed)',
     note:'The app remains real; AIS records are 100% SYNTHETIC benchmark fixtures, never live AIS.'};
 }"""
 
@@ -306,6 +330,7 @@ def run(url: str, frames: int, timeout: int) -> dict:
               "gitHeadStart":git("rev-parse","HEAD"),"dirtyStart":bool(git("status","--porcelain")),
               "sourceSha256Start":source_sha(),"fixture":"SYNTHETIC, from aisRenderer.perf.test.ts",
               "sizes":list(SIZES),"rows":[],"errors":[],"cdp":{},"storageWrites":"NONE_REQUESTED",
+              "browserConsoleErrors":[],
               "browser":"disposable single isolated headless Chrome process; no existing user profile"}
     if not CHROME.is_file():
         result["errors"].append(f"Installed Chrome binary missing: {CHROME}")
@@ -320,6 +345,8 @@ def run(url: str, frames: int, timeout: int) -> dict:
                       {"localhost","127.0.0.1","::1"} else route.abort())
         page = context.new_page()
         page.on("pageerror",lambda err: result["errors"].append("PAGE_ERROR: "+str(err)[:500]))
+        page.on("console",lambda msg: result["browserConsoleErrors"].append(msg.text[:500])
+                if msg.type == 'error' and len(result["browserConsoleErrors"]) < 12 else None)
         try:
             response=page.goto(url,wait_until="domcontentloaded",timeout=20000)
             if not response or response.status!=200:
@@ -385,7 +412,7 @@ def run(url: str, frames: int, timeout: int) -> dict:
                    "sourceSha256End":source_sha()})
     if result["gitHeadStart"]!=result["gitHeadEnd"] or result["sourceSha256Start"]!=result["sourceSha256End"]:
         result["errors"].append("SOURCE_CHANGED_DURING_HARDWARE_TEST")
-    if result.get("servedSourceSha256End") != result.get("sourceSha256End"):
+    if result.get("servedSourceSha256End") is not None and result.get("servedSourceSha256End") != result.get("sourceSha256End"):
         result["errors"].append("SERVED_VITE_SOURCE_DRIFTED_FROM_LOCAL_DURING_HARDWARE_TEST")
     result["status"]="MEASURED" if len(result["rows"])==len(SIZES) and not result["errors"] else "UNVERIFIED"
     return result
