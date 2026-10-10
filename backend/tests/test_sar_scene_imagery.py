@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
+import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from fastapi import FastAPI
@@ -55,6 +58,92 @@ def _app(root: Path) -> FastAPI:
     app.state.darkfleet_state = ApiState.build(Settings(data_dir=str(root)))
     app.include_router(router)
     return app
+
+
+def _replace_checksum_valid_archive(root: Path, key: CacheKey, inner_npy: bytes) -> None:
+    """Construct an altered NPZ whose sidecar SHA correctly matches its own bytes.
+
+    This forces tests to exercise *pre-decompression* validation rather than
+    passing only because the existing outer checksum detects a modification.
+    """
+    entry = root / "cache" / key.shard / key.directory
+    payload = entry / "normalized.npz"
+    meta_path = entry / "normalized.meta.json"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("normalized.npy", inner_npy)
+    new_payload = buffer.getvalue()
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["sha256"] = hashlib.sha256(new_payload).hexdigest()
+    payload.write_bytes(new_payload)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert hashlib.sha256(payload.read_bytes()).hexdigest() == meta["sha256"]
+
+
+def _npy(array: np.ndarray) -> bytes:
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    return buffer.getvalue()
+
+
+def test_checksum_valid_but_oversized_member_refused_before_materialization(tmp_path: Path):
+    key = _save(tmp_path, "ONE", np.ones((2, 3), dtype=np.float32))
+    # The sidecar still claims just six f32 values. This 16-MiB NPY member
+    # compresses into a tiny ZIP; checking only the archive length is unsafe.
+    oversized = _npy(np.zeros((2048, 2048), dtype=np.float32))
+    _replace_checksum_valid_archive(tmp_path, key, oversized)
+    entry = tmp_path / "cache" / key.shard / key.directory
+    assert (entry / "normalized.npz").stat().st_size < 40_000
+    # A deliberately fatal spy proves the numerical allocation path is NOT run.
+    with patch("darkfleet.sar_scene_imagery.npy_format.read_array",
+               side_effect=AssertionError("array materialized before preflight")):
+        scene = scene_imagery(tmp_path, "ONE")
+    assert scene.status == "UNAVAILABLE"
+    assert scene.reason == "CACHE_NPY_MEMBER_EXCEEDS_SAFE_BOUNDS"
+
+
+def test_rehashed_npy_header_shape_dtype_and_malformed_archive_are_refused(tmp_path: Path):
+    key = _save(tmp_path, "ONE", np.ones((2, 3), dtype=np.float32))
+    scenarios = (
+        (_npy(np.ones((3, 2), dtype=np.float32)), "CACHE_NPY_HEADER_MISMATCH"),
+        (_npy(np.ones((2, 3), dtype=np.float64)), "CACHE_NPY_HEADER_MISMATCH"),
+        (b"not-a-numpy-file", "CALIBRATED_CACHE_MISSING_OR_CORRUPT"),
+    )
+    for archive_member, reason in scenarios:
+        _replace_checksum_valid_archive(tmp_path, key, archive_member)
+        with patch("darkfleet.sar_scene_imagery.npy_format.read_array",
+                   side_effect=AssertionError("unverified archive materialized")):
+            assert scene_imagery(tmp_path, "ONE").reason == reason
+
+
+def test_rehashed_archive_with_extra_member_not_accepted(tmp_path: Path):
+    key = _save(tmp_path, "ONE", np.ones((2, 3), dtype=np.float32))
+    entry = tmp_path / "cache" / key.shard / key.directory
+    payload = entry / "normalized.npz"
+    meta_path = entry / "normalized.meta.json"
+    with io.BytesIO() as buffer:
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("normalized.npy", _npy(np.ones((2, 3), dtype=np.float32)))
+            archive.writestr("extra.npy", b"unexpected member")
+        new_payload = buffer.getvalue()
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["sha256"] = hashlib.sha256(new_payload).hexdigest()
+    payload.write_bytes(new_payload)
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    with patch("darkfleet.sar_scene_imagery.npy_format.read_array",
+               side_effect=AssertionError("unverified archive materialized")):
+        assert scene_imagery(tmp_path, "ONE").reason == "CACHE_NPY_MEMBER_INVALID"
+
+
+def test_compressed_valid_member_is_still_renderable(tmp_path: Path):
+    key = _save(tmp_path, "ONE", np.array([[1., 2., np.nan], [3., 4., 5.]], dtype=np.float32))
+    _replace_checksum_valid_archive(
+        tmp_path, key, _npy(np.array([[1., 2., np.nan], [3., 4., 5.]], dtype=np.float32)),
+    )
+    assert scene_imagery(tmp_path, "ONE").status == "READY"
+    with Image.open(io.BytesIO(scene_image_png(tmp_path, "ONE"))) as image:
+        assert image.size == (3, 2)
+        assert np.array(image)[0, 2, 3] == 0
 
 
 def test_pixels_mask_native_metadata_fixed_display_and_restart(tmp_path: Path):

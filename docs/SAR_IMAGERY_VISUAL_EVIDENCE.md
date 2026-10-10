@@ -62,6 +62,34 @@ all non-finite pixels, or oversized source arrays return explicit
 compressed cache maximum is **96 MiB** before decompression. A pixel mask is
 based on finite values of the authoritative cached RTC output.
 
+### Archive decompression boundary
+
+The scan cache writes an NPZ containing one `normalized.npy` member and a JSON
+sidecar with SHA-256 of the **entire NPZ byte stream**, recorded shape, dtype,
+cache digest, scene identity and processing version. The imagery endpoint
+retains that same authoritative SHA-256 verification but performs all archive
+checks against a single bounded in-memory snapshot. It never preflights one
+version of a file and then decodes a second version from disk.
+
+Before NumPy creates an array, the reader enforces:
+
+- At most **96 MiB** of NPZ bytes and **16 KiB** of sidecar bytes can be read.
+- Exactly one ZIP member named `normalized.npy`, stored or deflated, may exist;
+  its advertised **uncompressed** byte count is bounded by the source metadata
+  shape, supported floating-point dtype (`f2`, `f4`, `f8`) and a **4 KiB** header
+  allowance. This prevents highly compressible oversized members from inflating.
+- The inner NPY version must be 1.0 or 2.0, and its header has a hard **4 KiB**
+  parsing limit. Parsed shape and dtype must exactly match the sidecar; the ZIP
+  member length must equal the parsed header length plus the exact pixel bytes.
+- The outer archive SHA-256 must agree with the sidecar before opening any ZIP
+  member. Existing incorrect checksums remain hard failures.
+
+Unexpected members, malformed headers, inconsistent dimensions/dtypes, oversized
+uncompressed payloads or invalid source metadata return explicit unavailable
+reasons. The regression tests replace the fixture NPZ and **recalculate its
+correct outer SHA-256** to ensure an oversized or deceptive inner member is
+rejected *before* the NumPy array reader can run.
+
 **These views do not establish change detection or co-registration.** The
 pixel lattice, acquisition geometry, spatial coverage, polarization, and
 calibration may differ. A bright/dark contrast cannot be interpreted as a
@@ -74,7 +102,8 @@ For numerical exact-grid comparison use the separately gated existing
 The isolated Python tests use locally constructed fixtures to exercise expected
 behavior; **fixtures are not real observations**. They cover alpha masking,
 fixed scale, real-scan isolation, mismatched grids, malformed records,
-tampered checksums, unsafe sizes, independently reopenable cache, strict
+tampered checksums, low-metadata/high-inflation ZIP archives, forged NPY header
+shape or dtype, extra archive entries, unsafe sizes, independently reopenable cache, strict
 request boundaries, PNG content type and HTTP refusals. Frontend tests
 exercise its response contract, source validation, route usage, and pre-load
 status. Current production imagery remains unavailable until the operator

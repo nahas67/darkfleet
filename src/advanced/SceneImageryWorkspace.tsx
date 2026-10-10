@@ -95,7 +95,9 @@ export function readImageryPair(value: unknown, firstScan: string, secondScan: s
     }
     const shape = numbers(scene.source_shape, `${field}.source_shape`, 2);
     const preview = numbers(scene.preview_shape, `${field}.preview_shape`, 2);
-    const affine = numbers(scene.transform, `${field}.transform`, 6);
+    // Validate the recorded coefficients as data; the backend owns every
+    // georeferencing and coordinate computation.
+    numbers(scene.transform, `${field}.transform`, 6);
     if (!Array.isArray(scene.wgs84_corners_lon_lat) || scene.wgs84_corners_lon_lat.length !== 4) {
       throw new ContractViolation(`${field}.wgs84_corners_lon_lat`, 'Expected four source-derived corners.');
     }
@@ -116,7 +118,6 @@ export function readImageryPair(value: unknown, firstScan: string, secondScan: s
       window[2] !== shape[0] || window[3] !== shape[1] ||
       !Number.isInteger(valid) || valid <= 0 || valid > total ||
       !Number.isInteger(displayed) || displayed < 0 || displayed > preview[0] * preview[1] ||
-      affine[0] * affine[4] === affine[1] * affine[3] ||
       corners.some(([lon, lat]) => lon < -180 || lon > 180 || lat < -90 || lat > 90) ||
       db[0] !== -30 || db[1] !== 5
     ) {
@@ -210,7 +211,7 @@ function ImagePane({ scene, title }: { scene: ImageryScene; title: string }) {
         <p className="df-num break-all text-ink">{scene.item_id}</p>
         <p>Acquired {scene.acquisition_time} · {scene.platform} · {scene.provider}</p>
         <p>RTC gamma0 · {scene.polarization} · fixed display −30 to +5 dB</p>
-        <p>CRS {scene.crs} · affine {scene.transform?.join(', ')}</p>
+        <p>CRS {scene.crs} · recorded grid transform {scene.transform?.join(', ')}</p>
         <p>Measured window corners, WGS84 [longitude, latitude] (TL → TR → BR → BL):{' '}
           {scene.wgs84_corners_lon_lat?.map((corner) =>
             `[${corner.map((coordinate) => coordinate.toFixed(5)).join(', ')}]`).join(' · ')}</p>

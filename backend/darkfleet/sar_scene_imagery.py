@@ -6,15 +6,18 @@ persisted scan. This does not align acquisitions, infer change, or fetch imagery
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
 import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+from numpy.lib import format as npy_format
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 from pyproj import CRS, Transformer
@@ -22,7 +25,6 @@ from pyproj.exceptions import CRSError
 
 from darkfleet.sar_scene_compare import (
     _cache_key,
-    _read_calibrated_array,
     _real_record,
     _scene,
     _verified_rtc_provenance,
@@ -32,6 +34,8 @@ from darkfleet.storage.runs import run_store_for_data_dir
 MAX_SOURCE_PIXELS = 8_000_000
 MAX_PNG_EDGE = 1024
 MAX_CACHE_BYTES = 96 * 1024 * 1024
+MAX_META_BYTES = 16 * 1024
+MAX_NPY_HEADER_BYTES = 4096
 DB_WINDOW = (-30.0, 5.0)  # fixed for BOTH scenes; never independently stretched
 SCAN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
 
@@ -111,8 +115,19 @@ def _scan_record(data_dir: Path, scan_id: str) -> dict[str, Any]:
     return record
 
 
-def _cache_envelope(data_dir: Path, record: dict[str, Any]) -> None:
-    """Check compressed and declared decompressed bounds BEFORE decoding an NPZ."""
+def _read_bounded_calibrated_array(data_dir: Path, record: dict[str, Any]) -> np.ndarray:
+    """Verify one immutable cache snapshot before materializing its NPY member.
+
+    ArtifactCache.get validates the NPZ checksum but checks shape/dtype only
+    AFTER numpy materializes the array. A forged, properly re-hashed archive
+    could otherwise allocate well beyond the preview's declared safety cap.
+    Use the cache's *same sha256* authority; preflight ZIP sizes and NPY header
+    from the exact bytes subsequently decoded (no check/open race).
+    """
+    debug = record.get("debug")
+    layers = debug.get("layers") if isinstance(debug, dict) else None
+    if not isinstance(layers, list) or "normalized" not in layers:
+        raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT")
     key = _cache_key(record)
     if key is None:
         raise ImageryUnavailable("CACHE_REFERENCE_MISSING_OR_INVALID")
@@ -122,9 +137,15 @@ def _cache_envelope(data_dir: Path, record: dict[str, Any]) -> None:
     payload = entry / "normalized.npz"
     meta_path = entry / "normalized.meta.json"
     try:
-        if payload.stat().st_size > MAX_CACHE_BYTES or meta_path.stat().st_size > 16_384:
+        # Never rely on stat alone: bound the actual bytes read even if the file
+        # changes between opening and reading it.
+        with payload.open("rb") as stream:
+            raw = stream.read(MAX_CACHE_BYTES + 1)
+        with meta_path.open("rb") as stream:
+            meta_raw = stream.read(MAX_META_BYTES + 1)
+        if len(raw) > MAX_CACHE_BYTES or len(meta_raw) > MAX_META_BYTES:
             raise ImageryUnavailable("CACHE_EXCEEDS_SAFE_READ_BOUNDS")
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta = json.loads(meta_raw.decode("utf-8"))
     except (OSError, ValueError, UnicodeError):
         raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT") from None
     shape = meta.get("shape") if isinstance(meta, dict) else None
@@ -134,6 +155,81 @@ def _cache_envelope(data_dir: Path, record: dict[str, Any]) -> None:
         or shape[0] * shape[1] > MAX_SOURCE_PIXELS
     ):
         raise ImageryUnavailable("SOURCE_RASTER_DIMENSIONS_INVALID_OR_OVERSIZE")
+
+    # The cache writer uses np.savez (one named .npy member, not a raw TIFF) and
+    # persists the dtype and SHA of the exact outer archive in a sidecar.
+    # Reject invalid sidecars before opening the ZIP or parsing an NPY header.
+    dtype_string = meta.get("dtype")
+    if not isinstance(dtype_string, str) or not re.fullmatch(r"[<>=|]f[248]", dtype_string):
+        raise ImageryUnavailable("CACHE_NPY_DTYPE_UNSUPPORTED")
+    try:
+        expected_dtype = np.dtype(dtype_string)
+    except (TypeError, ValueError):
+        raise ImageryUnavailable("CACHE_NPY_DTYPE_UNSUPPORTED") from None
+    if (
+        expected_dtype.kind != "f" or expected_dtype.itemsize not in (2, 4, 8)
+        or not isinstance(meta, dict)
+        or meta.get("artifact_name") != "normalized"
+        or meta.get("storage_version") != 1
+        or meta.get("digest") != key.digest
+        or meta.get("algorithm_version") != key.algorithm_version
+        or meta.get("scene_item_id") != key.scene_item_id
+    ):
+        raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT")
+    if not isinstance(meta.get("sha256"), str) or (
+        hashlib.sha256(raw).hexdigest() != meta["sha256"]
+    ):
+        raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT")
+
+    expected_bytes = shape[0] * shape[1] * expected_dtype.itemsize
+    # ZipInfo.file_size is the *uncompressed* length from the central directory;
+    # verify it before even opening the member stream. A tiny compressed archive
+    # with a huge claimed member is refused without inflating its body.
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            members = archive.infolist()
+            if (
+                len(members) != 1 or members[0].filename != "normalized.npy"
+                or members[0].is_dir()
+                or members[0].compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+            ):
+                raise ImageryUnavailable("CACHE_NPY_MEMBER_INVALID")
+            member = members[0]
+            if member.file_size > expected_bytes + MAX_NPY_HEADER_BYTES + 16:
+                raise ImageryUnavailable("CACHE_NPY_MEMBER_EXCEEDS_SAFE_BOUNDS")
+            with archive.open(member) as stream:
+                version = npy_format.read_magic(stream)
+                if version == (1, 0):
+                    header = npy_format.read_array_header_1_0(
+                        stream, max_header_size=MAX_NPY_HEADER_BYTES,
+                    )
+                elif version == (2, 0):
+                    header = npy_format.read_array_header_2_0(
+                        stream, max_header_size=MAX_NPY_HEADER_BYTES,
+                    )
+                else:
+                    raise ImageryUnavailable("CACHE_NPY_HEADER_INVALID")
+                inner_shape, _fortran_order, inner_dtype = header
+                if (
+                    tuple(inner_shape) != tuple(shape)
+                    or inner_dtype != expected_dtype
+                    or inner_dtype.str != dtype_string
+                    or member.file_size != stream.tell() + expected_bytes
+                ):
+                    raise ImageryUnavailable("CACHE_NPY_HEADER_MISMATCH")
+            # The bytes are identical to those checked above, so no modification
+            # can introduce a larger ZIP member between validation and decode.
+            with archive.open(member) as stream:
+                array = npy_format.read_array(
+                    stream, allow_pickle=False, max_header_size=MAX_NPY_HEADER_BYTES,
+                )
+    except ImageryUnavailable:
+        raise
+    except (OSError, ValueError, EOFError, TypeError, RuntimeError, zipfile.BadZipFile):
+        raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT") from None
+    if array.ndim != 2 or list(array.shape) != shape or array.dtype.str != dtype_string:
+        raise ImageryUnavailable("CACHE_NPY_HEADER_MISMATCH")
+    return array
 
 
 def _load_scene(data_dir: Path, scan_id: str) -> tuple[ImageryScene, np.ndarray]:
@@ -160,10 +256,7 @@ def _load_scene(data_dir: Path, scan_id: str) -> tuple[ImageryScene, np.ndarray]
     except (CRSError, TypeError, ValueError):
         raise ImageryUnavailable("CRS_MISSING_OR_INVALID") from None
     transform = _fixed_affine(scene.get("transform"))
-    _cache_envelope(data_dir, record)
-    array = _read_calibrated_array(data_dir, record)
-    if array is None:
-        raise ImageryUnavailable("CALIBRATED_CACHE_MISSING_OR_CORRUPT")
+    array = _read_bounded_calibrated_array(data_dir, record)
     if array.size > MAX_SOURCE_PIXELS or array.ndim != 2:
         raise ImageryUnavailable("SOURCE_RASTER_DIMENSIONS_INVALID_OR_OVERSIZE")
     height, width = array.shape
