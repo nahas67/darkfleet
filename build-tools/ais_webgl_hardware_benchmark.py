@@ -14,14 +14,20 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import ast
+from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
 
@@ -31,6 +37,90 @@ SIZES = (100, 1000, 5000, 10000)
 SOURCE_FILES = ("src/globe/engine.ts", "src/globe/aisRenderer.ts",
                 "src/globe/aisRenderer.perf.test.ts", "src/ais/displayState.ts",
                 "src/state/store.ts", "src/tactical/TacticalWorld.tsx")
+SCRATCH_CONFIG_FILES = ("vite.config.ts", "backend/darkfleet/config/settings.py",
+                        "backend/darkfleet/api/app.py", "backend/darkfleet/api/routes.py")
+
+# A wholly separate, disposable FastAPI backend. Install socket-level provider
+# egress guards BEFORE importing any DarkFleet module; do not inherit user
+# API/provider credentials or open the real persisted data directory.
+SCRATCH_API = r"""
+import ipaddress, os, socket
+original_connect=socket.socket.connect
+original_connect_ex=socket.socket.connect_ex
+original_getaddrinfo=socket.getaddrinfo
+original_sendto=socket.socket.sendto
+def allow_host(value):
+    if value is None:return True
+    if isinstance(value,(bytes,bytearray)):value=value.decode('ascii','ignore')
+    if str(value).lower() in ('localhost','localhost.'):return True
+    try:return ipaddress.ip_address(str(value).split('%')[0]).is_loopback
+    except ValueError:return False
+def check_address(sock,address):
+    if sock.family in (socket.AF_INET,socket.AF_INET6):
+        if (not isinstance(address,tuple) or not allow_host(address[0]) or
+                (len(address)>1 and int(address[1]) in (5174,8000))):
+            raise OSError('GPU_SCRATCH_PROVIDER_EGRESS_BLOCKED')
+def guarded_connect(sock,address):
+    check_address(sock,address)
+    return original_connect(sock,address)
+def guarded_connect_ex(sock,address):
+    check_address(sock,address)
+    return original_connect_ex(sock,address)
+def guarded_lookup(host,*args,**kwargs):
+    if (not allow_host(host) or (args and str(args[0]) in ('5174','8000'))):
+        raise socket.gaierror('GPU_SCRATCH_DNS_OR_USER_PORT_BLOCKED')
+    return original_getaddrinfo(host,*args,**kwargs)
+def guarded_sendto(sock,*args):
+    if sock.family in (socket.AF_INET,socket.AF_INET6) and args and isinstance(args[-1],tuple):
+        check_address(sock,args[-1])
+    return original_sendto(sock,*args)
+socket.socket.connect=guarded_connect
+socket.socket.connect_ex=guarded_connect_ex
+socket.getaddrinfo=guarded_lookup
+socket.socket.sendto=guarded_sendto
+import uvicorn
+from darkfleet.api.app import create_app
+from darkfleet.config.settings import Settings
+data=os.environ['DARKFLEET_DATA_DIR']
+app=create_app(Settings(data_dir=data,log_level='WARNING'))
+uvicorn.run(app,host='127.0.0.1',port=int(os.environ['DARKFLEET_API_PORT']),log_level='warning')
+"""
+
+# Preloaded into the owned Vite Node child ONLY. The child may proxy to its
+# scratch API and bind its own listening server, but cannot initiate external
+# connections or connect to the user's 5174/8000. This is a process-scoped
+# network guard, not an OS firewall or a claim of complete packet capture.
+SCRATCH_VITE_NET_GUARD = r"""
+'use strict';
+const net=require('node:net');
+const dns=require('node:dns');
+const apiPort=Number(process.env.DARKFLEET_SCRATCH_API_PORT);
+const vitePort=Number(process.env.DARKFLEET_SCRATCH_VITE_PORT);
+if(!Number.isInteger(apiPort)||!Number.isInteger(vitePort)||
+    apiPort===vitePort||[8000,5174].includes(apiPort)||[8000,5174].includes(vitePort))
+  throw new Error('GPU_SCRATCH_NODE_INVALID_OWNED_PORTS');
+const allowedHost=h=>['127.0.0.1','localhost','::1'].includes(String(h).toLowerCase());
+const socketConnect=net.Socket.prototype.connect;
+net.Socket.prototype.connect=function(...args){
+  const value=args[0];let host='localhost',port;
+  if(value&&typeof value==='object'){
+    host=value.host||value.hostname||host;port=Number(value.port);
+  }else if(typeof value==='number'){
+    port=value;host=typeof args[1]==='string'?args[1]:host;
+  }else if(typeof value==='string'){
+    // Unix-domain/named-pipe connections are not used by this Vite server.
+    throw new Error('GPU_SCRATCH_NODE_PIPE_CONNECT_BLOCKED');
+  }
+  if(!allowedHost(host)||![apiPort,vitePort].includes(port))
+    throw new Error('GPU_SCRATCH_NODE_OUTBOUND_EGRESS_BLOCKED');
+  return socketConnect.apply(this,args);
+};
+const originalLookup=dns.lookup;
+dns.lookup=function(host,...args){
+  if(!allowedHost(host))throw new Error('GPU_SCRATCH_NODE_DNS_BLOCKED');
+  return originalLookup.call(this,host,...args);
+};
+"""
 
 # These are the exact raw source texts Vite makes importable in the page. In
 # dev mode a Git SHA cannot prove served-bundle identity: compare actual local
@@ -412,21 +502,53 @@ def self_test() -> dict:
     checks['longitudinal_gc_dom_and_gl'] = ('window.gc();window.gc()' in LONG_GC and
         'observedGlCallsSinceInstall' in LONG_GC and 'domElements' in LONG_GC)
     try:
+        ast.parse(SCRATCH_API)
+        checks['scratch_backend_python_syntax'] = True
+    except SyntaxError:
+        checks['scratch_backend_python_syntax'] = False
+    vite_source = (ROOT / 'vite.config.ts').read_text(encoding='utf-8')
+    benchmark_source = Path(__file__).read_text(encoding='utf-8')
+    checks['scratch_vite_proxy_env_exists'] = 'process.env.DARKFLEET_API_URL' in vite_source
+    checks['scratch_exact_port_network_guard'] = (
+        "target.port in {urlsplit(url).port,scratch_api_port}" in benchmark_source
+        and "target.port not in {5174, 8000}" in benchmark_source)
+    checks['scratch_user_ports_not_allowed'] = (
+        "int(address[1]) in (5174,8000)" in SCRATCH_API and
+        "if parsed.hostname != '127.0.0.1' or parsed.port in (8000, 5174)" in benchmark_source)
+    checks['scratch_isolates_data'] = ("env['DARKFLEET_DATA_DIR'] = str(data_root)" in
+        benchmark_source
+        and "create_app(Settings(data_dir=data" in SCRATCH_API)
+    checks['scratch_vite_network_guard'] = (
+        'GPU_SCRATCH_NODE_OUTBOUND_EGRESS_BLOCKED' in SCRATCH_VITE_NET_GUARD and
+        'GPU_SCRATCH_NODE_DNS_BLOCKED' in SCRATCH_VITE_NET_GUARD and
+        "'node', '--require', str(vite_guard)" in benchmark_source)
+    try:
         parsed = subprocess.run(['node','--check','-'], input='const install='+INSTALL+';\nconst stage='+CASE+';\nconst served='+SERVED_SOURCE+';\nconst longCycle='+LONG_CYCLE+';\nconst longRelease='+LONG_RELEASE+';\nconst longGc='+LONG_GC+';\n',
                                 text=True,capture_output=True,timeout=20,check=False)
         checks['javascript_parses_in_node'] = parsed.returncode == 0
         note = parsed.stderr.strip()[:500]
+        parsed_guard = subprocess.run(['node','--check','-'],input=SCRATCH_VITE_NET_GUARD,
+                                      text=True,capture_output=True,timeout=20,check=False)
+        checks['scratch_vite_net_guard_parses'] = parsed_guard.returncode == 0
+        if parsed_guard.stderr.strip():
+            note += ' ' + parsed_guard.stderr.strip()[:400]
     except (FileNotFoundError,subprocess.TimeoutExpired) as exc:
         checks['javascript_parses_in_node'] = False
+        checks['scratch_vite_net_guard_parses'] = False
         note = str(exc)
     return {'status':'STATIC_PASS' if all(checks.values()) else 'STATIC_FAIL',
             'checks':checks,'jsSyntaxDetail':note,
             'caveat':'Static checks; NO real browser/GPU canvas was exercised.'}
 
 
-def run(url: str, frames: int, timeout: int, cycles: tuple[int, ...] | None = None) -> dict:
+def run(url: str, frames: int, timeout: int, cycles: tuple[int, ...] | None = None,
+        scratch_api_port: int | None = None) -> dict:
     if urlsplit(url).hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise ValueError("Only localhost Vite URLs are allowed")
+    if scratch_api_port is not None and (urlsplit(url).hostname != '127.0.0.1' or
+                                         urlsplit(url).port in {5174, 8000, scratch_api_port} or
+                                         scratch_api_port in {5174, 8000}):
+        raise ValueError('SCRATCH_PORTS_MUST_BE_DISTINCT_NON_USER_LOOPBACK_PORTS')
     result = {"status":"UNVERIFIED", "utc":datetime.now(timezone.utc).isoformat(),"url":url,
               "gitHeadStart":git("rev-parse","HEAD"),"dirtyStart":bool(git("status","--porcelain")),
               "sourceSha256Start":source_sha(),"fixture":"SYNTHETIC, from aisRenderer.perf.test.ts",
@@ -445,27 +567,39 @@ def run(url: str, frames: int, timeout: int, cycles: tuple[int, ...] | None = No
         browser = playwright.chromium.launch(executable_path=str(CHROME), headless=True,
                                             args=["--enable-gpu", "--enable-webgl", "--ignore-gpu-blocklist",
                                                   "--disable-software-rasterizer", "--use-angle=d3d11",
-                                                  "--enable-precise-memory-info", "--js-flags=--expose-gc"])
+                                                  "--enable-precise-memory-info", "--js-flags=--expose-gc",
+                                                  "--disable-background-networking", "--disable-component-update",
+                                                  "--disable-sync", "--no-first-run", "--no-default-browser-check"])
         # Playwright request routing cannot intercept ServiceWorker-owned fetch;
         # disable ServiceWorkers so this isolated browser cannot bypass the
         # localhost-only network policy via a page-installed worker.
         context = browser.new_context(viewport={"width":1440,"height":900},
                                       service_workers="block", device_scale_factor=1)
-        result["externalEgress"] = {"blockedCount":0,"blockedHosts":[],"allowedHostnames":["localhost","127.0.0.1","::1"]}
+        result["externalEgress"] = {"blockedCount":0,"blockedHosts":[],
+                                    "userPortsForbidden": [5174, 8000],
+                                    "allowedScratchPorts": ([urlsplit(url).port,scratch_api_port]
+                                                            if scratch_api_port is not None else None)}
         def restrict_route(route):
-            hostname = urlsplit(route.request.url).hostname
-            if hostname in {"localhost", "127.0.0.1", "::1"}:
+            target = urlsplit(route.request.url)
+            allowed = (target.hostname == '127.0.0.1' and
+                       target.port in {urlsplit(url).port,scratch_api_port}) if scratch_api_port is not None else (
+                       target.hostname in {"localhost", "127.0.0.1", "::1"})
+            if allowed and target.port not in {5174, 8000}:
                 route.continue_()
             else:
                 result["externalEgress"]["blockedCount"] += 1
+                hostname=target.hostname
                 if hostname and hostname not in result["externalEgress"]["blockedHosts"] and len(result["externalEgress"]["blockedHosts"]) < 20:
                     result["externalEgress"]["blockedHosts"].append(hostname)
                 route.abort()
         context.route("**/*",restrict_route)
         result["externalEgress"]["webSocketsBlockedCount"] = 0
         def restrict_websocket(route):
-            hostname=urlsplit(route.url).hostname
-            if hostname in {"localhost", "127.0.0.1", "::1"}:
+            target=urlsplit(route.url)
+            allowed = (target.hostname == '127.0.0.1' and
+                       target.port in {urlsplit(url).port,scratch_api_port}) if scratch_api_port is not None else (
+                       target.hostname in {"localhost", "127.0.0.1", "::1"})
+            if allowed and target.port not in {5174, 8000}:
                 route.connect_to_server()
             else:
                 result["externalEgress"]["webSocketsBlockedCount"] += 1
@@ -607,6 +741,190 @@ def run(url: str, frames: int, timeout: int, cycles: tuple[int, ...] | None = No
     return result
 
 
+def _scratch_port() -> int:
+    """Reserve a free loopback candidate briefly; never touch user ports."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+        if port in {8000, 5174}:
+            raise RuntimeError('OS_ASSIGNED_RESERVED_USER_PORT')
+        return port
+
+
+def _scratch_source_tree() -> dict[str, str | int]:
+    """Snapshot whole app/backend source trees (including uncommitted files)."""
+    paths: list[Path] = []
+    for base, endings in ((ROOT / 'src', {'.ts', '.tsx', '.css'}),
+                          (ROOT / 'backend' / 'darkfleet', {'.py'})):
+        paths.extend(p for p in base.rglob('*') if p.is_file() and p.suffix in endings)
+    paths.extend(ROOT / p for p in ('vite.config.ts', 'index.html',
+                                  'package.json', 'build-tools/buildIdentity.ts'))
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        rel = path.relative_to(ROOT).as_posix()
+        digest.update(rel.encode('utf-8') + b'\0' + hashlib.sha256(path.read_bytes()).digest())
+    return {'sha256': digest.hexdigest(), 'sourceFileCount': len(paths)}
+
+
+def _scratch_env() -> dict[str, str]:
+    """Only machine execution essentials; no inherited provider keys/tokens."""
+    allowed = {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC",
+               "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+               "PROGRAMFILES", "PROGRAMFILES(X86)", "HOMEDRIVE", "HOMEPATH",
+               "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "VIRTUAL_ENV"}
+    env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
+    env["PYTHONPATH"] = str(ROOT / "backend")
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PROJ_NETWORK"] = "OFF"
+    env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+    return env
+
+
+def _scratch_wait_http(base: str, path: str, owned: subprocess.Popen, *, max_seconds: int = 35) -> None:
+    """Read ONLY the explicitly owned scratch address, never 5174 or 8000."""
+    from urllib.request import build_opener, ProxyHandler
+    target = f"{base}{path}"
+    parsed = urlsplit(target)
+    if parsed.hostname != '127.0.0.1' or parsed.port in (8000, 5174):
+        raise RuntimeError('SCRATCH_HEALTH_REQUEST_TARGET_NOT_ISOLATED')
+    opener = build_opener(ProxyHandler({}))  # no inherited HTTP proxy
+    start = time.monotonic()
+    last: str = "NOT_STARTED"
+    while time.monotonic() - start < max_seconds:
+        if owned.poll() is not None:
+            raise RuntimeError(f'SCRATCH_CHILD_DIED_{owned.pid}_EXIT_{owned.returncode}')
+        try:
+            with opener.open(target, timeout=2) as response:
+                if response.status == 200:
+                    return
+                last = f'HTTP_{response.status}'
+        except Exception as exc:
+            last = type(exc).__name__
+        time.sleep(0.2)
+    raise RuntimeError(f'SCRATCH_LOOPBACK_START_TIMEOUT_{parsed.port}_{last}')
+
+
+def _scratch_stop(proc: subprocess.Popen | None) -> dict:
+    """Stop ONLY the subprocess returned by our own Popen call."""
+    if proc is None:
+        return {"ownedPid": None, "stop": "NEVER_STARTED"}
+    report = {"ownedPid": proc.pid, "stop": "ALREADY_EXITED"}
+    if proc.poll() is None:
+        proc.terminate()
+        report["stop"] = "TERMINATED_OWNED_PROCESS"
+        try:
+            proc.wait(timeout=7)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+            report["stop"] = "KILLED_OWNED_PROCESS_AFTER_TIMEOUT"
+    report["exitCode"] = proc.returncode
+    return report
+
+
+def run_scratch(frames: int, timeout: int, cycles: tuple[int, ...]) -> dict:
+    """Isolated local FastAPI + Vite + Chrome; no user ports, API, or data."""
+    start_head = git('rev-parse', 'HEAD')
+    source_tree_start = _scratch_source_tree()
+    start_conf = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest()
+                  for p in SCRATCH_CONFIG_FILES}
+    report: dict = {"status": "UNVERIFIED", "errors": [],
+                    "utc": datetime.now(timezone.utc).isoformat(),
+                    "scratch": {"isolation": "OWNED_LOOPBACK_TEMP_ONLY",
+                                "neverTouchUserPorts": [5174, 8000],
+                                "initialGitHead": start_head,
+                                "fullSourceTreeStart": source_tree_start,
+                                "configSourceSha256Start": start_conf,
+                                "providerEgressGuard": "socket connect/connect_ex/sendto/getaddrinfo permit loopback only",
+                                "providerCredentialsInherited": False,
+                                "outsideDataRootsAccessed": "NONE_REQUESTED"}}
+    # Lifetime includes app child process, Vite child process and disposable
+    # hardware Chrome. Cleanup even if source changes, startup or Chrome fails.
+    with tempfile.TemporaryDirectory(prefix='darkfleet-gpu-longitudinal-NONLIVE-') as scratch:
+        temp = Path(scratch)
+        data_root = temp / 'data'
+        data_root.mkdir()
+        api_port = _scratch_port()
+        web_port = _scratch_port()
+        if api_port == web_port:
+            raise RuntimeError('SCRATCH_PORT_COLLISION')
+        api_url = f'http://127.0.0.1:{api_port}'
+        web_url = f'http://127.0.0.1:{web_port}/'
+        report['scratch'].update({"dataRoot": str(data_root), "dataRootWasOsTemp": True,
+                                  "apiPort": api_port, "vitePort": web_port,
+                                  "apiUrl": api_url, "viteUrl": web_url,
+                                  "viteProxyEnv": {"DARKFLEET_API_URL": api_url}})
+        env = _scratch_env()
+        env['DARKFLEET_DATA_DIR'] = str(data_root)
+        env['DARKFLEET_API_PORT'] = str(api_port)
+        web_env = dict(env, DARKFLEET_API_URL=api_url)
+        web_env['DARKFLEET_SCRATCH_API_PORT'] = str(api_port)
+        web_env['DARKFLEET_SCRATCH_VITE_PORT'] = str(web_port)
+        flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        api_proc: subprocess.Popen | None = None
+        web_proc: subprocess.Popen | None = None
+        vite_guard = temp / 'scratch_vite_outbound_guard.cjs'
+        vite_guard.write_text(SCRATCH_VITE_NET_GUARD, encoding='utf-8')
+        report['scratch']['viteNodeGuardSha256'] = hashlib.sha256(vite_guard.read_bytes()).hexdigest()
+        with (temp / 'scratch_api.log').open('w', encoding='utf-8') as api_log, \
+             (temp / 'scratch_vite.log').open('w', encoding='utf-8') as vite_log:
+            try:
+                api_proc = subprocess.Popen([sys.executable, '-B', '-c', SCRATCH_API],
+                                            cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                            stdout=api_log, stderr=subprocess.STDOUT,
+                                            creationflags=flags)
+                report['scratch']['ownedApiPid'] = api_proc.pid
+                _scratch_wait_http(api_url, '/health', api_proc)
+                # Native vite.config.ts reads DARKFLEET_API_URL from this
+                # process env. --strictPort forbids fallback onto user ports.
+                vite_cli = ROOT / 'node_modules' / 'vite' / 'bin' / 'vite.js'
+                if not vite_cli.is_file():
+                    raise RuntimeError('SCRATCH_VITE_DEPENDENCY_MISSING')
+                web_proc = subprocess.Popen(['node', '--require', str(vite_guard),
+                    str(vite_cli), '--host',
+                    '127.0.0.1', '--port', str(web_port), '--strictPort'],
+                    cwd=ROOT, env=web_env, stdin=subprocess.DEVNULL,
+                    stdout=vite_log, stderr=subprocess.STDOUT,
+                    creationflags=flags)
+                report['scratch']['ownedVitePid'] = web_proc.pid
+                _scratch_wait_http(web_url.rstrip('/'), '/', web_proc)
+                if git('rev-parse', 'HEAD') != start_head:
+                    raise RuntimeError('SCRATCH_REPO_HEAD_CHANGED_DURING_STARTUP')
+                if _scratch_source_tree() != source_tree_start:
+                    raise RuntimeError('SCRATCH_SOURCE_TREE_CHANGED_DURING_STARTUP')
+                if {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest()
+                    for p in SCRATCH_CONFIG_FILES} != start_conf:
+                    raise RuntimeError('SCRATCH_CONFIG_CHANGED_DURING_STARTUP')
+                report = {**report, **run(web_url, frames, timeout, cycles,
+                                         scratch_api_port=api_port)}
+            except Exception as exc:
+                report['errors'].append(f'SCRATCH_ISOLATION_OR_RUN_FAILURE_{type(exc).__name__}: {str(exc)[:650]}')
+                report['status'] = 'UNVERIFIED'
+            finally:
+                # Release both children before temporary directory cleanup.
+                report['scratch']['viteShutdown'] = _scratch_stop(web_proc)
+                report['scratch']['apiShutdown'] = _scratch_stop(api_proc)
+                api_log.flush()
+                vite_log.flush()
+                for kind, path in [('api', temp / 'scratch_api.log'),
+                                   ('vite', temp / 'scratch_vite.log')]:
+                    report['scratch'][kind + 'LogTail'] = path.read_text(
+                        encoding='utf-8', errors='replace')[-2400:]
+    report['scratch']['tempRootDeletedAfterExit'] = not temp.exists()
+    report['scratch']['finalGitHead'] = git('rev-parse', 'HEAD')
+    report['scratch']['fullSourceTreeEnd'] = _scratch_source_tree()
+    report['scratch']['configSourceSha256End'] = {
+        p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest()
+        for p in SCRATCH_CONFIG_FILES}
+    if (report['scratch']['finalGitHead'] != start_head or
+            report['scratch']['configSourceSha256End'] != start_conf or
+            report['scratch']['fullSourceTreeEnd'] != source_tree_start):
+        report['errors'].append('SCRATCH_REPO_SOURCE_CHANGED_DURING_RUN')
+        report['status'] = 'UNVERIFIED'
+    return report
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--self-test',action='store_true',help='Static JS syntax/fixture checks; never launches browser')
@@ -616,6 +934,7 @@ def main() -> int:
     parser.add_argument('--timeout',type=int,default=90,help='Seconds allowed for each active postRender sample')
     parser.add_argument('--longitudinal',action='store_true',help='Add bounded hardware GC/GL/DOM repeated lifecycle cycles after standard 4x36 active frames')
     parser.add_argument('--cycles-per-size',default='3,3,3,8',help='With --longitudinal: four 1..12 counts totaling 12..20 (default 3,3,3,8)')
+    parser.add_argument('--scratch',action='store_true',help='Own isolated loopback FastAPI/Vite servers on two free non-user ports with TEMP data; requires --longitudinal')
     options=parser.parse_args()
     if options.self_test:
         report=self_test()
@@ -637,7 +956,12 @@ def main() -> int:
             parser.error('cycles-per-size must be four integers')
         if len(cycles)!=len(SIZES) or not all(1<=n<=12 for n in cycles) or not 12<=sum(cycles)<=20:
             parser.error('cycles-per-size needs four 1..12 integers totaling 12..20')
-    try: outcome=run(options.url,options.frames,options.timeout,cycles)
+        if not options.scratch:
+            parser.error('Longitudinal Chrome requires --scratch; user 5174 and 8000 ports forbidden')
+    if options.scratch and not options.longitudinal:
+        parser.error('--scratch requires --longitudinal')
+    try: outcome=(run_scratch(options.frames,options.timeout,cycles) if options.scratch else
+                  run(options.url,options.frames,options.timeout,cycles))
     except Exception as exc:
         outcome={"status":"UNVERIFIED","errors":[f"{type(exc).__name__}: {str(exc)[:1200]}"]}
     print(json.dumps(outcome,indent=2,default=str))
