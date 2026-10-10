@@ -9,6 +9,7 @@ import { explain } from '../api/errors';
 import { fmtInstant } from '../design/format';
 import { engine } from '../globe/engine';
 import { editVertices, initialVertexHistory, redoVertices, undoVertices } from './geometryVertexHistory';
+import { commitAndReconcile } from './commitAndReconcile';
 
 const EMPTY = { label: '', notes: '', radius: '1000', kind: 'point' as GeometryKind };
 const show = (value: number | null) => value === null ? '—' : value.toLocaleString(undefined, {
@@ -25,6 +26,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mutationResult, setMutationResult] = useState<string | null>(null);
   const [drawing, setDrawing] = useState(false);
 
   // A case owns its overlay. Change of case or departure from the notebook
@@ -82,6 +84,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     setLoading(true);
     setLoaded(false);
     setError(null);
+    setMutationResult(null);
     void listGeoAnnotations(props.caseId)
       .then((result) => { if (active) { setItems(result); setLoaded(true); } })
       .catch((cause: unknown) => { if (active) setError(explain(cause)); })
@@ -102,6 +105,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       const persisted = await listGeoAnnotations(props.caseId);
       setItems(persisted);
       setLoaded(true);
+      setMutationResult(null);
     } finally { setLoading(false); }
   });
   const reset = () => {
@@ -112,6 +116,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     setVertices(initialVertexHistory());
   };
   const save = () => run(async () => {
+    setMutationResult(null);
     const coordinates = parseLonLatLines(vertices.current);
     const radius = Number(draft.radius);
     if (draft.kind === 'range_ring' && (!draft.radius.trim() ||
@@ -127,13 +132,31 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       },
     };
     if (!payload.label) throw new Error('Geometry label is required.');
-    if (editingId) await updateGeoAnnotation(props.caseId, editingId, payload);
-    else await createGeoAnnotation(props.caseId, payload);
-    setLoaded(false);
-    const persisted = await listGeoAnnotations(props.caseId);
-    setItems(persisted);
-    setLoaded(true);
+    const updating = editingId !== null;
+    const caseId = props.caseId;
+    const result = await commitAndReconcile(
+      async () => {
+        if (editingId) await updateGeoAnnotation(caseId, editingId, payload);
+        else await createGeoAnnotation(caseId, payload);
+      },
+      async () => {
+        setLoaded(false);
+        setLoading(true);
+        try { return await listGeoAnnotations(caseId); }
+        finally { setLoading(false); }
+      },
+    );
+    // The server accepted the write. Clearing the editor prevents duplicating
+    // it when a separate list GET has failed after the successful POST/PUT.
     reset();
+    setLoaded(false);
+    if (result.kind === 'CONFIRMED') {
+      setItems(result.value);
+      setLoaded(true);
+      setMutationResult(updating ? 'Geometry update saved and reloaded.' : 'Geometry saved and reloaded.');
+    } else {
+      setMutationResult(`${updating ? 'Geometry update' : 'Geometry'} saved on server, but the refreshed list could not be verified. Do not submit again; retry the list.`);
+    }
   });
   const edit = (item: GeoAnnotation) => {
     setDrawing(false);
@@ -151,10 +174,24 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     ).join('\n')));
   };
   const remove = (id: string) => run(async () => {
-    await deleteGeoAnnotation(props.caseId, id);
+    setMutationResult(null);
+    const result = await commitAndReconcile(
+      () => deleteGeoAnnotation(props.caseId, id),
+      async () => {
+        setLoaded(false);
+        setLoading(true);
+        try { return await listGeoAnnotations(props.caseId); }
+        finally { setLoading(false); }
+      },
+    );
     setLoaded(false);
-    setItems(await listGeoAnnotations(props.caseId));
-    setLoaded(true);
+    if (result.kind === 'CONFIRMED') {
+      setItems(result.value);
+      setLoaded(true);
+      setMutationResult('Geometry removed from server and reloaded.');
+    } else {
+      setMutationResult('Geometry removed from server, but the refreshed list could not be verified. Do not repeat deletion; retry the list.');
+    }
     if (editingId === id) reset();
     setPendingDelete(null);
   });
@@ -267,8 +304,8 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
           <p className="text-[10px] text-ink-dim">{item.measurements.method}</p>
           <button type="button" className="df-btn" disabled={busy}
             data-df-geo-edit onClick={() => edit(item)}>Edit</button>
-          <button type="button" className="df-btn ml-2" disabled={busy}
-            data-df-geo-frame onClick={() => {
+          <button type="button" className="df-btn ml-2"
+            data-df-geo-frame disabled={busy || engine.viewer === null} onClick={() => {
               const point = item.geometry.coordinates[0];
               if (point) engine.flyTo(point[1], point[0], 125_000);
             }}>Frame on globe</button>
@@ -283,6 +320,8 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       </ul> : null}
       {error ? <p role="alert" className="text-[11px] text-fault"
         data-df-geo-error>{error}</p> : null}
+      {mutationResult ? <p role="status" className="text-[11px] text-ink"
+        data-df-geo-persistence-receipt>{mutationResult}</p> : null}
     </section>
   );
 }

@@ -1,5 +1,5 @@
 /** Server-backed named investigation viewpoints, with explicit restoration diagnostics. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SavedViewOut } from '../api/contract';
 import {
   captureSnapshot, createSavedView, deleteSavedView,
@@ -7,7 +7,16 @@ import {
 } from '../api/savedViews';
 import { explain } from '../api/errors';
 
+/** The visible EDIT NAME control must focus the actual editable field. */
+export function focusViewNameInput(input: Pick<HTMLInputElement, 'focus' | 'select'> | null): boolean {
+  if (!input) return false;
+  input.focus();
+  input.select();
+  return true;
+}
+
 export function SavedViewsWorkspace() {
+  const nameInput = useRef<HTMLInputElement>(null);
   const [views, setViews] = useState<SavedViewOut[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -74,6 +83,7 @@ export function SavedViewsWorkspace() {
             View name
           </label>
           <input
+            ref={nameInput}
             id="df-view-name" aria-label="Saved view name" maxLength={120}
             className="df-input w-full"
             value={name}
@@ -187,7 +197,10 @@ export function SavedViewsWorkspace() {
                 </button>
                 <button data-df-view-rename className="df-btn" type="button"
                   disabled={working || active.status !== 'OK'}
-                  onClick={() => setName(active.title)}>
+                  onClick={() => {
+                    setName(active.title);
+                    focusViewNameInput(nameInput.current);
+                  }}>
                   EDIT NAME
                 </button>
                 {!confirmDelete ? (

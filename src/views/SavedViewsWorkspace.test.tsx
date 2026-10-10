@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SavedViewsWorkspace } from './SavedViewsWorkspace';
+import { SavedViewsWorkspace, focusViewNameInput } from './SavedViewsWorkspace';
 import { RAIL } from '../command/OperationRail';
 
 describe('Durable saved views operator access', () => {
@@ -13,5 +13,13 @@ describe('Durable saved views operator access', () => {
     expect(html).toContain('data-df-view-refresh');
     expect(html).toContain('Loading saved views');
     expect(html).toContain('Original satellite and AIS');
+  });
+  it('EDIT NAME focuses and selects the editable input rather than silently resetting its text', () => {
+    const focus = vi.fn();
+    const select = vi.fn();
+    expect(focusViewNameInput({ focus, select })).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(focusViewNameInput(null)).toBe(false);
   });
 });
