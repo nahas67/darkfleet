@@ -26,7 +26,23 @@ ROOT = Path(__file__).resolve().parents[1]
 CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 SIZES = (100, 1000, 5000, 10000)
 SOURCE_FILES = ("src/globe/engine.ts", "src/globe/aisRenderer.ts",
-                "src/globe/aisRenderer.perf.test.ts", "src/ais/displayState.ts")
+                "src/globe/aisRenderer.perf.test.ts", "src/ais/displayState.ts",
+                "src/state/store.ts", "src/tactical/TacticalWorld.tsx")
+
+# These are the exact raw source texts Vite makes importable in the page. In
+# dev mode a Git SHA cannot prove served-bundle identity: compare actual local
+# file bytes with the running Vite module's bytes instead.
+SERVED_SOURCE = r"""async ({paths,stage}) => {
+  const digests={};
+  for (const path of paths) {
+    const source=(await import('/'+path+'?raw&df_gpu_source_'+stage)).default;
+    if (typeof source!=='string') throw new Error('Not a Vite raw source module: '+path);
+    const bytes=new TextEncoder().encode(source);
+    const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+    digests[path]=Array.from(hash).map(x=>x.toString(16).padStart(2,'0')).join('');
+  }
+  return digests;
+}"""
 
 
 # Executed only on the actual loaded React app, in the original page's Vite
@@ -271,7 +287,7 @@ def self_test() -> dict:
         tag in INSTALL.lower() for tag in ('swiftshader', 'llvmpipe', 'lavapipe', 'microsoft basic render'))
     checks['synthetic_explicit'] = 'SYNTHETIC' in INSTALL and 'SYNTHETIC' in CASE.upper()
     try:
-        parsed = subprocess.run(['node','--check','-'], input='const install='+INSTALL+';\nconst stage='+CASE+';\n',
+        parsed = subprocess.run(['node','--check','-'], input='const install='+INSTALL+';\nconst stage='+CASE+';\nconst served='+SERVED_SOURCE+';\n',
                                 text=True,capture_output=True,timeout=20,check=False)
         checks['javascript_parses_in_node'] = parsed.returncode == 0
         note = parsed.stderr.strip()[:500]
@@ -310,6 +326,10 @@ def run(url: str, frames: int, timeout: int) -> dict:
                 raise RuntimeError(f"Vite app unavailable, HTTP {response.status if response else 'NO_RESPONSE'}")
             page.locator('.cesium-widget canvas').first.wait_for(state='visible',timeout=30000)
             page.wait_for_timeout(500)  # allow initial React effects; not part of timed sample
+            served=page.evaluate(SERVED_SOURCE,{"paths":list(SOURCE_FILES),"stage":"start"})
+            result["servedSourceSha256Start"]=served
+            if served != result["sourceSha256Start"]:
+                raise RuntimeError('VITE_DEV_SOURCE_MISMATCH: dev app serves different module source bytes than local repository; no valid version provenance')
             # The tactical tab is not required: globe viewer persists app-wide.
             hardware=page.evaluate(INSTALL)
             result["hardware"]=hardware
@@ -354,6 +374,7 @@ def run(url: str, frames: int, timeout: int) -> dict:
             if cdp:
                 result["cdp"]["after"]=cdp.send('Performance.getMetrics')
                 result["cdp"]["domCountersAfter"]=cdp.send('Memory.getDOMCounters')
+            result["servedSourceSha256End"]=page.evaluate(SERVED_SOURCE,{"paths":list(SOURCE_FILES),"stage":"end"})
         except Exception as exc:
             result["errors"].append(f"GATE_FAILURE: {type(exc).__name__}: {str(exc)[:1500]}")
         finally:
@@ -364,6 +385,8 @@ def run(url: str, frames: int, timeout: int) -> dict:
                    "sourceSha256End":source_sha()})
     if result["gitHeadStart"]!=result["gitHeadEnd"] or result["sourceSha256Start"]!=result["sourceSha256End"]:
         result["errors"].append("SOURCE_CHANGED_DURING_HARDWARE_TEST")
+    if result.get("servedSourceSha256End") != result.get("sourceSha256End"):
+        result["errors"].append("SERVED_VITE_SOURCE_DRIFTED_FROM_LOCAL_DURING_HARDWARE_TEST")
     result["status"]="MEASURED" if len(result["rows"])==len(SIZES) and not result["errors"] else "UNVERIFIED"
     return result
 
