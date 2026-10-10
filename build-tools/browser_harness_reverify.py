@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -20,16 +21,25 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 URL = "http://localhost:5174/"
 SOURCES = (
+    "index.html",
+    "src/main.tsx",
+    "src/command/OperationRail.tsx",
     "src/command/DarkFleetCommandApp.tsx",
     "src/intelligence/AdvancedWorkspace.tsx",
     "src/advanced/SceneImageryWorkspace.tsx",
     "src/scenes/LocalSarImportPanel.tsx",
+    "src/api/client.ts",
+    "src/state/store.ts",
     "src/globe/engine.ts",
+    "vite.config.ts",
+)
+MODULE_PROBES = (
+    "/src/command/DarkFleetCommandApp.tsx",
+    "/src/intelligence/AdvancedWorkspace.tsx",
 )
 WORKSPACES = (
     "SEARCH", "INTELLIGENCE", "TASKING", "MISSIONS", "LAYERS",
@@ -45,6 +55,49 @@ def git(*args: str) -> str:
     result = subprocess.run(["git", *args], cwd=ROOT, text=True,
                             capture_output=True, check=False)
     return result.stdout.strip() if result.returncode == 0 else "UNKNOWN"
+
+
+def certify_browser_source_identity(result: dict) -> list[str]:
+    """Reconcile *after* Chrome closes; a smoke PASS cannot outrank source drift.
+
+    Returning explicit failures keeps interrupted/partial runs reportable, but
+    never gives their snapshots an apparently stable-revision exit code.
+    """
+    failures: list[str] = []
+    before, after = result.get("gitHead"), result.get("gitHeadAfter")
+    if not all(isinstance(x, str) and re.fullmatch(r"[0-9a-f]{40}", x)
+               for x in (before, after)):
+        failures.append("GIT_HEAD_UNAVAILABLE")
+    elif before != after:
+        failures.append("GIT_HEAD_CHANGED")
+
+    old, new = result.get("sourceSha256Before"), result.get("sourceSha256After")
+    def complete(value: object) -> bool:
+        return (isinstance(value, dict) and set(value) == set(SOURCES)
+                and all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha)
+                        for sha in value.values()))
+
+    if not complete(old) or not complete(new):
+        failures.append("SOURCE_HASH_SET_INCOMPLETE")
+    elif old != new:
+        failures.append("SOURCE_CHANGED_DURING_RUN")
+
+    # Two independently served Vite raw modules must be present. In the older
+    # predicate, all([]) was True, allowing an empty probe set to pass.
+    probes = result.get("moduleProbe")
+    if (not isinstance(probes, dict) or set(probes) != set(MODULE_PROBES)
+            or any(not isinstance(value, dict) or value.get("status") != 200
+                   or value.get("hasExpectedMarker") is not True
+                   or value.get("rawSha256MatchesDisk") is not True
+                   for value in probes.values())):
+        failures.append("SERVED_VITE_SOURCE_UNVERIFIED")
+
+    result["sourceIdentityFailures"] = failures
+    if failures:
+        result["status"] = "PARTIAL_OR_BLOCKED"
+        message = "Source identity gate failed: " + ", ".join(failures)
+        result["reason"] = (result.get("reason", "") + " " + message).strip()
+    return failures
 
 
 FRAME_SAMPLE = """async () => {
@@ -129,8 +182,7 @@ def run() -> dict:
                 unmaskedVendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : null };
             }""")
             result["moduleProbe"] = {}
-            for path in ("/src/command/DarkFleetCommandApp.tsx",
-                         "/src/intelligence/AdvancedWorkspace.tsx"):
+            for path in MODULE_PROBES:
                 fetched = context.request.get(URL.rstrip("/") + path, timeout=9000)
                 raw = context.request.get(URL.rstrip("/") + path + "?raw", timeout=9000)
                 raw_text = raw.text()
@@ -228,6 +280,7 @@ def run() -> dict:
                 and all(entry["active"] == "true" and entry["panelVisible"]
                         for entry in result["workspaces"])
                 and result["localImport"]["visible"]
+                and set(result["moduleProbe"]) == set(MODULE_PROBES)
                 and all(entry["status"] == 200 and entry["hasExpectedMarker"]
                         and entry["rawSha256MatchesDisk"]
                         for entry in result["moduleProbe"].values())
@@ -252,10 +305,14 @@ def run() -> dict:
         finally:
             result["gitHeadAfter"] = git("rev-parse", "HEAD")
             result["headChangedDuringRun"] = result["gitHead"] != result["gitHeadAfter"]
-            result["sourceSha256After"] = source_digest()
+            try:
+                result["sourceSha256After"] = source_digest()
+            except OSError:
+                result["sourceSha256After"] = {}
             result["sourceChangedDuringRun"] = result["sourceSha256Before"] != result["sourceSha256After"]
             if browser is not None:
                 browser.close()
+    certify_browser_source_identity(result)
     return result
 
 
