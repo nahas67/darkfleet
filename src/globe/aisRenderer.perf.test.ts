@@ -18,8 +18,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { AisObservationOut } from '../api/contract';
-import { displayStateOf, type DisplayContactState } from '../ais/displayState';
+import {
+  displayStateOf,
+  freshnessOf,
+  inTimeOrder,
+  isMoving,
+  resolveOrientation,
+  type DisplayContactState,
+} from '../ais/displayState';
 import { arbitrateLabels, glyphScreenRotation, localFrameDeg, type LabelClaim } from './glyphGeometry';
 
 /* ------------------------------------------------------------------ fixture generation */
@@ -138,7 +146,10 @@ interface Measurement {
 
 function measure(count: number): Measurement {
   const vessels = makeVessels(count);
-  const reference = at(8); // strictly inside the first interval, so interpolation is exercised
+  // The fixture's third recorded fix is precisely at minute 8. This benchmark
+  // therefore exercises the exact-observation path, not interpolation; the
+  // separate ten-minute reference in the repeated profile covers interpolation.
+  const reference = at(8);
 
   const warm = buildDisplayStates(vessels.slice(0, 5), reference); // warm the JIT
   void warm.length;
@@ -295,6 +306,47 @@ const SIZES = [100, 1000, 5000, 10000] as const;
 const measurements = SIZES.map((size) => ({ size, m: measure(size) }));
 
 describe('AIS renderer performance', () => {
+  it('profiles the unchanged 10k / five-fix fixture with repeated median and worst CPU-stage times', () => {
+    // Reuse makeVessels(10000), the exact fleet and 4-minute cadence used by
+    // measure(10000) above. Fixture creation and warm-up are OUTSIDE timing.
+    const fleet = makeVessels(10000);
+    const reference = at(8);
+    const interpolatedReference = at(10);
+    let checksum = 0;
+    const profile = (run: (rows: AisObservationOut[]) => unknown) => {
+      const timed: number[] = [];
+      for (let iteration = 0; iteration < 9; iteration += 1) {
+        const start = performance.now();
+        for (const rows of fleet) {
+          const result = run(rows);
+          // Force consumption; all benchmark calls are semantically exercised.
+          if (result !== null && result !== undefined) checksum += 1;
+        }
+        if (iteration > 0) timed.push(performance.now() - start);
+      }
+      timed.sort((a, b) => a - b);
+      return { medianMs: (timed[3] + timed[4]) / 2, worstMs: timed[7] };
+    };
+    const stages = {
+      sort: profile((rows) => inTimeOrder(rows)),
+      moving: profile((rows) => isMoving(rows)),
+      orientation: profile((rows) => resolveOrientation(rows)),
+      freshness: profile((rows) => freshnessOf(rows, reference)),
+      whole: profile((rows) => displayStateOf(rows, reference)),
+      interpolated: profile((rows) => displayStateOf(rows, interpolatedReference)),
+    };
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify(buildDisplayStates(fleet, reference)))
+      .digest('hex');
+    console.info(`AIS 10k five-fix stage profile (ms, warm-up excluded): ${JSON.stringify(stages)} / consumed ${checksum}`);
+    console.info(`AIS 10k complete-state SHA256 fingerprint: ${fingerprint}`);
+    // Recorded before changing the display-state implementation at HEAD e036a728;
+    // every field (including nullable SOG/COG/heading, provenance, state and
+    // orientation reasons) must remain byte-identical for all 10k vessels.
+    expect(fingerprint).toBe('d81e18803b9ac4c0a8fa22d0ae77b20faec1f5c9b2e7ed558170b51242dc25d7');
+    expect(checksum).toBe(6 * 9 * 10000);
+    expect(stages.whole.medianMs).toBeGreaterThan(0);
+  });
 
   it('measures every required size', () => {
     // DF-X9.7 covers 100, 1,000, 5,000, and 10,000.

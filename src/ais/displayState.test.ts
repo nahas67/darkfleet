@@ -74,6 +74,42 @@ const at = (minutes: number): string =>
 const atSeconds = (seconds: number): string =>
   new Date(Date.parse(T0) + seconds * 1000).toISOString();
 
+describe('single-sort display-state reuse', () => {
+  it('agrees with independently ordered orientation and freshness on unsorted nullable fixes', () => {
+    const series = [
+      obs({ timestamp: at(8), lat: 1.1, lon: 103.1, heading: null, sog: null, cog: null }),
+      obs({ timestamp: at(0), lat: 1, lon: 103, heading: 0, sog: 0, cog: 0 }),
+      obs({ timestamp: at(4), lat: 1.05, lon: 103.05, heading: null, sog: 0, cog: 0 }),
+    ];
+    const original = series.slice();
+    for (const instant of [at(-1), at(0), at(2), at(4), at(6), at(8), at(12), at(35), 'invalid']) {
+      const display = displayStateOf(series, instant);
+      expect(display.orientation).toEqual(resolveOrientation(series));
+      expect(display.freshness).toEqual(freshnessOf(series, instant));
+      expect(display.reported).toEqual({ sogKnots: null, cogDegrees: null, headingDegrees: null });
+    }
+    expect(series).toEqual(original);
+    expect(series[0]).toBe(original[0]);
+  });
+
+  it('keeps null course and speed distinct from measured zero when reusing sorted fixes', () => {
+    const noKinematics = [
+      obs({ timestamp: at(4), lat: 1, lon: 103, sog: null, cog: null }),
+      obs({ timestamp: at(0), lat: 1, lon: 103, sog: null, cog: null }),
+    ];
+    const anchored = noKinematics.map((fix) => ({ ...fix, sog: 0, cog: 0 }));
+    const missing = displayStateOf(noKinematics, at(2));
+    const stopped = displayStateOf(anchored, at(2));
+    expect(missing.reported).toEqual({ sogKnots: null, cogDegrees: null, headingDegrees: null });
+    expect(stopped.reported).toEqual({ sogKnots: 0, cogDegrees: 0, headingDegrees: null });
+    expect(missing.orientation.source).toBe('UNKNOWN');
+    expect(stopped.orientation.source).toBe('UNKNOWN');
+    expect(missing.state).toBe('INTERPOLATED_DISPLAY');
+    expect(stopped.state).toBe('INTERPOLATED_DISPLAY');
+    expect(missing.sourceObservationTimestamps).toEqual([at(0), at(4)]);
+  });
+});
+
 /* ================================================================================================
  * CIRCULAR ANGLES
  * ============================================================================================== */

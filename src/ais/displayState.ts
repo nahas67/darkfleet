@@ -330,7 +330,11 @@ export type Orientation = {
  * resolved by assuming a speed of 0.
  */
 export function isMoving(observations: readonly AisObservationOut[]): boolean {
-  const ordered = inTimeOrder(observations);
+  return isMovingOrdered(inTimeOrder(observations));
+}
+
+/** Internal only: caller already made an independent, chronologically sorted copy. */
+function isMovingOrdered(ordered: readonly AisObservationOut[]): boolean {
   if (ordered.length === 0) return false;
 
   const latest = ordered[ordered.length - 1];
@@ -382,7 +386,11 @@ export function isMoving(observations: readonly AisObservationOut[]): boolean {
  * §11 forbids it specifically.
  */
 export function resolveOrientation(observations: readonly AisObservationOut[]): Orientation {
-  const ordered = inTimeOrder(observations);
+  return resolveOrientationOrdered(inTimeOrder(observations));
+}
+
+/** Avoid sorting the same five-fix series again while building a display state. */
+function resolveOrientationOrdered(ordered: readonly AisObservationOut[]): Orientation {
   if (ordered.length === 0) {
     return {
       source: 'UNKNOWN',
@@ -406,7 +414,7 @@ export function resolveOrientation(observations: readonly AisObservationOut[]): 
     };
   }
 
-  const moving = isMoving(ordered);
+  const moving = isMovingOrdered(ordered);
 
   // 2. Course over ground, gated on motion.
   const cog = courseOverGround(latest);
@@ -495,7 +503,14 @@ export function freshnessOf(
   observations: readonly AisObservationOut[],
   referenceTimeIso: string,
 ): FreshnessReading {
-  const ordered = inTimeOrder(observations);
+  return freshnessOrdered(inTimeOrder(observations), referenceTimeIso);
+}
+
+/** Internal only: preserve the public helper's ordering contract without re-sorting. */
+function freshnessOrdered(
+  ordered: readonly AisObservationOut[],
+  referenceTimeIso: string,
+): FreshnessReading {
   if (ordered.length === 0) {
     return {
       tier: 'LOST',
@@ -700,8 +715,12 @@ export function displayStateOf(
   atTimeIso: string,
 ): DisplayContactState {
   const ordered = inTimeOrder(observations);
-  const orientation = resolveOrientation(ordered);
-  const freshness = freshnessOf(ordered, atTimeIso);
+  // The former call chain sorted + parsed these same timestamps four times:
+  // here, then in resolveOrientation, again in isMoving, and in freshnessOf.
+  // Keep the public helpers independently order-safe, but share this single
+  // immutable sorted copy across all per-contact stages in the hot renderer.
+  const orientation = resolveOrientationOrdered(ordered);
+  const freshness = freshnessOrdered(ordered, atTimeIso);
   const latest = ordered.length > 0 ? ordered[ordered.length - 1] : null;
 
   const reported = latest
