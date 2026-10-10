@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from darkfleet.analyst import analyze_case
 from darkfleet.api.analyst_routes import router
 from darkfleet.api.app import create_app
+from darkfleet.api.targets import CLASSIFICATION_VALUES
 from darkfleet.config.settings import Settings
 from darkfleet.storage.runs import mark_synthetic, run_store_for_data_dir
 
@@ -110,6 +111,39 @@ def test_grounded_sar_ais_claims_cite_precise_stored_paths_and_restart(tmp_path:
         assert any(c["sources"][0]["field_path"] == "$.targets[0].sarConf" for c in watch["claims"])
         assert watch["source_canonical_sha256"] == initial["source_canonical_sha256"]
     assert path.read_bytes() == before_scan
+
+
+def test_real_serialized_target_processing_class_is_cited_without_fabrication(tmp_path: Path):
+    """The production scan stores `classification`, not the fixture's `cls`."""
+    from darkfleet.analyst import _CLASSIFICATIONS
+
+    assert _CLASSIFICATIONS == frozenset(CLASSIFICATION_VALUES)
+    _scan(tmp_path)
+    store = run_store_for_data_dir(tmp_path)
+    record = store.get("REAL-001")
+    assert record is not None
+    record["targets"][0].pop("cls")
+    record["targets"][0]["classification"] = "SEA_CLUTTER"
+    store.save(record)
+    with TestClient(_app(tmp_path)) as client:
+        cid = _case(client)
+        result = _run(client, cid, intent="SAR_AIS", target_id="DF-001").json()
+        assert result["source_status"] == "PERSISTED_REAL"
+        source_claim = next(
+            c for c in result["claims"]
+            if c["sources"][0]["field_path"] == "$.targets[0].classification"
+        )
+        assert source_claim["value"] == "SEA_CLUTTER"
+        assert source_claim["classification"] == "SENSOR_RECORD"
+        assert not any(u["code"] == "CLASSIFICATION_NOT_ESTABLISHED"
+                       for u in result["unknowns"])
+        # A second incompatible class in a legacy field is genuinely ambiguous.
+        record["targets"][0]["cls"] = "SAR_UNMATCHED"
+        store.save(record)
+        conflicting = _run(client, cid, intent="SAR_AIS", target_id="DF-001").json()
+        assert "CLASSIFICATION_INCONSISTENT" in {u["code"] for u in conflicting["unknowns"]}
+        assert not any(c["sources"][0]["field_path"] == "$.targets[0].classification"
+                       for c in conflicting["claims"])
 
 
 def test_operator_note_prompt_injection_never_becomes_a_claim(tmp_path: Path):

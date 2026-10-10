@@ -24,8 +24,12 @@ from darkfleet.storage.runs import RunStore
 AnalystIntent = Literal["SUMMARY", "WATCHLIST", "SAR_AIS", "GAPS"]
 SourceStatus = Literal["PERSISTED_REAL", "NO_SCAN_LINKED", "SOURCE_MISSING", "SOURCE_UNVERIFIED"]
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+# Keep in sync with api.targets.CLASSIFICATION_VALUES. Importing that module
+# from this domain reader causes the `api.__init__ -> app -> analyst_routes`
+# circular import during standalone/offline analysis.
 _CLASSIFICATIONS = frozenset((
-    "SAR_MATCHED_AIS", "SAR_UNMATCHED", "AIS_ONLY", "SAR_ONLY", "UNKNOWN",
+    "SAR_MATCHED_AIS", "SAR_UNMATCHED", "AIS_ONLY",
+    "STATIONARY_OR_INFRASTRUCTURE", "SEA_CLUTTER", "LOW_CONFIDENCE", "UNRESOLVED",
 ))
 _MAX_WATCHES = 30
 _MAX_TARGETS = 20
@@ -418,19 +422,33 @@ def analyze_case(
                             scan_id or "", scan_ref or "", f"{root}.aisConf",
                             "Algorithmic association score, not proof of AIS reception or identity.",
                         )
-                classification = item.get("cls")
-                if isinstance(classification, str) and classification in _CLASSIFICATIONS:
+                # Real persisted scan targets serialize the canonical API field as
+                # `classification`; older scan fixtures retain `cls`. Never cite a
+                # field that is absent, silently drop SEA_CLUTTER, or choose between
+                # contradictory stored classifications.
+                has_canonical = "classification" in item
+                class_field = "classification" if has_canonical else "cls"
+                classification = item.get(class_field)
+                legacy = item.get("cls")
+                if has_canonical and "cls" in item and legacy != classification:
+                    unknown(
+                        "CLASSIFICATION_INCONSISTENT",
+                        f"Conflicting stored class fields for target {tid}; no processing class asserted.",
+                        f"{root}.classification",
+                        "Inspect original persisted source and processing contract.",
+                    )
+                elif isinstance(classification, str) and classification in _CLASSIFICATIONS:
                     claim(
                         f"Stored processing class for target {tid} is {classification}.",
                         str(classification), "SENSOR_RECORD", "PERSISTED_REAL_SCAN",
-                        scan_id or "", scan_ref or "", f"{root}.cls",
+                        scan_id or "", scan_ref or "", f"{root}.{class_field}",
                         "A processing label only; SAR_UNMATCHED never establishes intentional AIS non-reporting.",
                     )
                 else:
                     unknown(
                         "CLASSIFICATION_NOT_ESTABLISHED",
                         f"A recognized processing class is not recorded for target {tid}.",
-                        f"{root}.cls", "Review the processing classification schema.",
+                        f"{root}.{class_field}", "Review the processing classification schema.",
                     )
                 if intent == "SAR_AIS":
                     corr = item.get("corr")
