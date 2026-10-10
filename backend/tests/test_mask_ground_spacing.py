@@ -33,3 +33,10 @@ def test_utm_metre_pixels_and_rotated_affine_keep_measured_scale() -> None:
 def test_invalid_affine_never_yields_zero_or_unbounded_scale() -> None:
     with pytest.raises(RealDataUnavailableError, match="pixel spacing"):
         rasterio_res(_window(CRS.from_epsg(4326), Affine(0, 0, 103.80, 0, 0, 1.3)))
+
+
+def test_invalid_crs_is_reported_as_unavailable_ground_spacing() -> None:
+    invalid = _window(CRS.from_epsg(4326), Affine(0.0001, 0, 103.8, 0, -0.0001, 1.3))
+    invalid["crs"] = "EPSG:not-a-code"
+    with pytest.raises(RealDataUnavailableError, match="pixel spacing"):
+        rasterio_res(invalid)

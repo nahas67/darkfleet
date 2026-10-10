@@ -600,6 +600,7 @@ def rasterio_res(window_data: dict[str, Any]) -> float:
     an isotropic pixel buffer does not silently fall below its requested size.
     """
     from pyproj import CRS, Geod, Transformer
+    from pyproj.exceptions import ProjError
 
     try:
         t = window_data["window_transform"]
@@ -620,7 +621,7 @@ def rasterio_res(window_data: dict[str, Any]) -> float:
         if not math.isfinite(spacing) or spacing <= 0:
             raise ValueError("nonpositive or nonfinite pixel spacing")
         return float(spacing)
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+    except (KeyError, TypeError, ValueError, OverflowError, ProjError) as exc:
         raise RealDataUnavailableError(
             "Raster ground pixel spacing cannot be established for land masking.",
             details={"reason": type(exc).__name__},
