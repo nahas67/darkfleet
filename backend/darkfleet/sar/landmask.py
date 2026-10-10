@@ -89,7 +89,12 @@ def build_land_mask(
             dst_crs=target_crs,
             resampling=Resampling.nearest,
         )
-    land = (water != WATER_CLASS) & (water != NODATA_CLASS)
+    # A source without coverage is unknown, never surveyed open water. GDAL
+    # initializes destinations outside the source footprint to class 0, so
+    # treating 0 as water silently admits targets where no WorldCover data was
+    # available to justify a maritime detection.
+    unknown = water == NODATA_CLASS
+    land = (water != WATER_CLASS) & ~unknown
 
     buf_px = max(0, round(coastline_buffer_m / pixel_spacing_m))
     if buf_px > 0:
@@ -112,15 +117,20 @@ def build_land_mask(
         ).astype(bool)
         land &= ~carved
 
+    excluded = land | unknown
     land_frac = float(land.mean())
     return {
-        "excluded": land,
+        "excluded": excluded,
         "land_fraction": land_frac,
+        "unknown_fraction": float(unknown.mean()),
+        "excluded_fraction": float(excluded.mean()),
         "buffer_px": buf_px,
         "provenance": {
             "source": WORLDCOVER_VERSION,
             "water_href": water_src_href,
             "water_class": WATER_CLASS,
+            "nodata_policy": "EXCLUDED_UNKNOWN_NOT_WATER",
+            "unknown_fraction": float(unknown.mean()),
             "coastline_buffer_m": coastline_buffer_m,
             "port_exceptions": len(port_polys_wgs84 or []),
         },

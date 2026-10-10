@@ -167,6 +167,11 @@ def pixel_to_wgs84(
             x=x,
             y=y,
         )
+    if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+        raise GeoreferenceError(
+            "reprojecting pixel produced a coordinate outside WGS84 bounds",
+            col=col, row=row, x=x, y=y, lon=lon, lat=lat,
+        )
     # Returned at FULL float precision, deliberately unrounded. An earlier draft
     # rounded to 7 dp (~1 cm); that is finer than any real geolocation, but it is
     # also coarser than this repository's own 1e-9 test tolerances, and rounding
@@ -246,13 +251,18 @@ def assert_window_consistency(
     if scene_transform is None or window is None or window_transform is None:
         return
     scene = affine_from_sequence(scene_transform)
-    col_off, row_off = float(window[0]), float(window[1])
+    # read_window records [row_off, col_off, height, width], the Rasterio
+    # window order. Swapping these silently geolocates a valid cropped window
+    # against the wrong scene pixels whenever the two offsets differ.
+    row_off, col_off = float(window[0]), float(window[1])
     from rasterio.transform import Affine
 
     expected = scene @ Affine.translation(col_off, row_off)
     actual = affine_from_sequence(window_transform)
     if not (
         math.isclose(expected.a, actual.a, rel_tol=0, abs_tol=1e-6)
+        and math.isclose(expected.b, actual.b, rel_tol=0, abs_tol=1e-6)
+        and math.isclose(expected.d, actual.d, rel_tol=0, abs_tol=1e-6)
         and math.isclose(expected.e, actual.e, rel_tol=0, abs_tol=1e-6)
         and math.isclose(expected.c, actual.c, rel_tol=0, abs_tol=1e-3)
         and math.isclose(expected.f, actual.f, rel_tol=0, abs_tol=1e-3)

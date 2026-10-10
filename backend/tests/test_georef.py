@@ -48,10 +48,12 @@ def test_window_read_4326_and_vessel_geolocation() -> None:
 
 
 def test_window_read_32648_pixel_to_wgs84() -> None:
-    out = read_window(F32648, (103.81, 1.27, 103.83, 1.29))
+    # The UTM fixture is at ~104.10 E, 1.32 N. A former AOI at 103.81 E
+    # was disjoint and silently "succeeded" by moving the read onto the raster.
+    out = read_window(F32648, (104.10, 1.32, 104.14, 1.36))
     assert out["crs"] == CRS.from_epsg(32648)
     # Full-raster read: vessel 1 at (row 250, col 300).
-    full = read_window(F32648, (103.79, 1.25, 103.85, 1.31))
+    full = read_window(F32648, (104.09, 1.31, 104.15, 1.37))
     ro, co, _, _ = full["window"]
     lat, lon = pixel_to_wgs84(full["window_transform"], full["crs"], 300.5 - co, 250.5 - ro)
     s = SIDECAR["t32648"]
@@ -74,6 +76,31 @@ def test_aoi_reprojection_contains_known_point() -> None:
 def test_window_clamped_to_raster() -> None:
     out = read_window(F4326, (103.0, 1.0, 104.5, 1.5))  # far larger than the 400px fixture
     assert out["array"].shape == (400, 400)
+
+
+def test_window_with_partial_overlap_is_only_the_actual_intersection() -> None:
+    # The AOI begins outside the scene's western edge and enters it by a few
+    # pixels. Its non-intersecting width cannot be moved onto valid scene data.
+    import rasterio
+
+    with rasterio.open(F4326) as ds:
+        west, north = ds.bounds.left, ds.bounds.top
+        resolution = abs(ds.transform.a)
+    out = read_window(F4326, (west - 20 * resolution, north - 30 * resolution,
+                               west + 5 * resolution, north - 5 * resolution))
+    assert out["array"].shape == (25, 5)
+    assert out["window"][1] == 0
+
+
+def test_nonoverlapping_aoi_refused_instead_of_reading_unrequested_pixels() -> None:
+    import rasterio
+
+    with rasterio.open(F4326) as ds:
+        west, north = ds.bounds.left, ds.bounds.top
+        resolution = abs(ds.transform.a)
+    with pytest.raises(RealDataUnavailableError, match="does not intersect"):
+        read_window(F4326, (west - 50 * resolution, north - 40 * resolution,
+                            west - 5 * resolution, north - 5 * resolution))
 
 
 def test_unreferenced_asset_refused_loudly() -> None:

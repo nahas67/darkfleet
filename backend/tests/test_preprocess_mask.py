@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from darkfleet.sar.landmask import build_land_mask
 
 MASK = Path(__file__).parent / "fixtures" / "mask"
 CLIP = str(MASK / "worldcover_sg_clip.tif")
+UTM_CLIP = str(MASK / "worldcover_utm32648_clip.tif")
 COG4326 = str(Path(__file__).parent / "fixtures" / "cog" / "fixture_4326.tif")
+COG32648 = str(Path(__file__).parent / "fixtures" / "cog" / "fixture_32648.tif")
 
 SINGAPORE_PORT = [[(103.825, 1.285), (103.835, 1.285), (103.835, 1.295), (103.825, 1.295)]]
 
@@ -82,6 +85,38 @@ def test_mask_open_water_grid_stays_water() -> None:
     t = Affine(0.0001, 0.0, 103.90, 0.0, -0.0001, 1.24)
     out = build_land_mask(CLIP, t, (400, 400), CRS.from_epsg(4326), coastline_buffer_m=150)
     assert out["land_fraction"] < 0.5
+
+
+def test_uncovered_worldcover_source_does_not_become_open_water() -> None:
+    from rasterio.transform import Affine
+
+    # 104.10 E is EAST of the committed Singapore clip's easternmost extent
+    # (104.05 E). Before this fix GDAL filled the destination with zeros and
+    # every one of those *unknown* pixels was treated as detectable water.
+    t = Affine(0.0001, 0.0, 104.10, 0.0, -0.0001, 1.24)
+    out = build_land_mask(CLIP, t, (50, 50), CRS.from_epsg(4326), coastline_buffer_m=0)
+    assert out["land_fraction"] == 0.0
+    assert out["unknown_fraction"] == 1.0
+    assert out["excluded_fraction"] == 1.0
+    assert out["excluded"].all()
+    assert out["provenance"]["nodata_policy"] == "EXCLUDED_UNKNOWN_NOT_WATER"
+
+
+def test_official_utm_worldcover_clip_covers_measured_vessel_positions() -> None:
+    metadata = json.loads((MASK / "worldcover_utm32648_clip.provenance.json").read_text())
+    assert metadata["source_url"] == (
+        "https://esa-worldcover.s3.amazonaws.com/v200/2021/map/"
+        "ESA_WorldCover_10m_2021_v200_N00E102_Map.tif"
+    )
+    assert metadata["source_tile_sha256"] is None  # upstream digest not independently verified
+    assert hashlib.sha256(Path(UTM_CLIP).read_bytes()).hexdigest() == metadata["clip_sha256"]
+    with rasterio.open(COG32648) as ds:
+        result = build_land_mask(UTM_CLIP, ds.transform, (ds.height, ds.width), ds.crs,
+                                 coastline_buffer_m=150, pixel_spacing_m=10)
+    assert result["unknown_fraction"] == 0.0
+    assert 0.01 < result["land_fraction"] < 0.50
+    for row, col in ((120, 200), (250, 300), (310, 150)):
+        assert not result["excluded"][row, col]
 
 
 def test_buffer_monotonic_and_port_carveback() -> None:

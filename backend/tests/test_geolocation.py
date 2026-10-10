@@ -391,6 +391,32 @@ def test_geolocation_is_finite_and_refuses_nonsense_input() -> None:
     with pytest.raises(GeoreferenceError):
         # no centroid at all -- cannot be placed, so it is not invented
         geolocate_components([{"area": 3}], crs="EPSG:4326", transform=[1, 0, 0, 0, -1, 0])
+    with pytest.raises(GeoreferenceError, match="outside WGS84"):
+        geolocate_components([_component(1.0, 1.0)], crs="EPSG:4326",
+                             transform=[0.1, 0, 210, 0, -0.1, 12])
+    with pytest.raises(GeoreferenceError, match="outside WGS84"):
+        geolocate_components([_component(1.0, 1.0)], crs="EPSG:4326",
+                             transform=[0.1, 0, 10, 0, -0.1, 120])
+
+
+def test_window_consistency_rejects_corrupted_rotation_or_shear() -> None:
+    from rasterio.transform import Affine
+
+    scene = Affine(10, 2, 500, 3, -10, 1000)
+    window = (7, 5, 20, 30)  # raster reader's row, column, height, width
+    correct = scene @ Affine.translation(window[1], window[0])
+    assert_window_consistency(
+        scene_transform=list(scene)[:6], window=window,
+        window_transform=list(correct)[:6],
+    )
+    for coefficient in (1, 3):  # b and d matter to every geolocated centroid
+        corrupted = list(correct)[:6]
+        corrupted[coefficient] += 1.0
+        with pytest.raises(GeoreferenceError, match="window transform"):
+            assert_window_consistency(
+                scene_transform=list(scene)[:6], window=window,
+                window_transform=corrupted,
+            )
 
 
 def test_correlation_refuses_a_component_with_no_measured_position() -> None:

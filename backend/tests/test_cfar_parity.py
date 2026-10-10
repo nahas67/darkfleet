@@ -93,3 +93,15 @@ def test_components_match_golden() -> None:
         assert got["wakeHdg"] == want["wakeHdg"]
         assert got["bbox"] == want["bbox"]
         assert abs(got["clutterMeanDb"] - want["clutterMeanDb"]) < 1e-9
+
+
+def test_cfar_window_smaller_than_training_footprint_yields_no_detections() -> None:
+    # A narrow intersection of an AOI with a real raster is a valid measurement,
+    # but it has no complete training annulus. No target may be inferred there.
+    for shape in ((1, 1), (2, 20), (20, 2), (5, 5), (0, 0)):
+        db = np.full(shape, -20.0, dtype=np.float32)
+        valid = np.ones(shape, dtype=bool)
+        result = run_ca_cfar(db, valid, None)
+        assert result["mask"].shape == shape
+        assert not result["mask"].any()
+        assert np.isnan(result["threshold_db"]).all()

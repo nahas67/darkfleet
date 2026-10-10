@@ -31,6 +31,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from darkfleet.sar.components import extract_components
+from tests.fixture_source import FIXTURE_BBOX
 from tests.test_api import (  # noqa: F401
     api_settings,
     client,
@@ -39,7 +40,7 @@ from tests.test_api import (  # noqa: F401
     offline_pipeline,
 )
 
-BBOX = [104.1011, 1.3569, 104.1371, 1.3931]
+BBOX = FIXTURE_BBOX
 
 
 def _run(client: TestClient) -> str:

@@ -63,11 +63,24 @@ def _reproject_aoi(
 
 
 def _clamp_window(win: Window, width: int, height: int) -> Window:
-    row_off = max(0, int(win.row_off))
-    col_off = max(0, int(win.col_off))
-    h = max(1, min(int(win.height), height - row_off))
-    w = max(1, min(int(win.width), width - col_off))
-    return Window(col_off, row_off, w, h)
+    """Intersect the requested window with the source, without shifting the AOI.
+
+    Simply clamping a negative origin to zero while keeping the requested width
+    turns an off-raster AOI into a read of unrelated scene pixels. A disjoint AOI
+    must fail before detection instead of producing geographic evidence outside
+    the requested area.
+    """
+    row0 = max(0, int(win.row_off))
+    col0 = max(0, int(win.col_off))
+    row1 = min(height, int(win.row_off + win.height))
+    col1 = min(width, int(win.col_off + win.width))
+    if row1 <= row0 or col1 <= col0:
+        raise RealDataUnavailableError(
+            "Requested SAR AOI does not intersect the source raster.",
+            details={"raster_width": width, "raster_height": height},
+            suggestions=["Select an AOI that overlaps the chosen SAR asset."],
+        )
+    return Window(col0, row0, col1 - col0, row1 - row0)
 
 
 def pixel_to_wgs84(

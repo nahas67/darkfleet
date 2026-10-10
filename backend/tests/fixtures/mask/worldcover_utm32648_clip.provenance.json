@@ -1,0 +1,27 @@
+{
+  "source": "ESA WorldCover v200, 2021 global land cover",
+  "source_url": "https://esa-worldcover.s3.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N00E102_Map.tif",
+  "source_tile_sha256": null,
+  "source_tile_sha256_status": "UNVERIFIED: full upstream source tile checksum was not available",
+  "extraction_method": "rasterio.open(/vsicurl/<source_url>); from_bounds; round_offsets; round_lengths; read band 1; GTiff with DEFLATE compression",
+  "extracted_utc_date": "2026-10-11",
+  "source_window_row_col_height_width": [19560, 25080, 720, 720],
+  "clip_bbox_wgs84_lon_lat": [104.09, 1.31, 104.15, 1.37],
+  "clip_crs": "EPSG:4326",
+  "clip_width": 720,
+  "clip_height": 720,
+  "clip_pixel_size_degrees": [0.00008333333333333333, -0.00008333333333333333],
+  "clip_sha256": "582da459913dcda51a5030ffa00a9fea7da0ae6ffe930c2b2e1266e21786606f",
+  "clip_size_bytes": 15761,
+  "observed_worldcover_classes_and_counts": {
+    "10": 21356,
+    "30": 11235,
+    "40": 19,
+    "50": 17123,
+    "60": 61610,
+    "80": 406975,
+    "90": 82
+  },
+  "class80_definition": "Water (ESA WorldCover legend)",
+  "limitations": "This is a deterministic locally SHA-verified clip obtained from the official ESA endpoint. A separately published checksum for the full upstream source tile was not independently verified. The SAR detections are fixture data, not independently validated field observations."
+}

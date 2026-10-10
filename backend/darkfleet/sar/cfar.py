@@ -52,6 +52,19 @@ def run_ca_cfar(
     guard_r = math.ceil(math.sqrt(guard_cells) / 2)
     train_r = guard_r + math.ceil(math.sqrt(training_cells) / 2)
 
+    # A narrow or empty source window has no complete training annulus.
+    # Return an explicit empty detection result; negative-sized integral-image
+    # slices formerly raised ValueError, aborting scans that only touch the edge
+    # of a valid SAR scene.
+    h, w_px = db.shape
+    if h <= 2 * train_r or w_px <= 2 * train_r:
+        return {
+            "mask": np.zeros((h, w_px), dtype=bool),
+            "threshold_db": np.full((h, w_px), np.nan, dtype=np.float32),
+            "guard_r": guard_r,
+            "train_r": train_r,
+        }
+
     int_p = np.zeros((power.shape[0] + 1, power.shape[1] + 1))
     int_w = np.zeros_like(int_p)
     int_p[1:, 1:] = np.cumsum(np.cumsum(power, axis=0), axis=1)
