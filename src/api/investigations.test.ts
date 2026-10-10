@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addInvestigationNote, createInvestigation, listInvestigations, removeInvestigationNote,
+  renameInvestigation,
   restoreInvestigationScan, selectRestoredInvestigationTarget,
 } from './investigations';
 import { loadScanAis, loadScanResults, loadRaster, releaseStageStream } from './client';
@@ -95,6 +96,16 @@ describe('investigation API and saved scan restoration', () => {
   it('rejects malformed list responses instead of displaying zero investigations', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ wrong_key: [] })));
     await expect(listInvestigations()).rejects.toThrow(/missing required key/);
+  });
+
+  it('renames a durable case using PUT without modifying scan linkage or source evidence', async () => {
+    const renamed = { ...caseRecord, title: 'Revised analyst case' };
+    const mock = vi.fn().mockResolvedValue(response(renamed));
+    vi.stubGlobal('fetch', mock);
+    expect(await renameInvestigation(caseRecord.id, renamed.title)).toEqual(renamed);
+    expect(mock.mock.calls[0][0]).toBe('/api/investigations/case-1');
+    expect(mock.mock.calls[0][1].method).toBe('PUT');
+    expect(JSON.parse(mock.mock.calls[0][1].body)).toEqual({ title: renamed.title });
   });
 
   it('rejects watchlist targets absent from an actual restored scan rather than fabricating selection', () => {

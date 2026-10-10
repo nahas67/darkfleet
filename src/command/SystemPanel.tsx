@@ -14,13 +14,18 @@
 import { useEffect, useState } from 'react';
 import { loadDatasetHealth, loadProviders } from '../api/client';
 import { engine } from '../globe/engine';
-import { useStore } from '../state/store';
+import { useStore, type State } from '../state/store';
 import { healthColor, healthSeverity } from '../design/tokens';
 import { SHORTCUTS } from './useGlobalKeys';
 import { NOT_ESTABLISHED } from '../design/format';
 import { useArchiveCoverage } from '../ais/archiveCoverage';
 import { installStatusLabel, versionLabel } from '../maritime/datasetHealth';
 import type { ProviderHealthEntry } from '../api/contract';
+import { ApiError, explain } from '../api/errors';
+import {
+  DEFAULT_OPERATOR_PREFERENCES, getOperatorSettings, resetOperatorSettings,
+  saveOperatorSettings, type OperatorPreferences, type OperatorSettings,
+} from '../api/operatorSettings';
 
 /** The group health is the least healthy reported member; an unknown status stays unknown. */
 export function worstProviderHealth(providers: readonly ProviderHealthEntry[]): string | null {
@@ -358,8 +363,139 @@ function MaritimeEntitySection() {
   );
 }
 
+/** Failure causes and provider status remain visible even when optional healthy details are hidden. */
+export function ProviderHealthRow({ provider, showOptionalDetails }: {
+  provider: ProviderHealthEntry; showOptionalDetails: boolean;
+}) {
+  const reported = (provider as { status?: unknown }).status;
+  const status = typeof reported === 'string' && healthSeverity.includes(reported)
+    ? reported : 'NOT_ESTABLISHED';
+  const tone = healthColor[status] ?? 'var(--df-text-dim)';
+  return <li className="border-l-2 pl-2" style={{ borderColor: tone }}>
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="df-num text-[11px] text-ink">{provider.provider}</span>
+      <span className="df-label text-[10px]" style={{ color: tone }}>
+        {status.replace(/_/g, ' ')}
+      </span>
+    </div>
+    {(status !== 'AVAILABLE' || showOptionalDetails) && (provider.detail || provider.error) ? (
+      <p className="text-[11px] leading-relaxed text-ink-2" data-df-provider-explanation>
+        {provider.detail || provider.error}
+      </p>
+    ) : null}
+  </li>;
+}
+
+export function SystemKeyboardReference({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return <section data-df-keyboard-reference>
+    <p className="df-label mb-1.5 mt-4 text-[10px]">Keyboard</p>
+    <dl className="space-y-0.5">
+      {SHORTCUTS.map((shortcut) => (
+        <div key={shortcut.keys} className="flex items-baseline gap-2">
+          <dt className="df-num w-14 shrink-0 text-[10px] text-ink">{shortcut.keys}</dt>
+          <dd className="text-[11px] text-ink-2">{shortcut.action}</dd>
+        </div>
+      ))}
+    </dl>
+  </section>;
+}
+
+/** Scan/stage/source status is non-optional provenance; only prose can be hidden. */
+export function SystemProvenanceStatus({ session, showSupplementary }: {
+  session: Pick<State, 'scanId' | 'scanStage' | 'streamState' | 'rasterError' | 'rasterLoaded'>;
+  showSupplementary: boolean;
+}) {
+  return <section data-df-provenance-mandatory>
+    <p className="df-label mb-1.5 mt-4 text-[10px]">Provenance</p>
+    <dl className="space-y-0.5">
+      {([
+        ['Scan', session.scanId],
+        ['Stage', session.scanStage],
+        ['Stream', session.streamState],
+        ['Raster', session.rasterError ? 'unavailable' : session.rasterLoaded ? 'loaded' : 'not loaded'],
+      ] as ReadonlyArray<readonly [string, string | null]>).map(([label, value]) => (
+        <div key={label} className="flex items-baseline justify-between gap-2">
+          <dt className="df-label text-[10px] text-ink-dim">{label}</dt>
+          <dd className="df-num text-[10px] text-ink">{value ?? NOT_ESTABLISHED}</dd>
+        </div>
+      ))}
+    </dl>
+    {showSupplementary ? <p data-df-provenance-supplement className="mt-1 text-[10px] text-ink-dim">
+      These are current interface/source-state indicators, not confirmation that a
+      provider returned verified observations for every place and time.
+    </p> : null}
+  </section>;
+}
+
 export function SystemPanel() {
   const state = useStore();
+  const [saved, setSaved] = useState<OperatorSettings | null>(null);
+  const [draft, setDraft] = useState<OperatorPreferences>(DEFAULT_OPERATOR_PREFERENCES);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsWorking, setSettingsWorking] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [settingsConflict, setSettingsConflict] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+    void getOperatorSettings(controller.signal).then((result) => {
+      if (!mounted) return;
+      setSaved(result);
+      setDraft(result.preferences);
+      setSettingsError(null);
+    }).catch((cause: unknown) => {
+      if (mounted) setSettingsError(`Operator preferences unavailable: ${explain(cause)}`);
+    }).finally(() => { if (mounted) setSettingsLoading(false); });
+    return () => { mounted = false; controller.abort(); };
+  }, []);
+
+  const reloadSettings = async () => {
+    setSettingsLoading(true);
+    setSettingsStatus(null);
+    try {
+      const record = await getOperatorSettings();
+      setSaved(record);
+      setDraft(record.preferences);
+      setSettingsConflict(false);
+      setSettingsError(null);
+      setSettingsStatus(`Loaded saved operator preferences (revision ${record.revision}).`);
+    } catch (cause) {
+      setSettingsError(`Settings reload failed: ${explain(cause)}`);
+    } finally { setSettingsLoading(false); }
+  };
+
+  const changePreference = (key: keyof OperatorPreferences, checked: boolean) => {
+    setDraft((previous) => ({ ...previous, [key]: checked }));
+    setSettingsStatus(null);
+  };
+
+  const commitSettings = async (reset: boolean) => {
+    if (!saved || settingsWorking || settingsLoading || settingsConflict) return;
+    setSettingsWorking(true);
+    setSettingsError(null);
+    setSettingsStatus(null);
+    try {
+      const next = reset
+        ? await resetOperatorSettings(saved.revision)
+        : await saveOperatorSettings(saved.revision, draft);
+      setSaved(next);
+      setDraft(next.preferences);
+      setSettingsStatus(`${reset ? 'Reset' : 'Saved'} operator preferences on server (revision ${next.revision}).`);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        setSettingsConflict(true);
+        setSettingsError('Settings changed in another session. Reload the authoritative revision before editing or saving.');
+      } else setSettingsError(`Operator settings could not be saved: ${explain(cause)}`);
+    } finally { setSettingsWorking(false); }
+  };
+
+  const preferences = saved?.preferences ?? DEFAULT_OPERATOR_PREFERENCES;
+  const dirty = saved !== null && (Object.keys(DEFAULT_OPERATOR_PREFERENCES) as Array<keyof OperatorPreferences>)
+    .some((key) => draft[key] !== saved.preferences[key]);
+  const writable = saved !== null && !settingsWorking && !settingsLoading && !settingsConflict;
 
   return (
     <section className="df-panel df-scroll h-full overflow-y-auto" data-df-workspace="SYSTEM">
@@ -377,6 +513,50 @@ export function SystemPanel() {
       </header>
 
       <div className="p-3">
+        <section className="mb-3 border border-structural p-2 space-y-2" data-df-operator-settings
+          aria-label="Persistent operator presentation preferences">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="df-label text-[10px]">Operator display settings</h3>
+            <span className="df-num text-[10px] text-ink-dim" data-df-settings-revision>
+              {saved ? `Revision ${saved.revision}` : 'NOT VERIFIED'}
+            </span>
+          </div>
+          <p className="text-[10px] text-ink-dim">
+            Saved locally on this installation. Presentation only: no source credentials,
+            network permissions, sensor evidence or detection parameters change.
+          </p>
+          {settingsLoading ? <p role="status" data-df-settings-loading className="df-note text-[11px]">
+            Reading saved operator preferences…
+          </p> : null}
+          {([
+            ['show_provider_details', 'Display provider diagnostic details'],
+            ['show_keyboard_reference', 'Display keyboard shortcut reference'],
+            ['show_provenance_summary', 'Display supplementary provenance explanation'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-[11px] text-ink-2">
+              <input type="checkbox" data-df-operator-setting={key}
+                checked={saved ? draft[key] : DEFAULT_OPERATOR_PREFERENCES[key]}
+                disabled={!writable}
+                onChange={(event) => changePreference(key, event.target.checked)} />
+              {label}
+            </label>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="df-btn" data-df-settings-save
+              disabled={!writable || !dirty} onClick={() => void commitSettings(false)}>Save preferences</button>
+            <button type="button" className="df-btn" data-df-settings-reset
+              disabled={!writable} onClick={() => void commitSettings(true)}>Reset to defaults</button>
+            <button type="button" className="df-btn" data-df-settings-reload
+              disabled={settingsWorking || settingsLoading} onClick={() => void reloadSettings()}>Reload saved</button>
+          </div>
+          {settingsError ? <p role="alert" data-df-settings-error className="text-[11px] text-fault">
+            {settingsError}
+            {saved === null ? ' Displaying fallback layout only; nothing is recorded as saved.' : ''}
+          </p> : null}
+          {settingsStatus ? <p role="status" data-df-settings-status className="text-[11px] text-ink-2">
+            {settingsStatus}
+          </p> : null}
+        </section>
         <ArchiveCoverageSection />
         <BasemapSection />
         <MaritimeEntitySection />
@@ -406,27 +586,8 @@ export function SystemPanel() {
           </p>
         ) : (
           <ul className="space-y-1" data-df-provider-list>
-            {state.providers.map((provider) => {
-              const reported = (provider as { status?: unknown }).status;
-              const status = typeof reported === 'string' && healthSeverity.includes(reported)
-                ? reported : 'NOT_ESTABLISHED';
-              const tone = healthColor[status] ?? 'var(--df-text-dim)';
-              return (
-                <li key={provider.provider} className="border-l-2 pl-2" style={{ borderColor: tone }}>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="df-num text-[11px] text-ink">{provider.provider}</span>
-                    <span className="df-label text-[10px]" style={{ color: tone }}>
-                      {status.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  {(provider.detail || provider.error) ? (
-                    <p className="text-[11px] leading-relaxed text-ink-2">
-                      {provider.detail || provider.error}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
+            {state.providers.map((provider) => <ProviderHealthRow key={provider.provider}
+              provider={provider} showOptionalDetails={preferences.show_provider_details} />)}
           </ul>
         )}
 
@@ -443,32 +604,9 @@ export function SystemPanel() {
           provider status does not establish group availability.
         </p>
 
-        <p className="df-label mb-1.5 mt-4 text-[10px]">Keyboard</p>
-        <dl className="space-y-0.5">
-          {SHORTCUTS.map((shortcut) => (
-            <div key={shortcut.keys} className="flex items-baseline gap-2">
-              <dt className="df-num w-14 shrink-0 text-[10px] text-ink">{shortcut.keys}</dt>
-              <dd className="text-[11px] text-ink-2">{shortcut.action}</dd>
-            </div>
-          ))}
-        </dl>
-
-        <p className="df-label mb-1.5 mt-4 text-[10px]">Provenance</p>
-        <dl className="space-y-0.5">
-          {(
-            [
-              ['Scan', state.scanId],
-              ['Stage', state.scanStage],
-              ['Stream', state.streamState],
-              ['Raster', state.rasterError ? 'unavailable' : state.rasterLoaded ? 'loaded' : 'not loaded'],
-            ] as ReadonlyArray<readonly [string, string | null]>
-          ).map(([label, value]) => (
-            <div key={label} className="flex items-baseline justify-between gap-2">
-              <dt className="df-label text-[10px] text-ink-dim">{label}</dt>
-              <dd className="df-num text-[10px] text-ink">{value ?? NOT_ESTABLISHED}</dd>
-            </div>
-          ))}
-        </dl>
+        <SystemKeyboardReference visible={preferences.show_keyboard_reference} />
+        <SystemProvenanceStatus session={state}
+          showSupplementary={preferences.show_provenance_summary} />
       </div>
     </section>
   );

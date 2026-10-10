@@ -3,13 +3,21 @@ import { useEffect, useState } from 'react';
 import {
   addInvestigationNote, addInvestigationWatch, createInvestigation, listInvestigations,
   removeInvestigation, removeInvestigationNote, removeInvestigationWatch,
-  restoreInvestigationScan, selectRestoredInvestigationTarget,
+  restoreInvestigationScan, selectRestoredInvestigationTarget, renameInvestigation,
 } from '../api/investigations';
 import type { InvestigationOut } from '../api/contract';
 import { explain } from '../api/errors';
 import { store, useStore } from '../state/store';
 import { fmtInstant } from '../design/format';
 import { InvestigationGeometryPanel } from './InvestigationGeometryPanel';
+import { InvestigationAttachments } from './InvestigationAttachments';
+
+export function CaseDeletionWarning() {
+  return <p className="text-[11px] text-ink-dim" data-df-case-delete-warning>
+    Delete this case, its notes, watchlist, saved geometries AND every attached binary file byte?
+    This cannot be undone. Original source scan evidence remains intact.
+  </p>;
+}
 
 export function InvestigationNotebook() {
   const state = useStore();
@@ -23,6 +31,9 @@ export function InvestigationNotebook() {
   const [verifiedList, setVerifiedList] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -65,6 +76,7 @@ export function InvestigationNotebook() {
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setSaveNotice(null);
     try { await action(); }
     catch (cause) { setError(explain(cause)); }
     finally { setBusy(false); }
@@ -128,6 +140,8 @@ export function InvestigationNotebook() {
             setConfirmDelete(false);
             setNote('');
             setScoped(false);
+            setRenaming(false);
+            setSaveNotice(null);
           }}>
           {cases.length === 0 ? <option value="">{verifiedList ? 'No saved investigations' : 'Investigation list unverified'}</option> : null}
           {cases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
@@ -146,6 +160,24 @@ export function InvestigationNotebook() {
         <p className="df-num text-[10px] text-ink-dim">
           Created {fmtInstant(selected.created_at)} · Scan {selected.scan_id ?? 'NOT LINKED'}
         </p>
+        {renaming ? <div className="space-y-1" data-df-investigation-rename-form>
+          <label htmlFor="df-case-rename" className="df-label text-[10px]">Case title</label>
+          <input id="df-case-rename" className="df-input w-full" maxLength={120}
+            value={newName} disabled={busy} onChange={(event) => setNewName(event.target.value)} />
+          <button type="button" className="df-btn" data-df-investigation-rename-save
+            disabled={busy || !newName.trim() || newName.trim() === selected.title}
+            onClick={() => void run(async () => {
+              const updated = await renameInvestigation(selected.id, newName.trim());
+              setCases((prior) => prior.map((row) => row.id === updated.id ? updated : row));
+              setRenaming(false);
+              setSaveNotice('Case title saved in the persisted investigation record.');
+            })}>Save case title</button>
+          <button type="button" className="df-btn ml-2" disabled={busy}
+            onClick={() => setRenaming(false)}>Cancel</button>
+        </div> : <button type="button" className="df-btn" disabled={busy}
+          data-df-investigation-rename onClick={() => { setNewName(selected.title); setRenaming(true); }}>
+          Rename case
+        </button>}
         {selected.scan_id ? <button type="button" className="df-btn w-full justify-center"
           disabled={busy} onClick={() => inspect(selected)} data-df-investigation-restore>
           Restore saved scan
@@ -223,12 +255,15 @@ export function InvestigationNotebook() {
         <InvestigationGeometryPanel key={selected.id} caseId={selected.id}
           scanId={selected.scan_id} />
 
+        <InvestigationAttachments key={`attachments-${selected.id}`} caseId={selected.id} />
+
         <section className="border-t border-structural pt-3 space-y-2"
           aria-label="Reproducible investigation exports" data-df-case-reports>
           <h3 className="df-label text-[10px]">Investigation evidence report</h3>
           <p className="text-[11px] text-ink-dim">
             Export the persisted source reference, recorded SAR target evidence,
-            watchlist, operator notes and WGS84 measurements. The JSON contains a
+            watchlist, operator notes, WGS84 measurements and binary attachment
+            metadata (names, byte counts and SHA-256, not inline file bytes). The JSON contains a
             canonical SHA-256 digest. The PDF labels missing sources and separates
             your annotations from satellite/AIS observations.
           </p>
@@ -252,9 +287,7 @@ export function InvestigationNotebook() {
 
         <div className="border-t border-structural pt-2">
           {confirmDelete ? <div className="space-y-2">
-            <p className="text-[11px] text-ink-dim">
-              Delete this case, its notes, watchlist and saved geometries? Source evidence remains intact.
-            </p>
+            <CaseDeletionWarning />
             <button type="button" className="df-btn" disabled={busy}
               onClick={() => void run(async () => {
                 await removeInvestigation(selected.id);
@@ -269,6 +302,8 @@ export function InvestigationNotebook() {
       </div> : null}
       {error ? <p role="alert" className="text-[11px] text-fault"
         data-df-investigation-error>{error}</p> : null}
+      {saveNotice ? <p role="status" className="text-[11px] text-ink"
+        data-df-investigation-save-notice>{saveNotice}</p> : null}
     </section>
   );
 }

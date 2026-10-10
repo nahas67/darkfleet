@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ReportsWorkspace, isExportableScan } from './ReportsWorkspace';
 import type { ScanStateResponse } from '../api/contract';
 import { store } from '../state/store';
-import { InvestigationNotebook } from './InvestigationNotebook';
+import { CaseDeletionWarning, InvestigationNotebook } from './InvestigationNotebook';
+import { InvestigationAttachments } from './InvestigationAttachments';
 
 describe('Reports investigation entry point', () => {
   it('exposes durable investigations alongside the original export capabilities', () => {
@@ -68,5 +69,22 @@ describe('DF-X16 discoverability and operator provenance', () => {
     expect(markup).toContain('Loading saved investigations');
     expect(markup).not.toContain('No saved investigations');
     expect(markup).toMatch(/data-df-investigation-create[^>]*disabled=""/);
+  });
+  it('binary evidence file controls are reachable and initially fail closed until inventory verified', () => {
+    const html = renderToStaticMarkup(<InvestigationAttachments caseId="case-1" />);
+    expect(html).toContain('data-df-attachment-file');
+    expect(html).toContain('data-df-attachment-upload');
+    expect(html).toContain('data-df-attachment-reload');
+    expect(html).toContain('Loading persisted attachment inventory');
+    expect(html).toMatch(/data-df-attachment-upload[^>]*disabled=""/);
+    expect(html).not.toContain('No operator attachment recorded');
+    expect(html).toContain('NOT satellite/AIS sensor evidence');
+  });
+  it('case deletion warns that binary attachment bytes are irreversibly deleted', () => {
+    const html = renderToStaticMarkup(<CaseDeletionWarning />);
+    expect(html).toContain('data-df-case-delete-warning');
+    expect(html).toContain('every attached binary file byte');
+    expect(html).toContain('cannot be undone');
+    expect(html).toContain('Original source scan evidence remains intact');
   });
 });

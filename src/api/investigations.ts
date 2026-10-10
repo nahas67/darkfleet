@@ -1,5 +1,5 @@
 /** Analyst-authored case records live outside immutable SAR/AIS scan evidence. */
-import { api, ContractViolation } from './errors';
+import { api, ContractViolation, request } from './errors';
 import { loadScanAis, loadScanResults, loadRaster, releaseStageStream } from './client';
 import { contractValidator } from './validateGenerated';
 import { store, toBBox } from '../state/store';
@@ -49,6 +49,13 @@ export async function listInvestigations(): Promise<InvestigationOut[]> {
 
 export async function createInvestigation(body: InvestigationCreate): Promise<InvestigationOut> {
   return checkedCase(await api.post<unknown>('/api/investigations', body));
+}
+
+/** Rename the durable case without modifying its immutable scan/source linkage. */
+export async function renameInvestigation(caseId: string, title: string): Promise<InvestigationOut> {
+  return checkedCase(await request<unknown>(endpoint(caseId), {
+    method: 'PUT', body: JSON.stringify({ title }),
+  }));
 }
 
 export async function addInvestigationNote(
