@@ -64,7 +64,12 @@ preview sampling shape/stride. It does not claim measured meters per pixel.
 
 The intake copies at most **64 MiB** while computing SHA-256. It compares the
 original file's identity, length and modification time before and after copying.
-Hardlinks and symlinks are refused where exposed by filesystem metadata. The
+Hardlinks and symlinks are refused where exposed by filesystem metadata. On
+Windows, Python does not expose `O_NOFOLLOW`; the code checks the path before
+opening it and the opened file identity during copying, but resistance to a
+malicious privileged, concurrent NTFS reparse-point swap is **not proven**.
+The Windows symlink test skipped for lack of creation privilege; avoid granting
+untrusted local writers access to the inbox. The
 snapshot is saved at `<data_dir>/local-sar-imports/{import_id}.tif` by exclusive
 creation; an append-only JSON receipt is created at `{import_id}.json` in the
 same directory. Repeating the same file, hash, and declarations returns the
@@ -158,12 +163,49 @@ the copied GeoTIFF's calibration, provider asset or sensor metadata.
   production Vite build passed. Vite retained its existing >500 kB chunk
   advisory, now **931.75 kB** for the main JS asset.
 
-The backend process was also restarted after the import. A fresh direct
-HTTP query following that restart was not completed in this verification
-session because the computer tool rejected the follow-up request; durable
-receipt/restart and missing-source preservation **were verified by the
-integration tests**, not asserted as an independently retested live-HTTP
-restart acceptance. No imported source was promoted into a canonical scan.
+The backend process was restarted after the import. The original JSON receipt
+was created at **2026-10-11 01:05:13 Asia/Kolkata**; the currently running
+Uvicorn parent/child processes started at **01:11:44**, later than that receipt.
+At this continuation, fresh HTTP requests to the restarted loopback service
+returned `GET /status` **200 READY** (`LOOPBACK_ONLY`, `IMPORT_ONLY`),
+`GET /imports` **200** (one persisted record), and `GET /imports/{id}` **200**
+with the original ID, `IMPORTED_NOT_ANALYZED`, `source_integrity: VERIFIED`,
+`snapshot_integrity: VERIFIED`, SHA-256 and 223×221 EPSG:32648 metadata.
+`GET /imports/{id}/image` returned **200 image/png**, **39,958 bytes**.
+Independent read-only source and archived TIFF checksum checks matched the
+receipt digest. This **closes the live post-restart read gate**; no extra import,
+sensor scan, synthetic observation or analysis was created by these checks.
+The restart durability/missing-source behavior is also exercised in offline
+integration tests. No imported source was promoted into a canonical scan.
+
+### Final follow-up fixes and fresh gates
+
+- Local backend commit `cf5eafb` handles a source disappearing after path
+  validation but before file stat/open: safe `SOURCE_NOT_FOUND` HTTP 404 or
+  `SOURCE_UNAVAILABLE` HTTP 409 rather than an unhandled file-path-bearing 500.
+  Three injected-race cases assert refusal status, unchanged original/receipt,
+  independent snapshot integrity and no temporary-file residue. **27 focused
+  backend tests passed, 1 skipped** for Windows symlink privilege.
+- Frontend commit `c1fb4f0` preserves the real FastAPI refusal code from
+  `ApiError.detail` without rendering arbitrary server messages; Advanced's
+  eight tabs now scroll horizontally without losing keyboard Arrow/Home/End
+  focus or tabpanel labelling. A real-envelope error regression and an Advanced
+  layout/semantics regression were added.
+- Post-fix full offline gates: **1,249 backend passed, 12 skipped,
+  4 deselected, 0 failed** (4 warnings); **844 frontend passed in 62 files**;
+  Ruff, scoped mypy, TypeScript, generated API contract `--check`, and Vite
+  production build passed. The production JS chunk remained **932.15 kB**
+  with the existing >500 kB advisory.
+- The updated backend was intentionally restarted again at **2026-10-11
+  01:26:44 Asia/Kolkata**, listening on **127.0.0.1:8000**. Fresh status/list/
+  detail/image requests still returned `READY`, one durable
+  `IMPORTED_NOT_ANALYZED` import, `VERIFIED` source/snapshot integrity,
+  EPSG:32648 **223×221** pixels and PNG HTTP 200 (**39,958 bytes**). A POST
+  for a definitely absent inbox basename returned **HTTP 404** with structured
+  `LOCAL_SAR_IMPORT_ERROR` / `SOURCE_NOT_FOUND`; no import was created. The
+  browser had earlier loaded the genuine saved record and PNG, but the shared
+  Chrome tab was claimed by another owner during this final follow-up; **no
+  new post-fix browser DOM interaction is claimed**.
 
 ### Scope boundary
 

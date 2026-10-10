@@ -623,3 +623,40 @@ not the results of the final real-data experiments.
   reopens after a fresh FastAPI application instance and preserved snapshot
   after original removal; genuine local import record persisted on disk.
   The existing `DF-0001`/`DF-0002` scans were not modified. No remote push.
+
+### 2026-10-11 continuation: DF-X10-LOCAL post-restart gate closed
+
+- The preceding blocked-request statement describes the earlier attempt only.
+  New read-only checks establish that the receipt for import
+  `1fa7533e24cc9c3f968b688ddfc5df5c` was created at **01:05:13**
+  Asia/Kolkata, and the live backend parent/child started at **01:11:44**.
+  Fresh HTTP on `127.0.0.1:8000` returned local SAR status **READY**, list
+  **one** saved import, detail `IMPORTED_NOT_ANALYZED`, both source and
+  snapshot integrity `VERIFIED`, EPSG:32648, **223×221**, and PNG **200**
+  (`image/png`, **39,958 bytes**). Independent on-disk SHA-256 for the inbox
+  TIFF and archived snapshot matched persisted
+  `c5d03b07a85fd5c266fa902dfadc3611c6d5ce211eaecff395e618b173776451`.
+  Vite homepage HTTP returned **200**. This initial continuation verification
+  did not itself restart the server. No GeoTIFFs or operator databases were
+  modified, and no inference of a completed analytical scan is warranted.
+
+### Final DF-X10-LOCAL robustness and updated-service acceptance
+
+- Commits `cf5eafb` and `c1fb4f0` close a deterministic source-open
+  disappearance error (structured HTTP 404/409), genuine FastAPI-error UI
+  feedback, and eight-tab Advanced horizontal/keyboard navigation. New tests
+  cover source stat/open races, refusal redaction, and active tabpanel labels.
+- Fresh post-fix Python **1,249 passed, 12 skipped, 4 deselected, 0 failed**;
+  frontend **844/844 in 62 files**; full Ruff, scoped mypy, TypeScript,
+  generated API-contract check and Vite production build passed. The main JS
+  bundle remains 932.15 kB and has a Vite advisory. The one Windows link test
+  still lacks OS creation privilege; a privileged concurrent NTFS reparse
+  swap is **not independently certified safe** (see `docs/SECURITY.md`).
+- The patched API was deliberately restarted at **01:26:44 Asia/Kolkata**,
+  preserving `DARKFLEET_DATA_DIR` and loopback-only binding. New HTTP returned
+  READY, 1 persisted import `IMPORTED_NOT_ANALYZED`, both integrity values
+  VERIFIED and saved image PNG **200/39,958 bytes**. A nonexistent filename
+  yielded HTTP **404**, body `LOCAL_SAR_IMPORT_ERROR` with
+  `SOURCE_NOT_FOUND`, with no additional import. Prior real Chrome UI acceptance
+  remains recorded; the follow-up did not claim a fresh browser interaction
+  because the existing tab was claimed by another session. No remote push.

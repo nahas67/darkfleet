@@ -147,6 +147,23 @@ observations. All commit IDs below are **local** and were not pushed.
 | **DF-X20-OFFLINE** `[~] IN PROGRESS` | Read-only MCP and evidence-grounded analyst; requires saved investigations and source records | `analyst.py`, `api/analyst_routes.py`, `AnalystWorkspace.tsx` and read-only MCP; bounded intents, source field paths, removal and injection controls | Real linked `DF-0001` case: before fix false class-missing unknown; after `a377d52` reads `$.targets[0].cls=SEA_CLUTTER`, 7 real-source claims/2 honest unknowns. 7 Python scoped tests, 5 UI tests; MCP stdio integration historically verified | **NO_MODEL_DETERMINISTIC_OFFLINE**; no model latency/isolation proof or AIS archive coverage | `docs/GROUNDED_ANALYST_EVIDENCE.md`, `docs/REAL_SAR_TWO_PASS_VALIDATION_2026-10-10.md`; `0c3833f`, `796adb2`, `e9a9b3c`, `a377d52` | Safe optional locally restricted model, independent AIS archive support, multi-resource source-deletion E2E |
 | **DF-X21-REGRESSION** `[~] IN PROGRESS` | Complete integrated product validation; depends X9.8–X20 | FastAPI/router, generated `src/api/contract.ts`, Vite UI, renderer and durable stores | Final Python **1,222 passed / 11 skipped / 4 deselected** (4 warnings), frontend **834/834** in 60 files, TypeScript/Vite/Ruff and generated contract green; 34/35 routes reachable (1 documented redundant raster). Backend 12/12 focused analyst/MCP post-fix | Two genuine RTC scenes 7.303/6.901 s; GPU AMD D3D11 browser 10K ~30.77 median-derived FPS, pick 10/10; Vite large-bundle advisory | `docs/DF_X9_8_H7_H8_CHROME_HARDWARE_EVIDENCE_2026-10-10.json`, `docs/REAL_SAR_TWO_PASS_VALIDATION_2026-10-10.md`, `docs/REAL_NATURAL_EARTH_LOCAL_INSTALL_2026-10-10.md`; `a00b821`, `a377d52` | Context-loss/soak and true AIS match, optional model and source licensing checks; no unconditional release certification |
 
+**Later DF-X10-LOCAL gate clarification (2026-10-11):** The earlier acceptance
+table's “post-restart live HTTP not reconfirmed” note is superseded by the
+subsequent confirmed persisted-receipt recovery after a live backend restart:
+01:05:13 receipt, 01:11:44 backend launch, fresh loopback status/list/detail/PNG
+HTTP 200 and matching source/snapshot SHA-256. See
+`docs/LOCAL_SAR_IMPORT_EVIDENCE.md`. This closes **only import intake and
+post-restart read acceptance**, not canonical scan analysis or DF-X10-SAR.
+
+**Final follow-up (2026-10-11):** `cf5eafb` hardened vanished-source error
+handling; `c1fb4f0` fixed real FastAPI refusal feedback and Advanced tab
+overflow. After both commits: 1,249 backend passed/12 skipped/4 deselected,
+844 frontend passed across 62 files, Ruff/mypy/tsc/build/contract green.
+Patched live API restarted at 01:26:44 local; saved import and PNG remained
+readable; nonexistent source gave structured 404. Windows symlink privilege and
+privileged link-swap resistance, true calibrated detection/AIS acceptance and
+full X21 release certification **remain open**.
+
 ### Immediate execution sequence
 
 1. Reverify H1–H6 fixes, test coverage, score deltas and browser behavior.

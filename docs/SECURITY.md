@@ -91,6 +91,13 @@ advertises neither, so a caller cannot request a mode that does not exist.
   network without putting an authenticating proxy in front of it.
 - There is **no per-request rate limiting**. Local operation makes this
   acceptable; a shared deployment needs it.
+- Windows does not expose `os.O_NOFOLLOW` through Python's `os` interface.
+  Local GeoTIFF intake rejects link paths using filesystem metadata and checks
+  the opened source identity before accepting bytes, but the Windows link test
+  was skipped where symlink privileges were unavailable. Resistance to a
+  malicious, privileged actor concurrently swapping NTFS reparse points has
+  **not** been independently demonstrated. Do not grant untrusted local users
+  write access to the configured inbox or imported archive.
 - Raster windows are bounded by the configured AOI but there is no global
   maximum pixel budget. Very large AOIs will be slow and memory-hungry rather
   than rejected.
