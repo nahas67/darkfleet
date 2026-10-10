@@ -130,6 +130,48 @@ fixture acceptance; they are **not** evidence of an operational AIS receiver,
 radio observations, live monitoring, successful SAR scan, production build or
 full renderer-resource cleanup.
 
+### Subsequent read-only static investigation (before next Chrome slot)
+
+The playback bar is conditional **only** on
+`state.aisObservations.length > 0` in `DarkFleetCommandApp.tsx:63,278`.
+`OperationRail.tsx:70` writes `workspace` alone. The preceding TACTICAL,
+LAYERS, INTELLIGENCE and SEARCH component mounts have no automatic path to
+replace/clear the AIS archive. The relevant explicit writers are
+`loadScanAis()` success and failure (`src/api/client.ts:566,583`), the
+user-triggered `restoreSavedView()` (`src/api/savedViews.ts:128`), or a full
+application/store reinitialization. `resetStore()` is test-only; no product
+caller was found. `startScan()` itself clears `aisOnly` but **not**
+`aisObservations`. A source reload/failed `loadScanAis()` could still clear
+the archive; that function is not invoked just by these rail clicks.
+
+**Time-correlated source change, not causality proof:** `src/ais/displayState.ts`
+was edited at **2026-10-11 04:23:45.645+05:30** (filesystem modification
+time), during the completed Chrome run. Its imports include
+`TacticalWorld.tsx`, `AisPlaybackBar.tsx`, `engine.ts` and `aisRenderer.ts`.
+Git HEAD was changing from a commit dated 04:23:03 to one dated 04:23:49
+while the run was active. The original 12-file hash gate did **not** cover
+`displayState.ts`, and no source-level `import.meta.hot` acceptance handler was
+found in these modules. A Vite full-page reload or dependency invalidation
+can plausibly reset the singleton store to empty observations and reinitialize
+one Cesium canvas, matching the final snapshot. This is the **leading
+unverified hypothesis**, not a reproduced product fault. The temporary dev
+server omitted `vite.config.ts` build-identity watching but still watched
+the application's real `src/` files.
+
+**Protocol for the one later exclusive Chrome rerun, after worker-2 and
+worker-7:** first hold source files stable, then record before/after 17-file
+digests and the presence of `data-df-ais-playback` on *every* rail transition.
+Collect the actual scan id, `aisObservations.length`, selected MMSI,
+`aisCoverage.state`, `[data-df-app]`, error-boundary alert, React rail state
+and frame-navigation count before/after each click, not only after the loop.
+Listen for full document navigation and Vite reload/HMR console messages;
+capture any `/api/scans/{id}/ais` request failure or validation error. Wait
+for each pressed rail entry and AIS DOM state to settle. Distinguish a
+reloaded document/store from an in-page store mutation; only modify AIS source
+if the same disappearing-bar failure reproduces with **all** source hashes
+stable and no dev reload. No Vite source change or new Chrome run was made
+during this investigation.
+
 ## Reproduction and handoff
 
 Execute from `/darkfleet` with project dependencies installed:
