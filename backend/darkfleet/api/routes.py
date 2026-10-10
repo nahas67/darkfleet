@@ -1510,6 +1510,32 @@ def _parse_bbox_query(raw: str | None) -> tuple[float, float, float, float]:
     return (min_lon, min_lat, max_lon, max_lat)
 
 
+def _revisit_bboxes(raw: str) -> tuple[tuple[float, float, float, float], ...]:
+    """Split a symmetric antimeridian AOI into legal noncrossing STAC boxes.
+
+    Strict noncrossing bbox semantics are preserved for ordinary scene discovery.
+    For a revisit interval, both dateline halves must be queried, then their
+    real acquisition identities merged BEFORE time intervals are calculated.
+    """
+    parts = raw.split(",")
+    if len(parts) == 4:
+        try:
+            min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
+        except ValueError:
+            pass  # The canonical parser supplies the structured 400 response.
+        else:
+            if (
+                all(math.isfinite(v) for v in (min_lon, min_lat, max_lon, max_lat))
+                and -180.0 < min_lon <= 180.0
+                and -180.0 <= max_lon < 180.0
+                and min_lon > max_lon
+            ):
+                east = _parse_bbox_query(f"{min_lon},{min_lat},180,{max_lat}")
+                west = _parse_bbox_query(f"-180,{min_lat},{max_lon},{max_lat}")
+                return east, west
+    return (_parse_bbox_query(raw),)
+
+
 # ------------------------------------------------------------ store lookup
 
 
@@ -2558,7 +2584,7 @@ def revisit_plan(
     """
     if provider not in KNOWN_PROVIDERS:
         raise _unknown_provider(provider)
-    box = _parse_bbox_query(bbox)
+    boxes = _revisit_bboxes(bbox)
     start, end = revisit_window(history_days=history_days, horizon_days=horizon_days)
     conf = state.settings
     collection = (
@@ -2566,15 +2592,30 @@ def revisit_plan(
     )
     url = conf.pc.stac_url if provider == "planetary-computer" else conf.earthsearch.stac_url
     try:
-        items = stac_items(url, collection, box, f"{start}/{end}", limit=200)
+        batches = [
+            stac_items(url, collection, part, f"{start}/{end}", limit=200)
+            for part in boxes
+        ]
     except RealDataUnavailableError as exc:
         raise _unavailable(exc, provider) from exc
 
     plan = plan_revisit(
-        acquisitions_from_items(items),
+        acquisitions_from_items([item for batch in batches for item in batch]),
         window_start=datetime.fromisoformat(start),
         window_end=datetime.fromisoformat(end),
     )
+    if len(boxes) > 1:
+        plan.limitations.append(
+            "The area crosses the antimeridian. Two noncrossing STAC searches "
+            "were merged by acquisition identity; either search failing fails "
+            "the whole plan rather than silently omitting a half."
+        )
+    if any(len(batch) >= 200 for batch in batches):
+        plan.limitations.append(
+            "A STAC result reached the 200-item response limit. Additional "
+            "provider pages may exist; measured intervals cover returned "
+            "acquisitions only and are not an exhaustive inventory."
+        )
     # Returned as a model rather than a hand-built Response so response_model
     # actually validates the payload. Wrapping in Response() skips validation
     # entirely, which is exactly how a payload drifts from its own contract
@@ -2584,7 +2625,10 @@ def revisit_plan(
             **plan.to_dict(),
             "provider": provider,
             "collection": collection,
-            "requested_bbox": list(box),
+            "requested_bbox": (
+                [boxes[0][0], boxes[0][1], boxes[-1][2], boxes[-1][3]]
+                if len(boxes) > 1 else list(boxes[0])
+            ),
         }
     )
 
