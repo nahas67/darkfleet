@@ -426,8 +426,8 @@ export class AisContactRenderer {
   constructor(viewer: Viewer) {
     this.#viewer = viewer;
     /*
-     * `scene.primitives` RETAINS ownership, so the collections live as long as the viewer and are
-     * torn down with it.
+     * `scene.primitives` RETAINS ownership; `destroy()` must remove these children through their
+     * parent before the viewer is destroyed. The viewer also owns any remaining primitives.
      *
      * Built once, in the constructor. A collection per temporal tick was the alternative and is
      * exactly what DF-X9 section 57 forbids: it reallocates every GPU buffer on every update. The
@@ -1112,11 +1112,17 @@ export class AisContactRenderer {
   }
 
   destroy(): void {
-    this.#contacts.destroy();
-    this.#labels.destroy();
-    this.#observations.destroy();
-    this.#track.destroy();
-    this.#predicted.destroy();
+    // These collections were registered in scene.primitives in the constructor. Destroying
+    // their resources directly leaves FIVE destroyed entries in the parent collection. A later
+    // renderer instance then appends another five; long-running load/clear/recreate cycles grow
+    // scene.primitives indefinitely and ask Cesium to revisit destroyed objects every frame.
+    // Removing through the owning collection destroys the child and releases its parent slot.
+    const primitives = this.#viewer.scene.primitives;
+    for (const primitive of [this.#contacts, this.#labels, this.#observations, this.#track, this.#predicted]) {
+      if (!primitives.isDestroyed() && primitives.remove(primitive)) continue;
+      // If the Viewer already removed a collection, this renderer still owns destruction.
+      if (!primitive.isDestroyed()) primitive.destroy();
+    }
     this.#billboards.clear();
     // All THREE per-contact maps, not two. A first version cleared `#billboards` and
     // `#drawnRotation` and left `#glyphKind`, while the engine's own teardown comment justifies

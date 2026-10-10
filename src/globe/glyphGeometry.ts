@@ -462,8 +462,17 @@ export function arbitrateLabels(
       placed.push(claim);
       continue;
     }
-    const worst = placed.reduce((m, existing) => Math.max(m, overlap(claim, existing)), 0);
-    if (worst > 0) {
+    // A single collision is sufficient to reject this claim. The previous reduce scanned ALL
+    // placed labels even after finding an overlap. In dense 10K-contact clusters almost every
+    // candidate collides with the first label, so the extra checks were pure CPU overhead.
+    let collides = false;
+    for (const existing of placed) {
+      if (overlap(claim, existing) > 0) {
+        collides = true;
+        break;
+      }
+    }
+    if (collides) {
       suppressed.push({ id: claim.id, reason: 'COLLISION' });
       continue;
     }
