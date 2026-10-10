@@ -396,3 +396,84 @@ rather than by implementation, which no earlier entry does.
   `GET /api/scenes` requires `bbox` (400 `INVALID_REQUEST` without it) and no
   `SYNTHETIC_SCENES_DISABLED` code exists. Corrected in `PROVENANCE.md`; the code
   comment is left as-is because this change is markdown-only.
+
+## 2026-10-10 — DARKFLEET autonomous continuation (DF-X11, X16, X19, X20, X21)
+
+This entry adds new evidence without rewriting the older, historically accurate
+CP0–CP15 claims. These measurements are local development evidence; **no new
+genuine SAR scene or live AIS observation was acquired in this continuation**.
+
+### DF-X20 — local grounded analyst integrated (commits `796adb2`, `e9a9b3c`)
+
+- Worker implemented bounded read-only saved-case analysis, fixed supported
+  questions, exact SQLite/RunStore evidence IDs/paths, explicit uncertainty and
+  unavailable source states. Operator note text is not used as model instructions.
+- Prime mounted the independent analyst router and Advanced → Analyst tab,
+  regenerated the OpenAPI-derived TypeScript contract; the route/orphan crawler
+  reports it product-reachable. Browser originally got HTTP **404** from a
+  pre-change backend process; after stopping and restarting that process,
+  `GET /api/analyst/cases` returned **200** and the browser selected a real
+  operator-created persisted investigation.
+- Browser clicked **Analyze saved case (read-only)**: `NO_SCAN_LINKED`, **two
+  operator-source count claims** (zero notes and zero watch entries), exact
+  SQLite source field paths, canonical scan SHA unavailable, and one explicit
+  `NO_SCAN_LINKED` unknown. No satellite target, identity or misconduct was
+  invented. **This is deterministic offline extraction, not model-backed AI.**
+- Worker reported 6 backend and 5 frontend dedicated tests, source-deletion,
+  restart, injection resistance; prime independently validated full suites.
+
+### DF-X16 — real globe clicks and geodesic persistence (commit `00c62dc`)
+
+- Existing saved local case `7b63ec61-cc40-4604-bd8c-364d7b09335c`
+  selected in Reports, changed shape to polyline, armed globe drawing; **two
+  real browser pointer clicks on the Cesium canvas** yielded WGS84
+  `[99.2878258,16.0603010]` and `[101.7914902,14.9564120]`.
+- Clicked **Save geometry**, backend returned HTTP **201**. Subsequent GET and
+  GET after restarting the backend returned the same persisted operator
+  annotation `d6aed3a9-491c-46f7-ba6c-0d02d7f4b0ee`, measured by the
+  server's WGS84 ellipsoid: **295.0857230389717 km / 159.33354375754413 nm**,
+  initial bearing **114.11383669079197°**. Its provenance is
+  `OPERATOR_ANNOTATION_NOT_SENSOR_EVIDENCE`; it is **not** SAR-derived data.
+- Added bounded 100-state reversible vertex draft history, undo/redo and undoable
+  clear; 5 focused frontend tests passed. Persisted multi-action undo history
+  and snapping to real SAR/AIS remain unimplemented/unverified.
+- Preserve the two untracked local SQLite databases. They contain operator
+  investigation/test state and must not be mistaken for disposable artifacts.
+
+### DF-X11 — independent exact-grid comparison and SAR imagery viewer
+
+- Commits `12deda2`/`17a741f` implement/checksum-gate numerical scene
+  comparison on identical pixel lattice, refusing incompatible pairs.
+- Worker added an **independent** two-pane real RTC-cache viewer in `4b759af`:
+  fixed grayscale dB window, finite valid-pixel mask and WGS84 corners derived
+  on the backend from recorded raster grid. **No automatic co-registration or
+  real-scene difference claims**; source/unavailability clearly separated.
+- Prime mounted `GET /api/sar/imagery/scans`, `POST /api/sar/imagery/pair` and
+  `GET /api/sar/imagery/scans/{scan_id}/image`, plus Advanced → SAR imagery;
+  after a backend restart, candidate endpoint returned **HTTP 200** and the
+  real browser said **No recorded REAL scans are available**. Both acquisition
+  selectors showed empty state, and display action was disabled. This is
+  honest no-source handling, NOT an operational two-scene comparison.
+- Follow-up source archive preflight, correct frontend/backend geolocation
+  ownership, complete full-suite and integration commit are separately gated.
+
+### DF-X19 and DF-X21 — regressions, contracts, failures and remaining evidence
+
+- Local browser-created operator case produced JSON and PDF investigation
+  reports (both **HTTP 200**, PDF begins `%PDF-`) after the previously fixed
+  relative-SQLite-URI bug. Sources missing/unlinked were explicit; no real
+  satellite evidence was included.
+- Post-analyst integration: Python **1,185 passed / 11 skipped / 4 deselected**;
+  frontend **822/822 passed**, TypeScript checked, Vite built, route reachability
+  **31/32** product-reachable (sole intentional redundant default-raster route).
+- Post-SAR imagery mount: Python **1,190 passed / 11 skipped / 4 deselected**,
+  full Ruff green, 56 scoped backend tests green; route reachability **34/35**
+  product-reachable, only the pre-existing redundant default-raster route.
+  Frontend initially **829 passed, 1 failed** of 830 tests: `noBrowserGeolocation`
+  correctly detected a forbidden browser-side affine determinant check in the
+  new imagery workspace; fix assigned without disabling the invariant.
+- Do **not** call DF-X9.8-H7/H8, operational SAR/AIS E2E, full product release,
+  optional model-backed analysis, wake calibration, dual-polarization, or
+  licensed optional data sources verified until their independent gates pass.
+  Actual GPU/frame-time, picking, resource lifecycle and real sensor acceptance
+  evidence are required separately. **No push or deployment performed.**

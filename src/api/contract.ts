@@ -264,6 +264,20 @@ export interface SceneCompareRequest {
   readonly second_scan_id: string;
 }
 
+export interface ImageryPairRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly first_scan_id: string;
+  readonly second_scan_id: string;
+}
+
+export interface ImageryPair {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly first: ImageryScene;
+  readonly second: ImageryScene;
+  readonly status: "READY" | "PARTIAL" | "UNAVAILABLE";
+  readonly interpretation?: string;
+}
+
 export interface AnalystCaseListOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly cases: AnalystCaseBrief[];
@@ -1085,6 +1099,32 @@ export interface SceneIdentity {
   readonly source?: "PERSISTED_REAL_SCAN_CALIBRATED_CACHE";
 }
 
+export interface ImageryScene {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly status: "READY" | "UNAVAILABLE";
+  readonly reason: string;
+  readonly item_id?: string | null;
+  readonly acquisition_time?: string | null;
+  readonly product?: string | null;
+  readonly polarization?: string | null;
+  readonly platform?: string | null;
+  readonly provider?: string | null;
+  readonly crs?: string | null;
+  readonly transform?: number[] | null;
+  readonly wgs84_corners_lon_lat?: number[][] | null;
+  readonly raster_window?: number[] | null;
+  readonly source_shape?: number[] | null;
+  readonly preview_shape?: number[] | null;
+  readonly sample_stride?: number | null;
+  readonly valid_source_pixels?: number | null;
+  readonly total_source_pixels?: number | null;
+  readonly displayed_valid_pixels?: number | null;
+  readonly image_url?: string | null;
+  readonly display_window_db?: number[] | null;
+  readonly source?: "PERSISTED_REAL_SCAN_CHECKSUM_VERIFIED_RTC" | null;
+}
+
 export interface AnalystCaseBrief {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly case_id: string;
@@ -1567,6 +1607,7 @@ export type ContractRequestSchemaName =
   | 'AnalystRequest'
   | 'AnnotationCreate'
   | 'GeometryCreate'
+  | 'ImageryPairRequest'
   | 'InvestigationCreate'
   | 'MissionBody'
   | 'MissionReplace'
@@ -1608,6 +1649,8 @@ export type ContractSchemaName =
   | 'SceneCandidatesOut'
   | 'SceneComparisonOut'
   | 'SceneCompareRequest'
+  | 'ImageryPairRequest'
+  | 'ImageryPair'
   | 'AnalystCaseListOut'
   | 'GroundedAnalystOut'
   | 'MissionListOut'
@@ -1677,6 +1720,7 @@ export type ContractSchemaName =
   | 'SceneCandidateOut'
   | 'ComparisonMetrics'
   | 'SceneIdentity'
+  | 'ImageryScene'
   | 'AnalystCaseBrief'
   | 'AnalystClaim'
   | 'AnalystUnknown'
@@ -2106,6 +2150,30 @@ export const SCENECOMPARISONOUT_FIELDS = [
 export const SCENECOMPAREREQUEST_FIELDS = [
   'first_scan_id',
   'second_scan_id',
+] as const;
+
+/**
+ * Property names of {@link ImageryPairRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const IMAGERYPAIRREQUEST_FIELDS = [
+  'first_scan_id',
+  'second_scan_id',
+] as const;
+
+/**
+ * Property names of {@link ImageryPair} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const IMAGERYPAIR_FIELDS = [
+  'first',
+  'second',
+  'status',
+  'interpretation',
 ] as const;
 
 /**
@@ -3254,6 +3322,37 @@ export const SCENEIDENTITY_FIELDS = [
   'window_transform',
   'raster_shape',
   'processing_version',
+  'source',
+] as const;
+
+/**
+ * Property names of {@link ImageryScene} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const IMAGERYSCENE_FIELDS = [
+  'scan_id',
+  'status',
+  'reason',
+  'item_id',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'platform',
+  'provider',
+  'crs',
+  'transform',
+  'wgs84_corners_lon_lat',
+  'raster_window',
+  'source_shape',
+  'preview_shape',
+  'sample_stride',
+  'valid_source_pixels',
+  'total_source_pixels',
+  'displayed_valid_pixels',
+  'image_url',
+  'display_window_db',
   'source',
 ] as const;
 
