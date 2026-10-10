@@ -38,6 +38,7 @@ from pydantic import ValidationError
 
 from darkfleet.api.models import CfarConfig
 from darkfleet.pipeline import DEFAULT_CFAR, merge_cfar_config
+from tests.fixture_source import FIXTURE_BBOX
 from tests.test_api import (  # noqa: F401
     api_settings,
     client,
@@ -46,7 +47,9 @@ from tests.test_api import (  # noqa: F401
     offline_pipeline,
 )
 
-BBOX = [104.1011, 1.3569, 104.1371, 1.3931]
+# Keep the test AOI tied to the measured raster footprint. A stale, north-shifted
+# bbox formerly appeared to work only because the reader moved it onto the image.
+BBOX = FIXTURE_BBOX
 CFAR_TS = Path(__file__).resolve().parents[2] / "src" / "analysis" / "cfar.ts"
 
 

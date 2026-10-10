@@ -26,11 +26,13 @@ import math
 from typing import Any
 
 import pytest
+import rasterio
 from fastapi.testclient import TestClient
 from rasterio.transform import Affine
 from rasterio.transform import xy as rio_xy
 
 from darkfleet.geolocation import GeoreferenceError, affine_from_sequence, pixel_to_wgs84
+from tests.fixture_source import FIXTURE_BBOX, fixture_path
 from tests.test_api import (  # noqa: F401
     api_settings,
     client,
@@ -39,7 +41,9 @@ from tests.test_api import (  # noqa: F401
     offline_pipeline,
 )
 
-BBOX = [104.1011, 1.3569, 104.1371, 1.3931]
+# Must cover the measured 400x400 UTM raster; the previous north-shifted AOI
+# silently clamped to the fixture before nonintersecting reads became fail-closed.
+BBOX = FIXTURE_BBOX
 
 #: UTM 48N. Deliberately NOT 4326: a geographic input CRS hides axis-order bugs
 #: completely, because lon/lat and lat/lon are both "degrees".
@@ -122,9 +126,21 @@ def test_top_left_pixel_centre(client: TestClient, completed_scan: dict[str, Any
     assert body["source"]["x"] == pytest.approx(x, abs=1e-9)
     assert body["source"]["y"] == pytest.approx(y, abs=1e-9)
 
+    # Pin the actual checked-in GeoTIFF, independently of the API's persisted
+    # transform: the source is UTM metres, never an AOI-derived fallback.
+    with rasterio.open(fixture_path("cog/fixture_32648.tif")) as source:
+        assert source.crs.to_string() == EXPECTED_CRS
+        assert (source.width, source.height) == (400, 400)
+        assert tuple(source.bounds) == pytest.approx((400000, 146000, 404000, 150000))
+        source_x, source_y = rio_xy(source.transform, 0, 0, offset="center")
+    assert body["source"]["x"] == pytest.approx(source_x, abs=1e-9)
+    assert body["source"]["y"] == pytest.approx(source_y, abs=1e-9)
+
     lat, lon = _expected_wgs84(transform, EXPECTED_CRS, 0.0, 0.0)
     assert body["wgs84_lat"] == pytest.approx(lat, abs=1e-9)
     assert body["wgs84_lon"] == pytest.approx(lon, abs=1e-9)
+    assert body["wgs84_lon"] == pytest.approx(104.10115689210639, abs=1e-8)
+    assert body["wgs84_lat"] == pytest.approx(1.3568812223073432, abs=1e-8)
 
 
 def test_centre_pixel(client: TestClient, completed_scan: dict[str, Any]) -> None:
@@ -540,7 +556,10 @@ def test_changing_the_aoi_does_not_move_a_probed_pixel(
     """
     import time
 
-    narrow = client.post("/api/scans", json={"bbox": [104.1100, 1.3600, 104.1200, 1.3700]})
+    # A genuinely interior subwindow, measured within the real UTM source's
+    # WGS84 extent (roughly 104.101..104.137 E, 1.321..1.357 N).
+    narrow_bbox = [104.1100, 1.3300, 104.1200, 1.3400]
+    narrow = client.post("/api/scans", json={"bbox": narrow_bbox})
     wide = client.post("/api/scans", json={"bbox": BBOX})
     assert narrow.status_code == 202
     assert wide.status_code == 202
@@ -555,15 +574,34 @@ def test_changing_the_aoi_does_not_move_a_probed_pixel(
             break
         time.sleep(0.2)
 
-    a = _probe(client, str(narrow.json()["scan_id"]), 10.0, 10.0)
-    b = _probe(client, str(wide.json()["scan_id"]), 10.0, 10.0)
+    assert all(s["stage"] == "COMPLETE" for s in states), states
+    narrow_id, wide_id = str(narrow.json()["scan_id"]), str(wide.json()["scan_id"])
+    narrow_raster, wide_raster = _raster(client, narrow_id), _raster(client, wide_id)
+    assert narrow_raster["transform"] != wide_raster["transform"]
+    assert narrow_raster["render"]["source_shape"] != wide_raster["render"]["source_shape"]
 
-    # The two scans read different windows over the same fixture, so their
-    # transforms differ; what must not differ is the geolocation of a given pixel
-    # RELATIVE to its own raster. Asserted as: the transform each one used is
-    # its own, and the reported AOI is genuinely different.
+    # Pixel (10,10) in the narrow window is NOT the same geographic point as
+    # pixel (10,10) in the full window. Project the narrow pixel centre through
+    # the independent rasterio affine and invert the wide-window transform to
+    # find the corresponding wide pixel-centre coordinates.
+    row, col = 10.0, 10.0
+    source_x, source_y = rio_xy(Affine(*narrow_raster["transform"]), row, col, offset="center")
+    corner_col, corner_row = (~Affine(*wide_raster["transform"])) @ (source_x, source_y)
+    wide_row, wide_col = float(corner_row - 0.5), float(corner_col - 0.5)
+    assert 0 <= wide_row < wide_raster["render"]["source_shape"][0]
+    assert 0 <= wide_col < wide_raster["render"]["source_shape"][1]
+
+    a = _probe(client, narrow_id, row, col)
+    b = _probe(client, wide_id, wide_row, wide_col)
+    # Identical physical UTM position has identical WGS84 coordinates even
+    # though the two requests used genuinely different raster windows.
+    assert a["source"]["x"] == pytest.approx(b["source"]["x"], abs=1e-7)
+    assert a["source"]["y"] == pytest.approx(b["source"]["y"], abs=1e-7)
+    assert a["wgs84_lat"] == pytest.approx(b["wgs84_lat"], abs=1e-9)
+    assert a["wgs84_lon"] == pytest.approx(b["wgs84_lon"], abs=1e-9)
     assert a["georeferencing"]["transform"] != b["georeferencing"]["transform"]
-    assert a["provenance"]["requested_aoi"] != b["provenance"]["requested_aoi"]
+    assert a["provenance"]["requested_aoi"] == pytest.approx(narrow_bbox)
+    assert b["provenance"]["requested_aoi"] == pytest.approx(BBOX)
 
 
 def test_requested_aoi_appears_only_as_context(client: TestClient, completed_scan: dict[str, Any]) -> None:
@@ -572,14 +610,13 @@ def test_requested_aoi_appears_only_as_context(client: TestClient, completed_sca
     body = _probe(client, scan_id, 5.0, 5.0)
     assert body["provenance"]["requested_aoi"] == pytest.approx(BBOX)
 
-    # The reported rectangle must come from the transform, not the AOI. This
-    # fixture's raster lies entirely SOUTH of the requested AOI -- a documented
-    # property of the fixture -- so if the AOI leaked into the geometry the
-    # rectangle would sit north of the raster's true extent.
+    # The reported rectangle comes from the actual projected raster, which is
+    # INSIDE the correctly covering AOI; it cannot come from the AOI corners.
     raster = _raster(client, scan_id)
-    assert raster["rectangle"]["north"] < BBOX[3], (
-        "fixture invariant: the raster lies south of the requested AOI"
-    )
+    assert BBOX[1] < raster["rectangle"]["south"] < raster["rectangle"]["north"] < BBOX[3]
+    assert BBOX[0] < raster["rectangle"]["west"] < raster["rectangle"]["east"] < BBOX[2]
+    assert raster["rectangle"]["north"] == pytest.approx(1.35694, abs=0.00002)
+    assert raster["rectangle"]["south"] == pytest.approx(1.32074, abs=0.00002)
     assert body["georeferencing"]["raster_height"] == 400
 
 

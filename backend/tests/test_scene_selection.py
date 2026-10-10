@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fixture_source import FIXTURE_BBOX
 from tests.test_api import (  # noqa: F401
     api_settings,
     client,
@@ -30,7 +31,9 @@ from tests.test_api import (  # noqa: F401
     offline_pipeline,
 )
 
-BBOX = [104.1011, 1.3569, 104.1371, 1.3931]
+# Scene pinning exercises the real UTM raster; the old north-shifted AOI did
+# not intersect that raster after fail-closed georeferencing was introduced.
+BBOX = FIXTURE_BBOX
 FIXTURE_SCENE = "S1A_FIXTURE_20240101T000000"
 
 
