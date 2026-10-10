@@ -75,6 +75,44 @@ const atSeconds = (seconds: number): string =>
   new Date(Date.parse(T0) + seconds * 1000).toISOString();
 
 describe('single-sort display-state reuse', () => {
+  it('preserves byte-identical states for chronological, reversed, tied and malformed input times', () => {
+    const variants = [
+      [obs({ timestamp: at(0), heading: 0, sog: 0, cog: 0 }), obs({ timestamp: at(4), heading: null, sog: null, cog: null })],
+      [obs({ timestamp: at(4), heading: null, sog: null, cog: null }), obs({ timestamp: at(0), heading: 0, sog: 0, cog: 0 })],
+      [obs({ timestamp: at(0), heading: 10 }), obs({ timestamp: at(0), heading: 20 }), obs({ timestamp: at(4), heading: null })],
+      [obs({ timestamp: 'invalid', heading: 30 }), obs({ timestamp: at(0), heading: null })],
+    ] as const;
+    for (const series of variants) {
+      const snapshot = JSON.stringify(series);
+      const independentlySorted = inTimeOrder(series);
+      for (const reference of [at(-1), at(0), at(2), at(4), at(30), 'invalid']) {
+        // The independently sorted array takes the same chronological path,
+        // but the original array may be descending, tied, or malformed.
+        expect(displayStateOf(series, reference)).toEqual(displayStateOf(independentlySorted, reference));
+      }
+      expect(JSON.stringify(series)).toBe(snapshot);
+    }
+  });
+
+  it('does not cache order by array identity after an in-place archive update', () => {
+    const chronological = [
+      obs({ timestamp: at(0), sog: null, cog: null, heading: null, lat: 1 }),
+      obs({ timestamp: at(4), sog: 0, cog: 0, heading: 0, lat: 2 }),
+    ];
+    const first = displayStateOf(chronological, at(2));
+    expect(first.state).toBe('INTERPOLATED_DISPLAY');
+    expect(first.sourceObservationTimestamps).toEqual([at(0), at(4)]);
+
+    // The same input array is now descending; re-evaluate its actual contents.
+    chronological.reverse();
+    const second = displayStateOf(chronological, at(2));
+    expect(second).toEqual(first);
+
+    // Frozen arrays are also valid readonly inputs; no hidden mutation may occur.
+    const frozen = Object.freeze(chronological.slice());
+    expect(displayStateOf(frozen, at(2))).toEqual(first);
+  });
+
   it('agrees with independently ordered orientation and freshness on unsorted nullable fixes', () => {
     const series = [
       obs({ timestamp: at(8), lat: 1.1, lon: 103.1, heading: null, sog: null, cog: null }),

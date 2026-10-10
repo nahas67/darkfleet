@@ -295,6 +295,27 @@ export function inTimeOrder(observations: readonly AisObservationOut[]): AisObse
   return [...observations].sort(byTime);
 }
 
+/**
+ * Display-only fast path: the ordinary AIS archive already arrives in
+ * chronological order. Validate that fact in one linear pass, and reuse the
+ * readonly series without a copy or comparator sort. Unsorted and invalid
+ * timestamps use the unchanged public archival sort; equal timestamps retain
+ * their original stable order. No path mutates caller observations.
+ *
+ * Do not memoize the array by identity: archive updates can change its content.
+ */
+function displayTimeOrder(observations: readonly AisObservationOut[]): readonly AisObservationOut[] {
+  if (observations.length < 2) return observations;
+  let previous = epochSeconds(observations[0].timestamp);
+  if (!Number.isFinite(previous)) return inTimeOrder(observations);
+  for (let i = 1; i < observations.length; i += 1) {
+    const current = epochSeconds(observations[i].timestamp);
+    if (!Number.isFinite(current) || current < previous) return inTimeOrder(observations);
+    previous = current;
+  }
+  return observations;
+}
+
 /* ============================================================================================== *
  * ORIENTATION
  * ============================================================================================== */
@@ -714,7 +735,7 @@ export function displayStateOf(
   observations: readonly AisObservationOut[],
   atTimeIso: string,
 ): DisplayContactState {
-  const ordered = inTimeOrder(observations);
+  const ordered = displayTimeOrder(observations);
   // The former call chain sorted + parsed these same timestamps four times:
   // here, then in resolveOrientation, again in isMoving, and in freshnessOf.
   // Keep the public helpers independently order-safe, but share this single
