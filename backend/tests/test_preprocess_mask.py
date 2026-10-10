@@ -10,6 +10,10 @@ import numpy as np
 import pytest
 import rasterio
 from pyproj import CRS
+from rasterio.enums import Resampling
+from rasterio.features import rasterize
+from rasterio.warp import reproject
+from scipy.ndimage import binary_dilation
 
 from darkfleet.providers import RealDataUnavailableError
 from darkfleet.sar import landmask, preprocess
@@ -143,3 +147,111 @@ def test_clip_sidecar_provenance() -> None:
     side = json.loads((MASK / "sidecar.json").read_text())
     assert side["version"] == "ESA WorldCover v200 2021"
     assert "N00E102" in side["tile_href"]
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (1, 7), (7, 1), (2, 9), (9, 2), (7, 11), (31, 23)])
+def test_bounded_coast_dilation_is_exact_scipy_default_cross(shape: tuple[int, int]) -> None:
+    """Reference the original SciPy morphology, including all-sea/all-land inputs.
+
+    SciPy's *default* binary_dilation footprint is a cross, so its repeated
+    growth uses Manhattan distance, not the eight-neighbour/Chebyshev distance.
+    All test masks are synthetic mathematical inputs, not live satellite data.
+    """
+    rng = np.random.default_rng(20261011)
+    cases = [np.zeros(shape, dtype=bool), np.ones(shape, dtype=bool)]
+    cases.extend(rng.random(shape) < fraction for fraction in (0.01, 0.15, 0.5, 0.95))
+    diameter = shape[0] + shape[1] - 2
+    for land in cases:
+        for radius in (0, 1, 2, 3, 7, diameter, diameter + 5, 150_000_000_000):
+            reference = (land.copy() if radius == 0 else
+                         binary_dilation(land, iterations=min(radius, max(1, diameter))))
+            actual = landmask._dilate_land_bounded(land, radius)
+            assert np.array_equal(actual, reference), (shape, radius, land)
+
+
+def test_bounded_coast_dilation_matches_real_worldcover_unknown_and_port_mask() -> None:
+    transform, shape, crs = _grid4326()
+    water = np.zeros(shape, dtype=np.uint8)
+    with rasterio.open(CLIP) as source:
+        reproject(rasterio.band(source, 1), water,
+                  src_transform=source.transform, src_crs=source.crs,
+                  dst_transform=transform, dst_crs=crs,
+                  resampling=Resampling.nearest)
+    unknown = water == landmask.NODATA_CLASS
+    classified_land = (water != landmask.WATER_CLASS) & ~unknown
+    port = rasterize(
+        [({"type": "Polygon", "coordinates": [SINGAPORE_PORT[0]]}, 1)],
+        out_shape=shape, transform=transform, fill=0, dtype=np.uint8,
+    ).astype(bool)
+    for radius in (0, 1, 4, 15):
+        expected_land = (classified_land.copy() if radius == 0 else
+                         binary_dilation(classified_land, iterations=radius))
+        expected_land &= ~port
+        got = build_land_mask(CLIP, transform, shape, crs,
+                              coastline_buffer_m=radius * 10,
+                              pixel_spacing_m=10,
+                              port_polys_wgs84=SINGAPORE_PORT)
+        assert np.array_equal(got["excluded"], expected_land | unknown)
+        assert got["land_fraction"] == float(expected_land.mean())
+        assert got["unknown_fraction"] == float(unknown.mean())
+        assert got["buffer_px"] == radius
+
+
+def test_pathologically_small_spacing_finishes_with_same_full_coverage_and_port_carveback() -> None:
+    # This is a *mathematical adversarial input* over an existing test raster.
+    # It is not a claim that a real sensor has 1e-9 metre ground sampling.
+    transform, shape, crs = _grid4326()
+    got = build_land_mask(CLIP, transform, shape, crs,
+                          coastline_buffer_m=150, pixel_spacing_m=1e-9,
+                          port_polys_wgs84=SINGAPORE_PORT)
+    assert got["buffer_px"] == 150_000_000_000
+    assert got["land_fraction"] < 1.0  # configured port exception survives
+    assert got["land_fraction"] > 0.0
+    assert got["excluded"].shape == shape
+    assert got["provenance"]["port_exceptions"] == 1
+
+
+def test_eight_million_cell_extreme_radius_is_bounded_and_correct() -> None:
+    # 8M * 4 bytes for the CDT field, plus a few bounded byte/bool arrays.
+    # This would demand 150 billion binary_dilation iterations previously.
+    land = np.zeros((2000, 4000), dtype=bool)
+    land[0, 0] = True
+    filled = landmask._dilate_land_bounded(land, 150_000_000_000)
+    assert filled.shape == land.shape
+    assert filled.all()
+    assert not land[200, 200]  # the caller's source mask is not mutated
+
+
+def test_large_but_nonsaturating_radius_avoids_iterative_dilation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    land = np.zeros((105, 105), dtype=bool)
+    land[0, 0] = True
+    reference = binary_dilation(land, iterations=70)
+
+    def refuse_unbounded_loop(*args: object, **kwargs: object) -> None:
+        raise AssertionError("large-radius path used iterative morphology")
+
+    monkeypatch.setattr(landmask, "binary_dilation", refuse_unbounded_loop)
+    result = landmask._dilate_land_bounded(land, 70)
+    assert np.array_equal(result, reference)
+    assert result[50, 20]
+    assert not result[50, 21]
+
+
+@pytest.mark.parametrize("spacing", [0.0, -1.0, float("nan"), float("inf"), 1e-320])
+def test_invalid_or_numerically_overflowing_spacing_fails_safely(spacing: float) -> None:
+    transform, shape, crs = _grid4326()
+    with pytest.raises(ValueError, match="pixel_spacing_m|buffer radius"):
+        build_land_mask(CLIP, transform, shape, crs,
+                        coastline_buffer_m=150, pixel_spacing_m=spacing)
+
+
+def test_buffer_pixel_rounding_preserves_original_ties_to_even() -> None:
+    transform, shape, crs = _grid4326()
+    first = build_land_mask(CLIP, transform, shape, crs,
+                            coastline_buffer_m=15, pixel_spacing_m=10)
+    second = build_land_mask(CLIP, transform, shape, crs,
+                             coastline_buffer_m=25, pixel_spacing_m=10)
+    assert first["buffer_px"] == second["buffer_px"] == 2
+    assert np.array_equal(first["excluded"], second["excluded"])

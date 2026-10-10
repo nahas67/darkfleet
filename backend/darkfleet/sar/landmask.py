@@ -7,6 +7,7 @@ covers the ambiguity honestly.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,16 @@ import rasterio
 from pyproj import CRS, Transformer
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, distance_transform_cdt
 
 WORLDCOVER_VERSION = "ESA WorldCover v200 2021 (10 m, EPSG:4326)"
 WORLDCOVER_TILE_BASE = "https://esa-worldcover.s3.amazonaws.com/v200/2021/map"
 WATER_CLASS = 80
 NODATA_CLASS = 0
+# The original iterative implementation is faster and uses far less memory for
+# a small coastline buffer on multi-million-pixel grids. A fixed upper bound
+# keeps that fast path O(pixels), regardless of the caller's requested radius.
+_MAX_ITERATIVE_BUFFER_PX = 32
 
 
 def tile_name_for(lon: float, lat: float) -> str:
@@ -63,6 +68,31 @@ def fetch_tile_clip(
     return {"tile_href": tile_href, "window": (win.row_off, win.col_off, win.height, win.width)}
 
 
+def _dilate_land_bounded(land: np.ndarray, radius: int) -> np.ndarray:
+    """Match ``binary_dilation(land, iterations=radius)`` with bounded work.
+
+    SciPy's default two-dimensional footprint is a *four-neighbour cross*.
+    Repeating it ``radius`` times includes precisely those pixels whose
+    Manhattan (taxicab) distance to classified land is at most ``radius``.
+    For small radii, keep the exact original morphology (at most 32 passes).
+    For larger radii, ``distance_transform_cdt`` computes this once in
+    O(pixels) time with one int32 distance field, independent of ``radius``.
+
+    A single land pixel can reach any point within ``height+width-2`` steps.
+    Saturating this computational radius preserves the old answer for even an
+    astronomically large finite requested buffer. An all-water mask must remain
+    empty (SciPy's CDT uses -1 when no source land pixel exists).
+    """
+    if radius <= 0 or land.size == 0 or not land.any():
+        return land.copy()
+    height, width = land.shape
+    if radius >= height + width - 2:
+        return np.ones_like(land, dtype=bool)
+    if radius <= _MAX_ITERATIVE_BUFFER_PX:
+        return binary_dilation(land, iterations=radius)
+    return distance_transform_cdt(~land, metric="taxicab") <= radius
+
+
 def build_land_mask(
     water_src_href: str,
     target_transform: Any,
@@ -96,9 +126,17 @@ def build_land_mask(
     unknown = water == NODATA_CLASS
     land = (water != WATER_CLASS) & ~unknown
 
-    buf_px = max(0, round(coastline_buffer_m / pixel_spacing_m))
+    if not math.isfinite(pixel_spacing_m) or pixel_spacing_m <= 0:
+        raise ValueError("pixel_spacing_m must be positive and finite")
+    radius = coastline_buffer_m / pixel_spacing_m
+    if not math.isfinite(radius):
+        raise ValueError("coastline buffer radius must be finite")
+    # Preserve the existing nearest-integer rounding, including tie behaviour.
+    # The requested radius remains in provenance even if its computational
+    # effect has saturated the entire finite source window.
+    buf_px = max(0, round(radius))
     if buf_px > 0:
-        land = binary_dilation(land, iterations=buf_px)
+        land = _dilate_land_bounded(land, buf_px)
 
     if port_polys_wgs84:
         from rasterio.features import rasterize
