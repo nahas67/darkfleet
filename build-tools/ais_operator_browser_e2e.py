@@ -232,9 +232,43 @@ def dom_readout(page) -> dict:
     }""")
 
 
+def navigation_probe(page, label: str) -> dict:
+    """Read the *real* singleton store and DOM after a true pointer action.
+
+    Importing the store is read-only. Time origin and a session-storage boot
+    counter distinguish in-page workspace changes from full-document reloads.
+    """
+    return page.evaluate("""async (label) => {
+      const {store} = await import('/src/state/store.ts');
+      const state = store.getState();
+      const bar = document.querySelector('[data-df-ais-playback]');
+      return {label, documentTimeOrigin: performance.timeOrigin,
+        documentBoot: Number(sessionStorage.getItem('df_ais_browser_boots') || '0'),
+        historicalLifecycleEvents: JSON.parse(sessionStorage.getItem('df_ais_browser_events') || '[]'),
+        currentLifecycleEvents: (window.__dfAisBrowserEvents || []).slice(-15),
+        route: location.pathname, workspace: state.workspace,
+        pressedRail: [...document.querySelectorAll('[data-df-rail-entry][aria-pressed="true"]')]
+          .map(el => el.getAttribute('data-df-rail-entry')),
+        scanId: state.scanId, scanStage: state.scanStage,
+        selectedMmsi: state.selectedAis?.mmsi ?? null,
+        selectedObservationAt: state.selectedAis?.observationAt ?? null,
+        observations: state.aisObservations.length, contacts: state.aisOnly.length,
+        uniqueSources: [...new Set(state.aisObservations.map(row=>row.source))],
+        coverageState: state.aisCoverage?.state ?? null,
+        barPresent: bar !== null, barMode: bar?.getAttribute('data-df-ais-playback') ?? null,
+        drawnCounts: document.querySelector('[data-df-ais-drawn-counts]')?.getAttribute('data-df-ais-drawn-counts') ?? null,
+        canvasCount: document.querySelectorAll('.cesium-widget canvas').length,
+        appPresent: document.querySelector('[data-df-app]') !== null,
+        alertText: document.querySelector('[role="alert"]')?.textContent?.trim()?.slice(0,240) ?? null,
+      };
+    }""", label)
+
+
 def run() -> dict:
     result: dict = {"status": "NOT_RUN", "checks": [], "failures": [],
                     "browserActions": [], "browserErrors": [], "blockedRequests": [],
+                    "navigationProbes": [], "frameNavigations": [],
+                    "viteMessages": [], "aisApiResponses": [], "aisApiFailures": [],
                     "gitHead": git("rev-parse", "HEAD"), "sourceHashesBefore": hashes(),
                     "syntheticProviderClaim": "NONE", "productScanCompleted": False}
     if not CHROME.is_file():
@@ -301,8 +335,40 @@ def run() -> dict:
                                 result["blockedRequests"].append(url[:180])
                                 route.abort("blockedbyclient")
                         context.route("**/*", offline)
+                        # Executes before application modules on every document
+                        # load, including HMR-triggered full reload. sessionStorage
+                        # persists across a full navigation of this SAME tab.
+                        context.add_init_script("""(() => {
+                          const key = 'df_ais_browser_boots';
+                          const next = Number(sessionStorage.getItem(key) || '0') + 1;
+                          sessionStorage.setItem(key, String(next));
+                          window.__dfAisBrowserEvents = [];
+                          for (const type of ['beforeunload', 'pagehide']) {
+                            addEventListener(type, () => {
+                              const event = {type, boot: next, url:location.href};
+                              window.__dfAisBrowserEvents.push(event);
+                              const events = JSON.parse(sessionStorage.getItem('df_ais_browser_events') || '[]');
+                              events.push(event);
+                              sessionStorage.setItem('df_ais_browser_events', JSON.stringify(events.slice(-30)));
+                            });
+                          }
+                        })()""")
                         page = context.new_page()
                         page.on("pageerror", lambda error: result["browserErrors"].append(str(error)[:400]))
+                        page.on("framenavigated", lambda frame: result["frameNavigations"].append({
+                            "url": frame.url[:250], "main": frame == page.main_frame,
+                            "wallTime": datetime.now(UTC).isoformat(),
+                        }) if frame == page.main_frame else None)
+                        page.on("console", lambda msg: result["viteMessages"].append({
+                            "type": msg.type, "text": msg.text[:350],
+                        }) if any(token in msg.text.lower() for token in
+                                  ("[vite]", "hmr", "reload", "darkfleet render failure")) else None)
+                        page.on("response", lambda response: result["aisApiResponses"].append({
+                            "status": response.status, "url": response.url[:250],
+                        }) if f"/api/scans/{API_SCAN}/ais" in response.url else None)
+                        page.on("requestfailed", lambda request: result["aisApiFailures"].append({
+                            "url": request.url[:250], "failure": request.failure,
+                        }) if f"/api/scans/{API_SCAN}/ais" in request.url else None)
                         # On a cold workspace Vite 8 first optimizes Cesium's
                         # dependencies; DOMContentLoaded can be delayed by this
                         # compilation despite the HTML already being delivered.
@@ -310,6 +376,22 @@ def run() -> dict:
                         fail_unless(response is not None and response.status == 200, "No Vite page")
                         page.locator("[data-df-app]").wait_for(timeout=90000)
                         page.locator(".cesium-widget canvas").first.wait_for(timeout=45000)
+                        # Observe Vite hot-update lifecycle if supported, not
+                        # synthetic events. This probe never writes product state.
+                        result["viteProbe"] = page.evaluate("""async () => {
+                          try {
+                            const module = await import('/@vite/client');
+                            if (typeof module.createHotContext !== 'function') return 'UNAVAILABLE';
+                            const hot = module.createHotContext('/__df_ais_operator_probe__');
+                            for (const type of ['vite:beforeFullReload', 'vite:beforeUpdate',
+                                                'vite:afterUpdate', 'vite:error']) {
+                              hot.on(type, () => {
+                                window.__dfAisBrowserEvents.push({type, boot:Number(sessionStorage.getItem('df_ais_browser_boots')||0)});
+                              });
+                            }
+                            return 'VITE_HOT_CONTEXT_LISTENERS_ATTACHED';
+                          } catch(error) { return 'UNAVAILABLE: '+String(error).slice(0,180); }
+                        }""")
                         result["buildMeta"] = page.locator('meta[name^="darkfleet-"]').evaluate_all(
                             "els=>els.map(e=>[e.name,e.content])")
                         result["canvasBefore"] = page.locator(".cesium-widget canvas").count()
@@ -333,6 +415,7 @@ def run() -> dict:
                         page.locator("[data-df-ais-playback]").wait_for(timeout=12000)
                         page.wait_for_function("() => document.querySelector('[data-df-ais-drawn-counts]')?.textContent?.includes('CONTACT')", timeout=10000)
                         result["initialDom"] = dom_readout(page)
+                        result["navigationProbes"].append(navigation_probe(page, "after archive load"))
                         result["checks"].append("Unmodified frontend client loaded archive fixture, not mock JSON or REAL scan")
                         page.locator('[data-df-rail-entry="INTELLIGENCE"]').click()
                         row = page.locator('[data-df-contact-row="ais:257600001"]')
@@ -420,7 +503,13 @@ def run() -> dict:
                             result["canvasPick"]={"status":"EXECUTED", "projectedCanvas":loc,
                                                   "clicked":picked,"observationIdentity":picked["observation"]}
                         for workspace in ("TACTICAL","LAYERS","INTELLIGENCE","SEARCH","INTELLIGENCE"):
+                            result["navigationProbes"].append(navigation_probe(page, f"before {workspace}"))
                             page.locator(f'[data-df-rail-entry="{workspace}"]').click()
+                            page.wait_for_function("""id =>
+                                document.querySelector(`[data-df-rail-entry="${id}"]`)
+                                  ?.getAttribute('aria-pressed') === 'true'
+                            """, arg=workspace, timeout=10000)
+                            result["navigationProbes"].append(navigation_probe(page, f"after {workspace}"))
                         final_dom = dom_readout(page)
                         result["browserActions"].append({"action":"rapid workspace navigation after layer and pick", "dom":final_dom})
                         result["navFinalProbe"] = page.evaluate("""() => ({
@@ -448,6 +537,23 @@ def run() -> dict:
                         # absent from pageerror. Keep this failure visible.
                         result["postconditions"] = {
                             "playbackBarSurvivedNavigation": final_dom["bar"] is not None,
+                            "everyNavigationPreservedSourceAndBar": len(result["navigationProbes"]) == 11 and all(
+                                p["observations"] == 499 and p["contacts"] == 100
+                                and p["uniqueSources"] == [SOURCE]
+                                and p["selectedMmsi"] == result["navigationProbes"][1]["selectedMmsi"]
+                                and p["barPresent"] and p["canvasCount"] == 1
+                                and p["appPresent"] and p["alertText"] is None
+                                for p in result["navigationProbes"] if p["label"].startswith(("before ", "after "))
+                            ),
+                            "noUnexpectedMainFrameReload": sum(
+                                1 for record in result["frameNavigations"] if record["main"]
+                            ) == 1,
+                            "noUnexpectedDocumentBoot": all(
+                                probe["documentBoot"] == 1 for probe in result["navigationProbes"]
+                            ),
+                            "noAisApiFailure": not result["aisApiFailures"] and all(
+                                response["status"] == 200 for response in result["aisApiResponses"]
+                            ),
                             "cesiumSingleCanvasAfterNavigation": result["canvasAfterNavigation"] == 1,
                             "pageClosed": result["firstPageClosed"],
                             "freshPageSingleCanvas": result["freshPageCanvas"] == 1,

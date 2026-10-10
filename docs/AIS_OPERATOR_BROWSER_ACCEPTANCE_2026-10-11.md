@@ -172,6 +172,59 @@ if the same disappearing-bar failure reproduces with **all** source hashes
 stable and no dev reload. No Vite source change or new Chrome run was made
 during this investigation.
 
+## Final exclusive Chrome rerun — 2026-10-11: bar anomaly not reproduced
+
+**Result:** the 17-source-hash, frame/HMR-instrumented AIS Chrome harness
+exited **0** with `status=PASS` and **all ten strengthened postconditions
+true**. This supersedes the earlier *NOT_RUN* statement above, which described
+the status immediately after the first browser handoff. The PASS applies to
+an isolated, explicitly **non-live AIS fixture**, not an authenticated live
+provider or release-built UI. No production source was edited.
+
+The rerun used one real installed Chrome 154 process, isolated FastAPI,
+Vite dev modules, temporary data directory and 127.0.0.1 ports. Actual
+`AisArchive`/Parquet and `/api/scans/AIS-BROWSER-FIXTURE-NONLIVE/ais`
+delivered **499 observations for 100 MMSIs** with provenance
+`fixture-browser-nonlive`. The temporary scan-window descriptor continued
+to say `runtime_mode=FIXTURE_NONLIVE`, `synthetic=true` and the browser
+state remained `QUEUED`; it was **never** a verified REAL scan or a
+production acquisition. Cesium displayed 100 contacts, 499 observation
+markers, 101 track primitives and one deliberate reporting gap.
+
+| Strengthened gate | Real browser evidence | Outcome |
+|---|---|---|
+| Per-rail persistence | Captured **ten** before/after store-and-DOM snapshots for TACTICAL → LAYERS → INTELLIGENCE → SEARCH → INTELLIGENCE, plus initial load. Every transition retained 499 fixes, 100 contacts, fixture source, consistent selection, visible playback bar, one canvas and no application error boundary | **PASS** |
+| Final navigation playback bar | `playbackBarSurvivedNavigation=true`; `everyNavigationPreservedSourceAndBar=true`; final `navFinalProbe.barCount=1` | **PASS**; old disappearance **not reproduced** |
+| Frame identity | Exactly **one main-frame navigation** (the initial page load), and document boot counter remained **1** throughout the navigation loop | **PASS** |
+| HMR diagnostics | Vite hot-context listeners were successfully installed; only `[vite] connecting...` and `[vite] connected.` console messages were captured, with no observed HMR/full reload | **PASS** for this session; historical cause remains unproven |
+| AIS request integrity | Browser captured `HTTP 200` for `/api/scans/AIS-BROWSER-FIXTURE-NONLIVE/ais`, zero failed AIS requests | **PASS** |
+| Chrome DOM/errors/unload | Zero uncaught page errors, one canvas after navigation; original page closed, subsequent page initialized one canvas | **PASS** for browser lifecycle; GPU allocation teardown not independently measured |
+| 17-file source identity | All 17 SHA-256 hashes identical before and after run; no Git HEAD change | **PASS** for these monitored dev source files; production bundle not attested |
+
+Both initial and final HEAD were
+`8f968fccbc5aa4682b71c0a554cf701a2b51dea3`.
+Representative measured file digests: `src/ais/displayState.ts` =
+`a6435ed7556d06c895ae4c5086f83407dd84400d480d47ea63107fda0a462795`;
+`src/temporal/TemporalController.ts` =
+`6a9371e3983654a3be3b6daca03f64820c6b19925471f7e1211aba068f95dc12`;
+`backend/darkfleet/api/routes.py` =
+`5c74110b94fb1bc205543cef997913375344ddd0e7e9c527dfe3fa3839829f2d`.
+
+An additional **actual canvas click** was attempted at projected canvas pixel
+`(425, 688)`; it cleared AIS selection but **did not establish a specific
+raw observation marker or `observationAt` timestamp**. Thus direct on-canvas
+observation-identity picking remains **UNVERIFIED**. The chosen pixel was not
+proven to intersect the intended marker, so this is not evidence of a
+reproduced picking defect. The targeted final acceptance was the previously
+disappearing navigation playback bar, which now persisted.
+
+**Conclusion:** the prior concurrent `displayState.ts` modification/HMR
+hypothesis remains plausible but unproven; the defect was not reproduced
+with byte-stable sources. No production repair was justified or made. This
+single rerun is not a statistical reliability guarantee, does not validate
+live AIS, and does not claim production-build equivalence. The exclusive
+Chrome slot and owned services were closed and released to prime/worker-4.
+
 ## Reproduction and handoff
 
 Execute from `/darkfleet` with project dependencies installed:
@@ -182,7 +235,7 @@ python -m ruff check build-tools/ais_operator_browser_e2e.py
 python -m py_compile build-tools/ais_operator_browser_e2e.py
 ```
 
-Only one Chrome benchmark/process group should run at a time. The completed
-worker-1 fixture browser slot was **released to prime for worker-2, then
-worker-7**, before this report was written. No production code modifications,
-no git push and no writes to existing operator `data/`.
+Only one Chrome benchmark/process group should run at a time. The initial
+browser slot was released to workers 2/7, and the **final** worker-1 slot was
+released to prime/worker-4 after this successful rerun. No production code
+modifications, no push, and no writes to existing operator `data/`.
