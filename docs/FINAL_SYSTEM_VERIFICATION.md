@@ -139,3 +139,21 @@ The prime reserved another exclusive no-GPU/no-browser CPU window for **eight pa
 | Interpolated at 10 minutes, pair B | 75.22 / 94.44 / 103.83 | **54.46 / 82.89 / 94.41** | Yes; original failed |
 
 All optimized sampled wall and thread-CPU worst values were below 100 ms, while both baseline interpolation runs had a worst over 100 ms. This is **PASS for the bounded, measured standalone synthetic 10k CPU fixture**, not a mathematical hard real-time guarantee or a demonstrated 30/60fps renderer. The two AMD hardware 10k frame p95 readings **145.7 ms and 195.1 ms** both fail the smooth interactive target. Crucial provenance correction: the first GPU run already loaded the optimized `displayState.ts` **uncommitted from its Vite module graph**, while the later committed-source run used the **same optimized SHA-256**. These results reflect **run-to-run variance under identical optimized code**, **not** a before/after GPU regression or a hardware proof of improvement. Full reproduction commands, SHA-256 fixtures, source hashes and exact substage results appear in `docs/AIS_10K_CPU_CLOSURE_2026-10-11.md` and the hardware report.
+
+### Clean production release — complete physical Cesium asset coverage
+
+The continuation's repaired build+release verifier was executed, not merely unit-tested, against committed clean source **`2abf3dec7530072ef66afa54a97032471d638624`** on Windows. The commands were:
+
+```powershell
+$env:DF_REQUIRE_CLEAN_TREE='1'
+npm run build
+Remove-Item Env:DF_REQUIRE_CLEAN_TREE
+node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4174 --strictPort
+python -B build-tools/release_build_verifier.py --preview-url http://127.0.0.1:4174/
+```
+
+The preview command was run as an independently owned localhost child process, not by modifying an operator's running server. **Actual results:** strict Vite build exit0 / 105 modules; 393 physically emitted files excluding manifest, **390 copied Cesium runtime resources**, manifest exactly lists all 393 files, `dirty=false`, `mode=production`; source contract hash `0d557aca1c1790c5`; strict preview verification exit0 **`VERIFIED`, 20/20 checks PASS, zero failures**. Both dist HTML and served HTML identify the same clean source HEAD as the manifest, the served manifest is byte-identical, emitted resources are byte-identical and the installed Cesium package's 390 source files are individually compared. SHA-256 emitted-tree bundle digest: **`7829221f2e412016fee1556faf9c608d382a107e2c4c9a7088e17b541cef99ad`**. The full read-only JSON receipt was saved outside the repository as `%TEMP%/darkfleet_release_final_2abf3de.json`. Existing >500KB Vite chunk warning remains advisory; it is not a test failure or proof of responsiveness.
+
+**HEAD invalidation rule:** this very document and checkpoint require a further local documentation commit, which changes the HEAD after the preceding 20/20 check. A release at that new HEAD requires **another clean strict build and actual localhost served verifier replay**. Because embedding the second receipt directly in source documentation would again change HEAD, the authoritative final replay's exact HEAD/digest/checks are stored in the **local Git note** `refs/notes/darkfleet-verification` attached to the final source commit (`git notes --ref=darkfleet-verification show HEAD`). The Git note does not change the source/build identity. Do not cite the `2abf3de` digest as the digest of a later HEAD.
+
+**Bounded release verdict:** Locally tested source and operator workflows are verified within their stated constraints, while authenticated independent Sentinel-1 calibration/live AIS availability, a source-driven watchlist alert/live reporter trace, mutable general settings and binary case-evidence upload (not implemented), fully external-network authenticated hosting, Docker Linux container execution, real abrupt-process/power-loss recovery, long-term GPU memory/VRAM and a smooth sustained 10k-contact interactive frame budget are **not** certified. The **10k GPU performance result is a measured failed acceptance target**, not an unexecuted measurement. No invented live maritime observation, inferred illicit vessel intent or unverified source is promoted from HYPOTHESIS/UNKNOWN to OBSERVED. No Git push was performed.
