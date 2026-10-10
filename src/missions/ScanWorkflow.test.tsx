@@ -29,4 +29,20 @@ describe('Operator-selected scan AOI', () => {
     expect(valid).toMatch(/data-df-run-scan/);
     expect(valid).not.toMatch(/disabled=""[^>]*data-df-run-scan/);
   });
+
+  it('retains scene discovery, footprint framing and source metadata in the reachable Tasking workflow', () => {
+    store.set({
+      aoiText: '100, 0, 101, 1',
+      scenes: [{
+        id: 'S1', provider: 'planetary-computer', platform: 'sentinel-1a',
+        product: 'RTC', polarization: 'VH', acquisition_time: '2026-10-01T00:00:00Z',
+        bbox: [100, 0, 101, 1], runtime_mode: 'REAL', synthetic: false,
+      }],
+    });
+    const html = renderToStaticMarkup(<ScanWorkflow />);
+    expect(html).toContain('data-df-scene-extent="S1"');
+    expect(html).toContain('RTC');
+    expect(html).toContain('VH');
+    expect(html).toContain('sentinel-1a');
+  });
 });

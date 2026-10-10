@@ -9,9 +9,9 @@
  * not chosen and not notice.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { loadScenes, startScan } from '../api/client';
+import { invalidateSceneCatalogue, loadScenes, startScan } from '../api/client';
 import { engine } from '../globe/engine';
 import { store, toBBox, useStore, type BBox } from '../state/store';
 import { fmt, fmtInstant, NOT_ESTABLISHED } from '../design/format';
@@ -37,34 +37,27 @@ export function ScanWorkflow() {
   const text = state.aoiText;
   const setText = (value: string) => {
     setSceneId('');
-    store.set({ aoiText: value, scenes: [] });
+    // Invalidate the previous region before the new debounced request starts.
+    // Otherwise the old region may resolve and reappear during the debounce.
+    invalidateSceneCatalogue();
+    store.set({ aoiText: value });
   };
   const [sceneId, setSceneId] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const catalogueQueue = useRef<Promise<void>>(Promise.resolve());
-  const catalogueGeneration = useRef(0);
-
 
   const parsed = parseBbox(text);
 
-  // Debounce typing and serialize requests: changing one valid AOI to another
-  // must fetch a fresh catalogue, and a slower older fetch must not win last.
-  // A queued request is discarded when its typed AOI has already changed.
+  // Debounce typing; shared API request ownership now aborts/ignores any
+  // superseded catalogue response across all component instances.
   useEffect(() => {
     const next = parseBbox(text);
-    const generation = ++catalogueGeneration.current;
-    const refresh = () => {
-      catalogueQueue.current = catalogueQueue.current.catch(() => {}).then(() => {
-        if (catalogueGeneration.current === generation) return loadScenes(next);
-      });
-    };
-    if (!next) refresh();
-    else {
-      const timer = setTimeout(refresh, 300);
-      return () => { clearTimeout(timer); catalogueGeneration.current++; };
+    if (!next) {
+      void loadScenes(null);
+      return;
     }
-    return () => { catalogueGeneration.current++; };
+    const timer = setTimeout(() => { void loadScenes(next); }, 300);
+    return () => clearTimeout(timer);
   }, [text]);
 
   /**
@@ -150,7 +143,7 @@ export function ScanWorkflow() {
           {state.scenesLoading ? <p role="status" className="df-note">Searching acquisitions for this area…</p> : null}
           {state.scenes.length > 0 ? (
             <ul className="df-scroll mt-2 max-h-40 space-y-1 overflow-y-auto">
-              {state.scenes.slice(0, 8).map((scene) => (
+              {state.scenes.map((scene) => (
                 <li
                   key={`${scene.id}:${scene.polarization}`}
                   className="df-num flex items-center gap-2 text-[10px]"
@@ -165,6 +158,7 @@ export function ScanWorkflow() {
                       if (bbox) {
                         useSceneExtent(bbox);
                         setSceneId(scene.id);
+                        engine.setAoi(bbox);
                         engine.flyToBbox(bbox);
                       }
                     }}
@@ -172,7 +166,8 @@ export function ScanWorkflow() {
                     {scene.id}
                   </button>
                   <span className="text-ink-dim">
-                    {scene.platform ?? '—'} · {fmtInstant(scene.acquisition_time)}
+                    {scene.platform ?? 'platform unknown'} · {fmtInstant(scene.acquisition_time)}
+                    {' '}· {scene.product ?? 'product unknown'} · {scene.polarization ?? 'polarization unknown'}
                   </span>
                 </li>
               ))}

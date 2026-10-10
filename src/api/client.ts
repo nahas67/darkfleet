@@ -658,6 +658,20 @@ export async function loadRaster(
 
 /* ------------------------------------------------------- catalogue + health */
 
+// The catalogue list is shared by TACTICAL/TASKING and any other scene
+// consumer. Component-local request queues cannot prevent an older caller's
+// response from overwriting a newer caller's AOI.
+let scenesGeneration = 0;
+let scenesController: AbortController | null = null;
+
+/** Invalidate scene data immediately when the operator changes the AOI. */
+export function invalidateSceneCatalogue(): void {
+  scenesGeneration++;
+  scenesController?.abort();
+  scenesController = null;
+  store.set({ scenes: [], scenesLoading: false });
+}
+
 /**
  * Load the Sentinel-1 catalogue.
  *
@@ -667,6 +681,9 @@ export async function loadRaster(
  * permanently empty.
  */
 export async function loadScenes(bbox?: BBox | null): Promise<void> {
+  const generation = ++scenesGeneration;
+  scenesController?.abort();
+  scenesController = null;
   if (!bbox) {
     // Stated rather than attempted. No fabricated catalogue entry is shown in
     // its place.
@@ -676,15 +693,25 @@ export async function loadScenes(bbox?: BBox | null): Promise<void> {
     });
     return;
   }
-  store.set({ scenesLoading: true });
+  const controller = new AbortController();
+  scenesController = controller;
+  // A pending catalogue belongs to a particular area. Retaining an earlier
+  // area during a new request would display stale candidate acquisitions.
+  store.set({ scenes: [], scenesLoading: true });
   const query = bbox.map((v) => v.toFixed(6)).join(',');
   try {
-    const payload = await api.get<SceneListResponse>(`/api/scenes?bbox=${encodeURIComponent(query)}`);
-    store.set({ scenes: payload.scenes ?? [], scenesLoading: false, scanError: null });
+    const payload = await api.get<SceneListResponse>(
+      `/api/scenes?bbox=${encodeURIComponent(query)}`, controller.signal,
+    );
+    if (controller.signal.aborted || generation !== scenesGeneration) return;
+    store.set({ scenes: payload.scenes ?? [], scenesLoading: false });
   } catch (error) {
+    if (controller.signal.aborted || generation !== scenesGeneration) return;
     // A failed catalogue load is not a scan failure. It used to overwrite
     // `scanError`, so a scene-search 400 surfaced as the analysis having failed.
     store.set({ scenes: [], scenesLoading: false });
+  } finally {
+    if (generation === scenesGeneration) scenesController = null;
   }
 }
 
