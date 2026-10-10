@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -104,6 +105,86 @@ def test_reader_provenance_missingness_and_output_limits(tmp_path: Path) -> None
     assert {p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file()} == existing_files
 
 
+def test_mcp_does_not_surface_signed_urls_or_unbounded_nested_source_values(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    store = run_store_for_data_dir(tmp_path)
+    record = store.get("DF-EVIDENCE-001")
+    assert record is not None
+    record["created_at"] = "https://private.invalid/?token=INTERNAL_SECRET"
+    record["acquisition_time"] = "https://private.invalid/?token=INTERNAL_SECRET"
+    record["aoi"] = {"secret": "INTERNAL_SECRET"}
+    record["counts"]["PRIVATE_TOKEN"] = {"secret": "INTERNAL_SECRET"}
+    record["scene"]["provider"] = "https://private.invalid/?token=INTERNAL_SECRET"
+    record["targets"][0]["corr"]["vesselName"] = "https://private.invalid/?token=INTERNAL_SECRET"
+    record["targets"][0]["ais"]["observation"]["source"] = "https://private.invalid/?token=INTERNAL_SECRET"
+    store.save(record)
+    reader = EvidenceReader(tmp_path)
+    outputs = [
+        reader.list_scans(), reader.get_scan("DF-EVIDENCE-001"),
+        reader.list_scan_targets("DF-EVIDENCE-001"),
+        reader.get_target_evidence("DF-EVIDENCE-001", "DF-001"),
+    ]
+    serialized = json.dumps(outputs)
+    assert "INTERNAL_SECRET" not in serialized
+    assert "private.invalid" not in serialized
+    assert reader.get_scan("DF-EVIDENCE-001")["aoi"] is None
+
+
+def test_mcp_redacts_archive_observation_private_metadata(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    AisArchive(tmp_path).append([AisObservation(
+        timestamp=datetime(2026, 9, 18, 15, 2, tzinfo=UTC),
+        mmsi="111222333", lat=1.25, lon=100.25, source="file-import",
+        name="https://private.invalid/?token=INTERNAL_SECRET",
+        callsign="VESSEL?token=INTERNAL_SECRET",
+    )])
+    reader = EvidenceReader(tmp_path)
+    row = reader.query_scan_ais(
+        "DF-EVIDENCE-001", "2026-09-18T15:02:00Z", "2026-09-18T15:02:00Z",
+    )
+    assert row["status"] == "AVAILABLE"
+    assert row["observations"][0]["mmsi"] == "111222333"
+    assert "name" not in row["observations"][0]
+    assert "callsign" not in row["observations"][0]
+    assert "INTERNAL_SECRET" not in json.dumps(row)
+
+
+def test_mcp_rejects_ais_partition_symlink_outside_archive(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    original = next((tmp_path / "ais").rglob("part-*.parquet"))
+    external = tmp_path / "external-parquet.parquet"
+    external.write_bytes(original.read_bytes())
+    original.unlink()
+    try:
+        original.symlink_to(external)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    result = EvidenceReader(tmp_path).query_scan_ais(
+        "DF-EVIDENCE-001", "2026-09-18T14:00:00Z", "2026-09-18T16:00:00Z",
+    )
+    assert result["status"] == "UNAVAILABLE"
+    assert result["reason"] == "AIS_ARCHIVE_PATH_OUTSIDE_ROOT"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction boundary test")
+def test_mcp_rejects_junction_redirected_ais_archive(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    archive = tmp_path / "ais"
+    outside = tmp_path / "elsewhere"
+    archive.rename(outside)
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(archive), str(outside)],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode:
+        pytest.skip(f"Directory junctions unavailable: {result.stderr}")
+    response = EvidenceReader(tmp_path).query_scan_ais(
+        "DF-EVIDENCE-001", "2026-09-18T14:00:00Z", "2026-09-18T16:00:00Z",
+    )
+    assert response["status"] == "UNAVAILABLE"
+    assert response["reason"] == "AIS_ARCHIVE_PATH_OUTSIDE_ROOT"
+
+
 def test_mcp_preserves_real_serialized_processing_class_and_refuses_conflicts(tmp_path: Path) -> None:
     """RunStore uses `cls` and the API maps it to `classification`."""
     _seed(tmp_path)
@@ -128,6 +209,23 @@ def test_mcp_preserves_real_serialized_processing_class_and_refuses_conflicts(tm
     ambiguous = reader.get_target_evidence("DF-EVIDENCE-001", "DF-001")
     assert ambiguous["target"]["classification_status"] == "INCONSISTENT_STORED_SOURCE_FIELDS"
     assert "classification" not in ambiguous["target"] and "cls" not in ambiguous["target"]
+
+
+def test_mcp_missing_target_array_is_unknown_not_zero_or_absent(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    store = run_store_for_data_dir(tmp_path)
+    record = store.get("DF-EVIDENCE-001")
+    assert record is not None
+    del record["targets"]
+    store.save(record)
+    reader = EvidenceReader(tmp_path)
+    assert reader.list_scans()["scans"][0]["target_count"] is None
+    assert reader.get_scan("DF-EVIDENCE-001")["target_count"] is None
+    target_list = reader.list_scan_targets("DF-EVIDENCE-001")
+    assert target_list["status"] == "MISSING_EVIDENCE"
+    assert target_list["reason"] == "TARGETS_NOT_RECORDED"
+    assert reader.get_target_evidence("DF-EVIDENCE-001", "DF-001")["reason"] == "TARGETS_NOT_RECORDED"
+    assert reader.get_maritime_context("DF-EVIDENCE-001", "DF-001")["reason"] == "TARGETS_NOT_RECORDED"
 
 
 def test_scan_guard_and_invalid_inputs(tmp_path: Path) -> None:

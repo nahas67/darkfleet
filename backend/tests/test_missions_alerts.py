@@ -39,6 +39,24 @@ def _seed(root: Path, scan_id: str = "REAL-001", *, confidence: float | None = 0
     return root / "scans" / f"{scan_id}.json"
 
 
+def test_watch_evidence_does_not_echo_secret_query_or_native_path(tmp_path: Path):
+    source = _seed(tmp_path)
+    record = run_store_for_data_dir(tmp_path).get("REAL-001")
+    assert record is not None
+    record["scene"]["item_id"] = "SCENE?token=INTERNAL_SECRET"
+    record["scene"]["acquisition_time"] = "C:\\private\\metadata.txt"
+    record["created_at"] = "2026-09-18?signature=INTERNAL_SECRET"
+    run_store_for_data_dir(tmp_path).save(record)
+    finding = evaluate_sar_watch("REAL-001", record, "DF-001", 0.8)
+    assert finding.status == "TRIGGERED"
+    assert finding.evidence is not None
+    assert finding.evidence["scene_item_id"] is None
+    assert finding.evidence["acquisition_time"] is None
+    assert finding.evidence["scan_created_at"] is None
+    assert "INTERNAL_SECRET" not in finding.model_dump_json()
+    assert source.exists()
+
+
 def _mission(client: TestClient, *, status: str = "ACTIVE") -> dict:
     response = client.post("/api/missions", json={
         "title": "Operator-defined coastal watch",

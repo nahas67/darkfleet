@@ -190,6 +190,21 @@ class RunStore:
     def _path(self, scan_id: str) -> Path:
         return self._scans_dir / f"{scan_id}.json"
 
+    def _directory_confined(self) -> bool:
+        """A substituted scans directory must never redirect evidence I/O."""
+        try:
+            return self._scans_dir.resolve() == self._root.resolve() / self._scans_dir.name
+        except (OSError, RuntimeError):
+            return False
+
+    def _document_confined(self, path: Path) -> bool:
+        try:
+            return (self._directory_confined() and not path.is_symlink()
+                    and path.resolve() == self._scans_dir.resolve() / path.name
+                    and (not path.exists() or path.stat().st_nlink <= 1))
+        except (OSError, RuntimeError):
+            return False
+
     def _atomic_write(self, path: Path, data: bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -235,6 +250,8 @@ class RunStore:
         document = dict(record)
         document["schema_version"] = int(document.get("schema_version", SCHEMA_VERSION))
         path = self._path(scan_id)
+        if not self._document_confined(path):
+            raise RunRecordError("scan record path redirects outside its evidence directory")
         self._atomic_write(
             path,
             json.dumps(document, sort_keys=True, indent=2, default=str).encode("utf-8"),
@@ -245,19 +262,31 @@ class RunStore:
     def get(self, scan_id: str) -> dict[str, Any] | None:
         """Return the stored document, or ``None`` when absent/unreadable."""
         self._validate_scan_id(scan_id)
-        document = self._read_document(self._path(scan_id))
+        path = self._path(scan_id)
+        if not self._document_confined(path):
+            return None
+        document = self._read_document(path)
         if document is not None:
             self._counters["loads"] += 1
         return document
 
     def exists(self, scan_id: str) -> bool:
-        return self._path(self._validate_scan_id(scan_id)).is_file()
+        path = self._path(self._validate_scan_id(scan_id))
+        return self._document_confined(path) and path.is_file()
 
     def list_ids(self) -> list[str]:
         """Sorted scan ids currently on disk. An empty store yields ``[]``."""
-        if not self._scans_dir.is_dir():
+        if not self._directory_confined() or not self._scans_dir.is_dir():
             return []
-        return sorted(path.stem for path in self._scans_dir.glob("*.json"))
+        ids: list[str] = []
+        for path in self._scans_dir.glob("*.json"):
+            try:
+                self._validate_scan_id(path.stem)
+            except RunRecordError:
+                continue
+            if self._document_confined(path) and path.is_file():
+                ids.append(path.stem)
+        return sorted(ids)
 
     def list(self) -> _RecordList:
         """Alias for :meth:`get_all` kept for call-site readability."""
@@ -267,7 +296,7 @@ class RunStore:
         """Every readable document, ordered by scan id. Survives restarts."""
         documents: _RecordList = []
         for scan_id in self.list_ids():
-            document = self._read_document(self._path(scan_id))
+            document = self.get(scan_id)
             if document is not None:
                 documents.append(document)
         return documents
@@ -275,6 +304,8 @@ class RunStore:
     def delete(self, scan_id: str) -> bool:
         """Delete one record. Returns True only when a file was removed."""
         path = self._path(self._validate_scan_id(scan_id))
+        if not self._document_confined(path):
+            return False
         if not path.is_file():
             return False
         try:

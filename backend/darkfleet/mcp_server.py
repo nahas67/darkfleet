@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import UTC, datetime, timedelta
+from itertools import islice
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -57,6 +58,8 @@ _AIS_FIELDS = (
     "name", "callsign", "imo", "ship_type", "length_m", "width_m", "source",
 )
 _MAX_AIS_PARTITIONS = 10_000
+_REDACT = object()
+_PRIVATE_QUERY = re.compile(r"(?:^|[?&])(?:token|sig|signature|secret|password|api[_-]?key|auth(?:orization)?)=", re.IGNORECASE)
 
 
 def _identity(value: str, label: str) -> str:
@@ -75,20 +78,57 @@ def _page(limit: int, offset: int, *, maximum: int = 100) -> None:
 def _selected(record: object, fields: tuple[str, ...]) -> dict[str, Any]:
     if not isinstance(record, dict):
         return {}
-    return {key: record[key] for key in fields if key in record}
+    result: dict[str, Any] = {}
+    for key in fields:
+        if key in record:
+            value = _public_scalar(record[key])
+            if value is not _REDACT:
+                result[key] = value
+    return result
+
+
+def _public_scalar(value: object) -> Any:
+    """MCP output must contain bounded, non-URL scalars from known fields."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if (len(value) <= 300 and all(32 <= ord(ch) != 127 for ch in value)
+                and "://" not in value and "\\" not in value
+                and _PRIVATE_QUERY.search(value) is None):
+            return value
+        return _REDACT
+    if isinstance(value, (int, float)):
+        try:
+            return value if math.isfinite(value) else _REDACT
+        except OverflowError:
+            return _REDACT
+    return _REDACT
+
+
+def _safe_aoi(value: object) -> list[int | float] | None:
+    if (not isinstance(value, (list, tuple)) or len(value) != 4
+            or any(isinstance(v, bool) or not isinstance(v, (float, int))
+                   or not -180 <= v <= 180 or not math.isfinite(v) for v in value)):
+        return None
+    west, south, east, north = value
+    if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+        return None
+    return list(value)
+
+
+def _safe_counts(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        k: v for k, v in value.items()
+        if isinstance(k, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", k)
+        and isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1_000_000_000
+    }
 
 
 def _safe_metadata(record: object, fields: tuple[str, ...]) -> dict[str, Any]:
     """Only bounded scalar catalog fields; never unreviewed nested provider data."""
-    values = _selected(record, fields)
-    return {
-        key: value for key, value in values.items()
-        if (value is None or (
-            isinstance(value, (str, int, float, bool))
-            and (not isinstance(value, str) or len(value) <= 300)
-            and (not isinstance(value, float) or math.isfinite(value))
-        ))
-    }
+    return _selected(record, fields)
 
 
 def _instant(raw: str, label: str) -> datetime:
@@ -153,7 +193,7 @@ class EvidenceReader:
             "record_path": f"scans/{record['scan_id']}.json",
             "runtime_mode": "REAL",
             "synthetic": False,
-            "created_at": record.get("created_at"),
+            "created_at": _selected(record, ("created_at",)).get("created_at"),
             "scene": _safe_metadata(record.get("scene"), _SCENE_FIELDS),
             "processing": _safe_metadata(record.get("provenance"), _PROVENANCE_FIELDS),
         }
@@ -171,7 +211,7 @@ class EvidenceReader:
                 if total >= offset and len(page) < limit:
                     page.append({
                         "scan_id": scan_id,
-                        "target_count": len(record.get("targets") or []),
+                        "target_count": len(record["targets"]) if isinstance(record.get("targets"), list) else None,
                         "provenance": self._provenance(record),
                     })
                 total += 1
@@ -186,12 +226,12 @@ class EvidenceReader:
             return {"status": "MISSING_EVIDENCE", "scan_id": scan_id, "reason": "NO_PERSISTED_REAL_SCAN"}
         return {
             "status": "AVAILABLE", "scan_id": scan_id,
-            "stage": record.get("stage"),
-            "aoi": record.get("aoi"),
-            "counts": record.get("counts"),
-            "target_count": len(record.get("targets") or []),
-            "ais_only_count": len(record.get("ais_only") or []),
-            "acquisition_time": record.get("acquisition_time"),
+            "stage": _selected(record, ("stage",)).get("stage"),
+            "aoi": _safe_aoi(record.get("aoi")),
+            "counts": _safe_counts(record.get("counts")),
+            "target_count": len(record["targets"]) if isinstance(record.get("targets"), list) else None,
+            "ais_only_count": len(record["ais_only"]) if isinstance(record.get("ais_only"), list) else None,
+            "acquisition_time": _selected(record, ("acquisition_time",)).get("acquisition_time"),
             "provenance": self._provenance(record),
         }
 
@@ -202,7 +242,10 @@ class EvidenceReader:
         record = self._real_scan(scan_id)
         if record is None:
             return {"status": "MISSING_EVIDENCE", "scan_id": scan_id, "reason": "NO_PERSISTED_REAL_SCAN"}
-        targets = [t for t in (record.get("targets") or []) if isinstance(t, dict)]
+        if not isinstance(record.get("targets"), list):
+            return {"status": "MISSING_EVIDENCE", "scan_id": scan_id,
+                    "reason": "TARGETS_NOT_RECORDED", "provenance": self._provenance(record)}
+        targets = [t for t in record["targets"] if isinstance(t, dict)]
         return {
             "status": "AVAILABLE", "scan_id": scan_id,
             "total": len(targets), "offset": offset, "limit": limit,
@@ -218,8 +261,11 @@ class EvidenceReader:
                 "status": "MISSING_EVIDENCE", "scan_id": scan_id,
                 "target_id": target_id, "reason": "NO_PERSISTED_REAL_SCAN",
             }
+        if not isinstance(record.get("targets"), list):
+            return {"status": "MISSING_EVIDENCE", "scan_id": scan_id,
+                    "target_id": target_id, "reason": "TARGETS_NOT_RECORDED"}
         target = next(
-            (t for t in record.get("targets") or []
+            (t for t in record["targets"]
              if isinstance(t, dict) and t.get("id") == target_id), None,
         )
         if target is None:
@@ -235,7 +281,7 @@ class EvidenceReader:
         return {
             "status": "AVAILABLE", "scan_id": scan_id, "target_id": target_id,
             "target": _target_result(target),
-            "associated_ais_observation": _selected(observed, _AIS_FIELDS) if observed else None,
+            "associated_ais_observation": _selected(observed, _AIS_FIELDS) if isinstance(observed, dict) else None,
             "provenance": self._provenance(record),
         }
 
@@ -254,7 +300,7 @@ class EvidenceReader:
         if end < start or end - start > timedelta(days=7):
             raise ValueError("AIS query requires start <= end and an interval <= 7 days")
         archive_root = self.data_dir / "ais"
-        parts = sorted(archive_root.rglob("part-*.parquet")) if archive_root.is_dir() else []
+        parts = sorted(islice(archive_root.rglob("part-*.parquet"), _MAX_AIS_PARTITIONS + 1)) if archive_root.is_dir() else []
         base = {
             "scan_id": scan_id, "query_interval": {"start_utc": start.isoformat(), "end_utc": end.isoformat()},
             "mmsi_filter": mmsi, "limit": limit, "offset": offset,
@@ -266,6 +312,20 @@ class EvidenceReader:
         }
         if not parts:
             return {**base, "status": "MISSING_EVIDENCE", "reason": "AIS_ARCHIVE_NOT_PRESENT",
+                    "observations": []}
+        # Do not let local untrusted symlinks/junctions redirect DuckDB to a
+        # Parquet source outside the operator's configured AIS archive.
+        try:
+            canonical_root = archive_root.resolve()
+            confined = (
+                canonical_root == self.data_dir / "ais"
+                and all(not part.is_symlink() and part.resolve().is_relative_to(canonical_root)
+                        for part in parts)
+            )
+        except (OSError, RuntimeError):
+            confined = False
+        if not confined:
+            return {**base, "status": "UNAVAILABLE", "reason": "AIS_ARCHIVE_PATH_OUTSIDE_ROOT",
                     "observations": []}
         if len(parts) > _MAX_AIS_PARTITIONS:
             return {**base, "status": "UNAVAILABLE", "reason": "AIS_PARTITION_LIMIT_EXCEEDED",
@@ -293,10 +353,10 @@ class EvidenceReader:
         finally:
             connection.close()
         observed = [
-            {
+            _selected({
                 key: value.isoformat() if isinstance(value, datetime) else value
                 for key, value in row.items()
-            }
+            }, _AIS_FIELDS)
             for row in rows[:limit]
         ]
         return {
@@ -318,8 +378,11 @@ class EvidenceReader:
                 "status": "MISSING_EVIDENCE", "scan_id": scan_id,
                 "target_id": target_id, "reason": "NO_PERSISTED_REAL_SCAN",
             }
+        if not isinstance(record.get("targets"), list):
+            return {"status": "MISSING_EVIDENCE", "scan_id": scan_id,
+                    "target_id": target_id, "reason": "TARGETS_NOT_RECORDED"}
         target = next(
-            (t for t in record.get("targets") or []
+            (t for t in record["targets"]
              if isinstance(t, dict) and t.get("id") == target_id), None,
         )
         if target is None:

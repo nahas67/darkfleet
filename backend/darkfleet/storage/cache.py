@@ -47,6 +47,8 @@ BBOX_DECIMALS = 6
 _META_SUFFIX = ".meta.json"
 
 _STORAGE_VERSION = 1
+_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+_MAX_UNCOMPRESSED_ARRAY_BYTES = 512 * 1024 * 1024
 
 
 def _canonical_bbox(bbox: Sequence[float]) -> tuple[float, float, float, float]:
@@ -251,6 +253,15 @@ class ArtifactCache:
     def _meta_path(self, key: CacheKey, artifact_name: str) -> Path:
         return self._entry_dir(key) / f"{artifact_name}{_META_SUFFIX}"
 
+    def _path_confined(self, path: Path) -> bool:
+        """Reject linked cache files and redirected shard/entry directories."""
+        try:
+            expected = self._root.resolve() / path.relative_to(self._root)
+            return (not path.is_symlink() and path.resolve() == expected
+                    and (not path.exists() or path.stat().st_nlink <= 1))
+        except (OSError, RuntimeError, ValueError):
+            return False
+
     def _check_version(self, key: CacheKey) -> None:
         if key.algorithm_version != self._algorithm_version:
             raise ValueError(
@@ -266,10 +277,10 @@ class ArtifactCache:
             raise ValueError(
                 f"artifact_name must not have surrounding whitespace: {artifact_name!r}"
             )
-        if artifact_name in {".", ".."} or any(
-            char in artifact_name for char in ("/", "\\", "\x00")
-        ):
-            raise ValueError(f"artifact_name must not contain path separators: {artifact_name!r}")
+        if (len(artifact_name) > 128 or artifact_name in {".", ".."}
+                or any(char in artifact_name for char in '/\\\x00:*?"<>|')
+                or any(ord(char) < 32 for char in artifact_name)):
+            raise ValueError("artifact_name contains unsafe filesystem characters or exceeds 128 characters")
         return artifact_name
 
     @staticmethod
@@ -290,7 +301,14 @@ class ArtifactCache:
     def _stored_artifacts(self) -> list[Path]:
         """All stored artifacts, oldest write first (mtime, then path)."""
         artifacts = self._root.glob("*/*/*.npz")
-        ordered = [(path.stat().st_mtime_ns, path.name, path) for path in artifacts]
+        ordered: list[tuple[int, str, Path]] = []
+        for path in artifacts:
+            if not self._path_confined(path):
+                continue
+            try:
+                ordered.append((path.stat().st_mtime_ns, path.name, path))
+            except OSError:
+                continue
         ordered.sort(key=lambda item: (item[0], item[1]))
         return [item[2] for item in ordered]
 
@@ -324,11 +342,15 @@ class ArtifactCache:
         artifact = self._artifact_path(key, name)
         meta_path = self._meta_path(key, name)
 
-        if not artifact.is_file() or not meta_path.is_file():
+        if (not self._path_confined(artifact) or not self._path_confined(meta_path)
+                or not artifact.is_file() or not meta_path.is_file()):
             self._counters.misses += 1
             return None
 
         try:
+            if artifact.stat().st_size > _MAX_ARCHIVE_BYTES:
+                self._counters.misses += 1
+                return None
             raw = artifact.read_bytes()
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -349,6 +371,13 @@ class ArtifactCache:
             return None
 
         try:
+            # np.load only decompresses the selected member, but without a ZIP
+            # size preflight a valid-checksum compressed bomb can exhaust memory.
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                info = archive.getinfo(f"{name}.npy")
+                if info.file_size > _MAX_UNCOMPRESSED_ARRAY_BYTES:
+                    self._counters.misses += 1
+                    return None
             with np.load(io.BytesIO(raw), allow_pickle=False) as bundle:
                 if name not in bundle.files:
                     self._counters.misses += 1
@@ -375,8 +404,14 @@ class ArtifactCache:
         array = np.asarray(payload)
         if array.dtype.hasobject:
             raise ValueError("payload dtype must not be object dtype")
+        if array.nbytes > _MAX_UNCOMPRESSED_ARRAY_BYTES:
+            raise ValueError("payload exceeds maximum uncompressed cache array size")
 
         entry = self._entry_dir(key)
+        artifact = self._artifact_path(key, name)
+        meta_path = self._meta_path(key, name)
+        if not self._path_confined(artifact) or not self._path_confined(meta_path):
+            raise ValueError("cache artifact path redirects outside its configured cache shard")
         entry.mkdir(parents=True, exist_ok=True)
 
         buffer = io.BytesIO()
@@ -385,6 +420,8 @@ class ArtifactCache:
         named: dict[str, Any] = {name: array}
         np.savez(buffer, **named)
         raw = buffer.getvalue()
+        if len(raw) > _MAX_ARCHIVE_BYTES:
+            raise ValueError("payload exceeds maximum cache archive size")
 
         meta = {
             "algorithm_version": key.algorithm_version,
@@ -397,10 +434,9 @@ class ArtifactCache:
             "storage_version": _STORAGE_VERSION,
         }
 
-        artifact = self._artifact_path(key, name)
         self._atomic_write(artifact, raw)
         self._atomic_write(
-            self._meta_path(key, name),
+            meta_path,
             json.dumps(meta, sort_keys=True, separators=(",", ":")).encode("utf-8"),
         )
         self._counters.writes += 1
@@ -411,13 +447,16 @@ class ArtifactCache:
         """Cheap existence probe that does not move hit/miss counters."""
         self._check_version(key)
         name = self._check_artifact_name(artifact_name)
-        return self._artifact_path(key, name).is_file()
+        artifact = self._artifact_path(key, name)
+        return self._path_confined(artifact) and artifact.is_file()
 
     def delete(self, key: CacheKey, artifact_name: str) -> bool:
         """Remove one artifact. Returns True when a file was actually removed."""
         self._check_version(key)
         name = self._check_artifact_name(artifact_name)
         artifact = self._artifact_path(key, name)
+        if not self._path_confined(artifact) or not self._path_confined(self._meta_path(key, name)):
+            return False
         removed = False
         if artifact.is_file():
             artifact.unlink()

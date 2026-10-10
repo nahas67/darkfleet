@@ -16,6 +16,8 @@ No network, no mocks on the persistence path -- every assertion touches a real
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +65,68 @@ def _patch() -> np.ndarray:
 
 def _artifact_path(cache: ArtifactCache, key: CacheKey, name: str = "chip") -> Path:
     return cache.root / key.shard / key.directory / f"{name}.npz"
+
+
+def test_run_store_rejects_scan_document_symlink_outside_store(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs")
+    store.save(mark_synthetic({"scan_id": "legitimate", "targets": []}))
+    secret = tmp_path / "private.json"
+    secret.write_text(json.dumps(mark_synthetic({
+        "scan_id": "linked", "targets": [{"id": "PRIVATE"}],
+    })), encoding="utf-8")
+    linked = store.scans_dir / "linked.json"
+    try:
+        linked.symlink_to(secret)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    assert store.get("linked") is None
+    assert store.exists("linked") is False
+    assert store.list_ids() == ["legitimate"]
+    assert store.get_all() == [store.get("legitimate")]
+    assert secret.read_text(encoding="utf-8")
+
+
+def test_run_store_rejects_hardlinked_document_outside_store(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs")
+    store.save(mark_synthetic({"scan_id": "legitimate", "targets": []}))
+    secret = tmp_path / "private.json"
+    secret.write_text(json.dumps(mark_synthetic({
+        "scan_id": "linked", "targets": [{"id": "PRIVATE"}],
+    })), encoding="utf-8")
+    try:
+        os.link(secret, store.scans_dir / "linked.json")
+    except OSError as exc:
+        pytest.skip(f"Hardlinks unavailable: {exc}")
+    assert store.get("linked") is None
+    assert not store.exists("linked")
+    assert store.list_ids() == ["legitimate"]
+    assert secret.read_text(encoding="utf-8")
+
+
+def test_run_store_refuses_redirected_scans_directory(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "runs"
+    root.mkdir()
+    try:
+        (root / "scans").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        if os.name != "nt":
+            pytest.skip(f"Directory symlinks unavailable: {exc}")
+        # Windows junctions require no symbolic-link privilege and exercise the
+        # same on-disk directory-redirect boundary as a malicious symlink.
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(root / "scans"), str(outside)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            pytest.skip(f"Directory junctions unavailable: {result.stderr}")
+    store = RunStore(root)
+    with pytest.raises(RunRecordError, match="outside|redirect|symlink"):
+        store.save(mark_synthetic({"scan_id": "redirected", "targets": []}))
+    assert store.get("redirected") is None
+    assert store.list_ids() == []
+    assert not (outside / "redirected.json").exists()
 
 
 # --------------------------------------------------------------------------
@@ -137,6 +201,53 @@ def test_cache_key_rejects_bad_inputs() -> None:
         cache_key("S1", (1.0, 2.0, 3.0), CONFIG, ALGO_V1)
     with pytest.raises(ValueError):
         cache_key("S1", (1.0, 2.0, 3.0, float("nan")), CONFIG, ALGO_V1)
+
+
+@pytest.mark.parametrize("name", ["chip:secret", "chip?secret", "chip*", "bad\nname", "a" * 201])
+def test_cache_rejects_unsafe_artifact_filenames(tmp_path: Path, name: str) -> None:
+    cache = ArtifactCache(tmp_path / "cache", ALGO_V1)
+    with pytest.raises(ValueError, match="artifact_name"):
+        cache.get(_key(), name)
+    with pytest.raises(ValueError, match="artifact_name"):
+        cache.put(_key(), name, _patch())
+
+
+def test_cache_rejects_excessive_archive_before_decompressing(tmp_path: Path, monkeypatch) -> None:
+    cache = ArtifactCache(tmp_path / "cache", ALGO_V1)
+    key = _key()
+    cache.put(key, "chip", np.zeros(2048, dtype=np.float64))
+    import darkfleet.storage.cache as cache_module
+
+    monkeypatch.setattr(cache_module, "_MAX_UNCOMPRESSED_ARRAY_BYTES", 1024)
+    assert cache.get(key, "chip") is None
+    assert cache.stats()["misses"] == 1
+
+
+def test_cache_rejects_redirected_shard_directory(tmp_path: Path) -> None:
+    key = _key()
+    root = tmp_path / "cache"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    shard = root / key.shard
+    try:
+        shard.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        if os.name != "nt":
+            pytest.skip(f"Directory symlinks unavailable: {exc}")
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(shard), str(outside)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            pytest.skip(f"Directory junctions unavailable: {result.stderr}")
+    cache = ArtifactCache(root, ALGO_V1)
+    with pytest.raises(ValueError, match="redirect"):
+        cache.put(key, "chip", _patch())
+    assert cache.get(key, "chip") is None
+    assert cache.contains(key, "chip") is False
+    assert cache.delete(key, "chip") is False
+    assert not (outside / key.directory).exists()
 
 
 # --------------------------------------------------------------------------

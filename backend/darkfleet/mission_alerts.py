@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -26,7 +27,10 @@ class RuleFinding(BaseModel):
 
 def _safe_value(value: object) -> str | None:
     """Never include unreviewed signed URLs or provider metadata in an alert."""
-    if isinstance(value, str) and 0 < len(value) <= 200 and "://" not in value:
+    if (isinstance(value, str) and 0 < len(value) <= 200
+            and all(32 <= ord(ch) != 127 for ch in value)
+            and "://" not in value and "\\" not in value
+            and re.search(r"(?:^|[?&])(?:token|sig|signature|secret|password|api[_-]?key|auth(?:orization)?)=", value, re.IGNORECASE) is None):
         return value
     return None
 

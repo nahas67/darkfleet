@@ -110,6 +110,15 @@ def _db(data_dir: Path) -> sqlite3.Connection:
     db = data_dir / "investigations.sqlite3"
     if not db.is_file():
         raise UnknownInvestigation("No persisted investigation database is available.")
+    # Case titles/watchlists must come from the configured case store, never an
+    # unrelated SQLite database reached through a link or junction.
+    try:
+        confined = (not db.is_symlink() and db.stat().st_nlink <= 1
+                    and db.resolve() == data_dir.resolve() / db.name)
+    except (OSError, RuntimeError):
+        confined = False
+    if not confined:
+        raise UnknownInvestigation("Investigation database is linked outside its configured store.")
     # URI mode=ro: no SQLite schema migration, implicit DB creation, or writes.
     connection = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
     connection.row_factory = sqlite3.Row
