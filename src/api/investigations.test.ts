@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addInvestigationNote, createInvestigation, listInvestigations, removeInvestigationNote,
-  restoreInvestigationScan,
+  restoreInvestigationScan, selectRestoredInvestigationTarget,
 } from './investigations';
 import { loadScanAis, loadScanResults, loadRaster, releaseStageStream } from './client';
-import { store } from '../state/store';
+import { store, type SarTarget } from '../state/store';
 import type { InvestigationOut } from './contract';
 
 vi.mock('./client', () => ({
@@ -95,5 +95,15 @@ describe('investigation API and saved scan restoration', () => {
   it('rejects malformed list responses instead of displaying zero investigations', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ wrong_key: [] })));
     await expect(listInvestigations()).rejects.toThrow(/missing required key/);
+  });
+
+  it('rejects watchlist targets absent from an actual restored scan rather than fabricating selection', () => {
+    store.set({ scanId: 'DF-001', targets: [], selection: { kind: 'none' } });
+    expect(() => selectRestoredInvestigationTarget('DF-001', 'MISSING'))
+      .toThrow(/missing from the restored scan/);
+    expect(store.getState().selection.kind).toBe('none');
+    store.set({ targets: [{ id: 'REAL-TARGET' } as SarTarget] });
+    selectRestoredInvestigationTarget('DF-001', 'REAL-TARGET');
+    expect(store.getState().selection).toEqual({ kind: 'target', scanId: 'DF-001', targetId: 'REAL-TARGET' });
   });
 });

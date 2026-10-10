@@ -22,6 +22,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawing, setDrawing] = useState(false);
@@ -79,20 +80,30 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     setDrawing(false);
     setPendingDelete(null);
     setLoading(true);
+    setLoaded(false);
     setError(null);
     void listGeoAnnotations(props.caseId)
-      .then((result) => { if (active) setItems(result); })
+      .then((result) => { if (active) { setItems(result); setLoaded(true); } })
       .catch((cause: unknown) => { if (active) setError(explain(cause)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [props.caseId]);
 
   const run = (operation: () => Promise<void>) => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     void operation().catch((cause: unknown) => setError(explain(cause)))
       .finally(() => setBusy(false));
   };
+  const retry = () => run(async () => {
+    setLoading(true);
+    try {
+      const persisted = await listGeoAnnotations(props.caseId);
+      setItems(persisted);
+      setLoaded(true);
+    } finally { setLoading(false); }
+  });
   const reset = () => {
     setDrawing(false);
     setEditingId(null);
@@ -118,8 +129,10 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     if (!payload.label) throw new Error('Geometry label is required.');
     if (editingId) await updateGeoAnnotation(props.caseId, editingId, payload);
     else await createGeoAnnotation(props.caseId, payload);
+    setLoaded(false);
     const persisted = await listGeoAnnotations(props.caseId);
     setItems(persisted);
+    setLoaded(true);
     reset();
   });
   const edit = (item: GeoAnnotation) => {
@@ -139,7 +152,9 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
   };
   const remove = (id: string) => run(async () => {
     await deleteGeoAnnotation(props.caseId, id);
+    setLoaded(false);
     setItems(await listGeoAnnotations(props.caseId));
+    setLoaded(true);
     if (editingId === id) reset();
     setPendingDelete(null);
   });
@@ -149,13 +164,13 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       <p className="df-label text-[10px]">Geo-annotations &amp; WGS84 measurements</p>
       <p className="text-[11px] text-ink-dim">
         Operator-added geometry — NOT SAR/AIS sensor evidence.
-        {' '}{props.scanId ? `Case linked to persisted scan ${props.scanId}.` : 'Unlinked case geometry.'}
+        {' '}{props.scanId ? `Case references scan ${props.scanId}; current source availability is not established here.` : 'Unlinked case geometry.'}
         {' '}Draw by clicking the globe, or enter WGS84 longitude, latitude manually.
         Measurements are calculated from Earth coordinates on the backend, never screen pixels.
       </p>
       <label htmlFor="df-geo-kind" className="df-label text-[10px]">Shape type</label>
       <select id="df-geo-kind" data-df-geo-kind className="df-input w-full"
-        disabled={busy} value={draft.kind}
+          disabled={busy || !loaded} value={draft.kind}
         onChange={(event) => setDraft((prior) => ({
           ...prior, kind: event.target.value as GeometryKind,
         }))}>
@@ -167,13 +182,13 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       <label htmlFor="df-geo-label" className="df-label text-[10px]">Geometry label</label>
       <input id="df-geo-label" data-df-geo-label className="df-input w-full"
         placeholder="e.g. Patrol transit segment" maxLength={120}
-        disabled={busy} value={draft.label}
+        disabled={busy || !loaded} value={draft.label}
         onChange={(event) => setDraft((prior) => ({ ...prior, label: event.target.value }))} />
       <label htmlFor="df-geo-vertices" className="df-label text-[10px]">
         WGS84 vertices · longitude, latitude · one per line
       </label>
       <textarea id="df-geo-vertices" data-df-geo-vertices className="df-input w-full"
-        rows={3} maxLength={6000} spellCheck={false} disabled={busy}
+        rows={3} maxLength={6000} spellCheck={false} disabled={busy || !loaded}
         value={vertices.current} placeholder={'103.801, 1.281\n103.811, 1.292'}
         onChange={(event) => setVertices((prior) => editVertices(prior, event.target.value))} />
       <p className="text-[10px] text-ink-dim">
@@ -184,19 +199,19 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       </p>
       <div className="flex flex-wrap gap-2" role="group" aria-label="Draw geometry on globe">
         <button type="button" className="df-btn" data-df-geo-draw-toggle
-          disabled={engine.viewer === null || busy}
+          disabled={engine.viewer === null || busy || !loaded}
           aria-pressed={drawing}
           onClick={() => setDrawing((value) => !value)}>
           {drawing ? 'Stop globe drawing' : 'Draw by globe clicks'}
         </button>
         <button type="button" className="df-btn" data-df-geo-undo-point
-          disabled={busy || vertices.past.length === 0}
+          disabled={busy || !loaded || vertices.past.length === 0}
           onClick={() => setVertices(undoVertices)}>Undo vertices</button>
         <button type="button" className="df-btn" data-df-geo-redo-point
-          disabled={busy || vertices.future.length === 0}
+          disabled={busy || !loaded || vertices.future.length === 0}
           onClick={() => setVertices(redoVertices)}>Redo vertices</button>
         <button type="button" className="df-btn" data-df-geo-clear-points
-          disabled={busy || !vertices.current.trim()}
+          disabled={busy || !loaded || !vertices.current.trim()}
           onClick={() => setVertices((prior) => editVertices(prior, ''))}>Clear vertices</button>
       </div>
       {drawing ? <p className="text-[10px] text-ink" data-df-geo-drawing-status role="status">
@@ -208,27 +223,32 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
         <label htmlFor="df-geo-radius" className="df-label text-[10px]">Geodesic radius (metres)</label>
         <input id="df-geo-radius" data-df-geo-radius className="df-input w-full"
           type="number" min="1" max="2000000" step="1" value={draft.radius}
-          disabled={busy} onChange={(event) => setDraft((prior) => ({
+          disabled={busy || !loaded} onChange={(event) => setDraft((prior) => ({
             ...prior, radius: event.target.value,
           }))} />
       </> : null}
       <label htmlFor="df-geo-notes" className="df-label text-[10px]">Operator notes</label>
       <textarea id="df-geo-notes" data-df-geo-notes className="df-input w-full"
-        rows={2} maxLength={4000} value={draft.notes} disabled={busy}
+        rows={2} maxLength={4000} value={draft.notes} disabled={busy || !loaded}
         onChange={(event) => setDraft((prior) => ({ ...prior, notes: event.target.value }))} />
       <div className="flex gap-2">
         <button className="df-btn" type="button" data-df-geo-save
-          disabled={busy || !draft.label.trim() || !vertices.current.trim()} onClick={save}>
+          disabled={busy || !loaded || !draft.label.trim() || !vertices.current.trim()} onClick={save}>
           {editingId ? 'Update geometry' : 'Save geometry'}
         </button>
         {editingId ? <button className="df-btn" type="button" disabled={busy}
           data-df-geo-cancel onClick={reset}>Cancel edit</button> : null}
       </div>
-      <p className="df-label text-[10px]">Persisted geometries ({items.length})</p>
+      <p className="df-label text-[10px]">Persisted geometries {loaded ? `(${items.length})` : '(unverified)'}</p>
       {loading ? <p className="text-[11px] text-ink-dim">Loading saved geometry…</p> : null}
-      {!loading && items.length === 0 ?
+      {!loading && loaded && items.length === 0 ?
         <p className="text-[11px] text-ink-dim">No operator geometry recorded for this case.</p> : null}
-      <ul className="space-y-2" data-df-geo-list>
+      {!loading && !loaded ? <div role="alert" data-df-geo-unavailable className="text-[11px] text-fault">
+        Geometry inventory could not be verified; this is not an empty case.
+        <button type="button" className="df-btn ml-2" data-df-geo-retry
+          disabled={busy} onClick={retry}>Retry geometry list</button>
+      </div> : null}
+      {loaded ? <ul className="space-y-2" data-df-geo-list>
         {items.map((item) => <li key={item.id} className="space-y-1 border border-structural p-2"
           data-df-geo-item={item.id}>
           <p className="text-xs text-ink">{item.label} · {item.geometry.kind}</p>
@@ -260,7 +280,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
           </> : <button type="button" className="df-btn ml-2" disabled={busy}
             data-df-geo-delete onClick={() => setPendingDelete(item.id)}>Remove</button>}
         </li>)}
-      </ul>
+      </ul> : null}
       {error ? <p role="alert" className="text-[11px] text-fault"
         data-df-geo-error>{error}</p> : null}
     </section>

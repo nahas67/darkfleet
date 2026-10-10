@@ -2,7 +2,7 @@
 import { api, ContractViolation } from './errors';
 import { loadScanAis, loadScanResults, loadRaster, releaseStageStream } from './client';
 import { contractValidator } from './validateGenerated';
-import { store, type BBox } from '../state/store';
+import { store, toBBox } from '../state/store';
 import type {
   AnnotationCreate,
   AnnotationOut,
@@ -89,11 +89,7 @@ export async function restoreInvestigationScan(investigation: InvestigationOut):
     throw new Error('This investigation has no persisted REAL scan available to restore.');
   }
   releaseStageStream();
-  const extent = investigation.aoi;
-  const aoi: BBox | null =
-    Array.isArray(extent) && extent.length === 4 && extent.every(Number.isFinite)
-      ? [extent[0], extent[1], extent[2], extent[3]]
-      : null;
+  const aoi = toBBox(investigation.aoi);
   store.set({
     scanId,
     scanStage: 'COMPLETE',
@@ -108,4 +104,13 @@ export async function restoreInvestigationScan(investigation: InvestigationOut):
     aoiText: aoi ? aoi.map((n) => n.toFixed(5)).join(', ') : '',
   });
   await Promise.all([loadScanResults(scanId), loadScanAis(scanId), loadRaster(scanId, 'raw')]);
+}
+
+/** A watchlist reference cannot itself prove a target survived the persisted reload. */
+export function selectRestoredInvestigationTarget(scanId: string, targetId: string): void {
+  const current = store.getState();
+  if (current.scanId !== scanId || !current.targets.some((target) => target.id === targetId)) {
+    throw new Error('Watched target is missing from the restored scan; no target was selected.');
+  }
+  store.select({ kind: 'target', scanId, targetId });
 }

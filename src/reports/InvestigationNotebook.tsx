@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   addInvestigationNote, addInvestigationWatch, createInvestigation, listInvestigations,
   removeInvestigation, removeInvestigationNote, removeInvestigationWatch,
-  restoreInvestigationScan,
+  restoreInvestigationScan, selectRestoredInvestigationTarget,
 } from '../api/investigations';
 import type { InvestigationOut } from '../api/contract';
 import { explain } from '../api/errors';
@@ -20,6 +20,7 @@ export function InvestigationNotebook() {
   const [scoped, setScoped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [verifiedList, setVerifiedList] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -29,10 +30,11 @@ export function InvestigationNotebook() {
       .then((items) => {
         if (!active) return;
         setCases(items);
+        setVerifiedList(true);
         setSelectedId((prior) =>
           prior && items.some((item) => item.id === prior) ? prior : (items[0]?.id ?? null));
       })
-      .catch((cause: unknown) => { if (active) setError(explain(cause)); })
+      .catch((cause: unknown) => { if (active) { setVerifiedList(false); setError(explain(cause)); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -49,7 +51,10 @@ export function InvestigationNotebook() {
     ? state.scanId : null;
 
   const refresh = async (preferredId?: string | null) => {
-    const items = await listInvestigations();
+    let items: InvestigationOut[];
+    try { items = await listInvestigations(); }
+    catch (cause) { setVerifiedList(false); throw cause; }
+    setVerifiedList(true);
     setCases(items);
     setSelectedId((prior) => {
       const requested = preferredId === undefined ? prior : preferredId;
@@ -87,7 +92,7 @@ export function InvestigationNotebook() {
   const inspect = (caseRecord: InvestigationOut, watchedTarget?: string) => void run(async () => {
     await restoreInvestigationScan(caseRecord);
     if (watchedTarget && caseRecord.scan_id) {
-      store.select({ kind: 'target', targetId: watchedTarget, scanId: caseRecord.scan_id });
+      selectRestoredInvestigationTarget(caseRecord.scan_id, watchedTarget);
       store.set({ workspace: 'INTELLIGENCE' });
     } else {
       store.set({ workspace: 'TASKING' });
@@ -103,11 +108,11 @@ export function InvestigationNotebook() {
           placeholder="Investigation title" onChange={(event) => setTitle(event.target.value)} />
         <p className="df-num mt-1 text-[10px] text-ink-dim">
           {linkableScan
-            ? `Links to verified persisted scan ${linkableScan}.`
+            ? `Requests link to completed scan ${linkableScan}; server verifies persisted REAL evidence.`
             : 'No completed scan selected. Creates an unlinked case for general notes.'}
         </p>
         <button type="button" data-df-investigation-create
-          className="df-btn mt-2 w-full justify-center" disabled={busy || !title.trim()}
+          className="df-btn mt-2 w-full justify-center" disabled={busy || loading || !verifiedList || !title.trim()}
           onClick={create}>Create investigation</button>
       </div>
 
@@ -116,7 +121,7 @@ export function InvestigationNotebook() {
           Saved investigations
         </label>
         <select className="df-input w-full" id="df-investigation-select"
-          data-df-investigation-select disabled={busy || cases.length === 0}
+          data-df-investigation-select disabled={busy || loading || !verifiedList || cases.length === 0}
           value={selectedId ?? ''}
           onChange={(event) => {
             setSelectedId(event.target.value);
@@ -124,13 +129,20 @@ export function InvestigationNotebook() {
             setNote('');
             setScoped(false);
           }}>
-          {cases.length === 0 ? <option value="">No saved investigations</option> : null}
+          {cases.length === 0 ? <option value="">{verifiedList ? 'No saved investigations' : 'Investigation list unverified'}</option> : null}
           {cases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
         </select>
         {loading ? <p className="text-[11px] text-ink-dim">Loading saved investigations…</p> : null}
+        {!loading && !verifiedList ? <div role="alert" data-df-investigation-list-unavailable className="text-[11px] text-fault">
+          Saved investigations could not be verified. This is not proof the case library is empty.
+          <button type="button" className="df-btn ml-2" disabled={busy}
+            data-df-investigation-list-retry onClick={() => void run(() => refresh())}>
+            Retry cases
+          </button>
+        </div> : null}
       </div>
 
-      {selected ? <div className="space-y-3" data-df-investigation-detail={selected.id}>
+      {selected && verifiedList ? <div className="space-y-3" data-df-investigation-detail={selected.id}>
         <p className="df-num text-[10px] text-ink-dim">
           Created {fmtInstant(selected.created_at)} · Scan {selected.scan_id ?? 'NOT LINKED'}
         </p>

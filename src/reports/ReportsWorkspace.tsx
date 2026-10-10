@@ -9,6 +9,9 @@
  * 400s is worse than no link.
  */
 
+import { useEffect, useState } from 'react';
+import type { ScanStateResponse } from '../api/contract';
+import { api } from '../api/errors';
 import { useStore } from '../state/store';
 import { NOT_ESTABLISHED } from '../design/format';
 import { InvestigationNotebook } from './InvestigationNotebook';
@@ -21,9 +24,46 @@ const FORMATS = [
   { id: 'pdf', label: 'PDF evidence', note: 'rendered server-side' },
 ] as const;
 
+/** Export readiness is about a verified persisted source, not a visible scan ID. */
+export function isExportableScan(value: ScanStateResponse): boolean {
+  return value.record_persisted === true && value.runtime_mode === 'REAL' &&
+    value.synthetic === false && value.stage === 'COMPLETE';
+}
+
 export function ReportsWorkspace() {
   const state = useStore();
   const scanId = state.scanId;
+  const [exportState, setExportState] = useState<{
+    scanId: string; status: 'loading' | 'ready' | 'unavailable'; detail: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!scanId) return;
+    if (state.scanStage !== 'COMPLETE') {
+      setExportState({ scanId, status: 'unavailable',
+        detail: state.scanStage === 'FAILED'
+          ? 'This scan failed and has no completed evidence export.'
+          : 'This scan has not completed. Exports require a persisted scan record.' });
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setExportState({ scanId, status: 'loading', detail: 'Checking persisted scan evidence…' });
+    void api.get<ScanStateResponse>(`/api/scans/${encodeURIComponent(scanId)}`, controller.signal)
+      .then((record) => {
+        if (!active) return;
+        setExportState(isExportableScan(record)
+          ? { scanId, status: 'ready', detail: '' }
+          : { scanId, status: 'unavailable',
+            detail: 'This scan has no verified, completed REAL record available for export.' });
+      })
+      .catch(() => {
+        if (active) setExportState({ scanId, status: 'unavailable',
+          detail: 'Export availability could not be checked. No report download has been verified.' });
+      });
+    return () => { active = false; controller.abort(); };
+  }, [scanId, state.scanStage]);
+  const ready = scanId !== null && exportState?.scanId === scanId && exportState.status === 'ready';
 
   return (
     <section className="df-panel df-scroll h-full overflow-y-auto" data-df-workspace="REPORTS">
@@ -39,14 +79,15 @@ export function ReportsWorkspace() {
               Exports appear once a scan exists. Nothing is exported from an analysis that
               has not run.
             </p>
-          ) : (
+          ) : ready ? (
             <ul className="space-y-1">
               {FORMATS.map((format) => (
                 <li key={format.id}>
                   <a
                     className="df-btn w-full justify-between normal-case tracking-normal"
-                    href={`/api/scans/${scanId}/export/${format.id}`}
+                    href={`/api/scans/${encodeURIComponent(scanId)}/export/${format.id}`}
                     data-df-export={format.id}
+                    download={`${scanId}.${format.id}`}
                   >
                     <span>{format.label}</span>
                     <span className="df-num text-[10px] text-ink-dim">{format.note}</span>
@@ -54,6 +95,11 @@ export function ReportsWorkspace() {
                 </li>
               ))}
             </ul>
+          ) : (
+            <p className="text-[11px] text-ink-dim" role="status" data-df-report-export-unavailable>
+              {exportState?.scanId === scanId ? exportState.detail : 'Checking persisted scan evidence…'}
+              {' '}Download links are disabled until the source is verified.
+            </p>
           )}
         </div>
 

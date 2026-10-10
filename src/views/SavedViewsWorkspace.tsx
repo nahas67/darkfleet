@@ -19,7 +19,9 @@ export function SavedViewsWorkspace() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const active = views.find((item) => item.id === chosen) ?? null;
 
-  const reload = useCallback(async () => {
+  // A failed post-mutation list read must not be mistaken for confirmation that
+  // the operator's library is current. Return the result to mutation handlers.
+  const reload = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
       const records = await listSavedViews();
@@ -27,8 +29,10 @@ export function SavedViewsWorkspace() {
       setChosen((previous) => previous && records.some((item) => item.id === previous)
         ? previous : records[0]?.id ?? null);
       setError(null);
+      return true;
     } catch (cause) {
       setError(explain(cause));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -78,26 +82,32 @@ export function SavedViewsWorkspace() {
           />
           <div className="flex flex-wrap gap-2">
             <button data-df-view-save className="df-btn" type="button"
-              disabled={!validName || working}
+              disabled={!validName || working || loading}
               onClick={() => void run(async () => {
                 const saved = await createSavedView({ title: name.trim(), snapshot: captureSnapshot() });
-                await reload();
+                const refreshed = await reload();
                 setChosen(saved.id);
                 setName(saved.title);
-                setSuccess(`Saved view "${saved.title}".`);
+                if (!refreshed) {
+                  setViews((prior) => [saved, ...prior.filter((item) => item.id !== saved.id)]);
+                  setWarnings(['Server created this view, but library refresh failed. Refresh to reconcile saved records.']);
+                } else setSuccess(`Saved view "${saved.title}".`);
               })}>
               SAVE NEW
             </button>
             <button data-df-view-update className="df-btn" type="button"
-              disabled={!active || !validName || working}
+              disabled={!active || active.status !== 'OK' || !validName || working || loading}
               onClick={() => void run(async () => {
                 if (!active) return;
                 const updated = await replaceSavedView(active.id, {
                   title: name.trim(), expected_revision: active.revision, snapshot: captureSnapshot(),
                 });
-                await reload();
+                const refreshed = await reload();
                 setChosen(updated.id);
-                setSuccess(`Updated view "${updated.title}" (revision ${updated.revision}).`);
+                if (!refreshed) {
+                  setViews((prior) => prior.map((item) => item.id === updated.id ? updated : item));
+                  setWarnings(['Server updated this view, but library refresh failed. Refresh to reconcile revisions.']);
+                } else setSuccess(`Updated view "${updated.title}" (revision ${updated.revision}).`);
               })}>
               UPDATE SELECTED
             </button>
@@ -191,7 +201,13 @@ export function SavedViewsWorkspace() {
                       onClick={() => void run(async () => {
                         await deleteSavedView(active.id);
                         setConfirmDelete(false);
-                        await reload();
+                        const refreshed = await reload();
+                        if (!refreshed) {
+                          setViews((prior) => prior.filter((item) => item.id !== active.id));
+                          setChosen(null);
+                          setWarnings(['Server deleted this view, but library refresh failed. Refresh to reconcile remaining records.']);
+                          return;
+                        }
                         setName('');
                         setSuccess('Saved view deleted. Source observations remain intact.');
                       })}>CONFIRM DELETE</button>
