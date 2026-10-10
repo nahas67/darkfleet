@@ -422,8 +422,9 @@ def analyze_case(
                             scan_id or "", scan_ref or "", f"{root}.aisConf",
                             "Algorithmic association score, not proof of AIS reception or identity.",
                         )
-                # Real persisted scan targets serialize the canonical API field as
-                # `classification`; older scan fixtures retain `cls`. Never cite a
+                # RunStore records use `cls`, while HTTP target responses serialize
+                # this as `classification`. Future saved records may use either;
+                # never cite a
                 # field that is absent, silently drop SEA_CLUTTER, or choose between
                 # contradictory stored classifications.
                 has_canonical = "classification" in item

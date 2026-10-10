@@ -113,8 +113,8 @@ def test_grounded_sar_ais_claims_cite_precise_stored_paths_and_restart(tmp_path:
     assert path.read_bytes() == before_scan
 
 
-def test_real_serialized_target_processing_class_is_cited_without_fabrication(tmp_path: Path):
-    """The production scan stores `classification`, not the fixture's `cls`."""
+def test_real_persisted_class_and_public_alias_are_cited_without_fabrication(tmp_path: Path):
+    """Persisted runs use `cls`; API responses serialize it as `classification`."""
     from darkfleet.analyst import _CLASSIFICATIONS
 
     assert _CLASSIFICATIONS == frozenset(CLASSIFICATION_VALUES)
@@ -122,8 +122,7 @@ def test_real_serialized_target_processing_class_is_cited_without_fabrication(tm
     store = run_store_for_data_dir(tmp_path)
     record = store.get("REAL-001")
     assert record is not None
-    record["targets"][0].pop("cls")
-    record["targets"][0]["classification"] = "SEA_CLUTTER"
+    record["targets"][0]["cls"] = "SEA_CLUTTER"
     store.save(record)
     with TestClient(_app(tmp_path)) as client:
         cid = _case(client)
@@ -131,13 +130,20 @@ def test_real_serialized_target_processing_class_is_cited_without_fabrication(tm
         assert result["source_status"] == "PERSISTED_REAL"
         source_claim = next(
             c for c in result["claims"]
-            if c["sources"][0]["field_path"] == "$.targets[0].classification"
+            if c["sources"][0]["field_path"] == "$.targets[0].cls"
         )
         assert source_claim["value"] == "SEA_CLUTTER"
         assert source_claim["classification"] == "SENSOR_RECORD"
         assert not any(u["code"] == "CLASSIFICATION_NOT_ESTABLISHED"
                        for u in result["unknowns"])
-        # A second incompatible class in a legacy field is genuinely ambiguous.
+        # A newer stored serialization is supported without mis-citing the old path.
+        record["targets"][0].pop("cls")
+        record["targets"][0]["classification"] = "SEA_CLUTTER"
+        store.save(record)
+        future = _run(client, cid, intent="SAR_AIS", target_id="DF-001").json()
+        assert any(c["sources"][0]["field_path"] == "$.targets[0].classification" and
+                   c["value"] == "SEA_CLUTTER" for c in future["claims"])
+        # Two incompatible stored class fields are genuinely ambiguous.
         record["targets"][0]["cls"] = "SAR_UNMATCHED"
         store.save(record)
         conflicting = _run(client, cid, intent="SAR_AIS", target_id="DF-001").json()

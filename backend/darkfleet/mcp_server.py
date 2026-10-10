@@ -33,7 +33,9 @@ _PROVENANCE_FIELDS = (
     "algorithm_version", "acquisition_time", "provider", "product",
 )
 _TARGET_FIELDS = (
-    "id", "cls", "lat", "lon", "sarConf", "aisConf", "area", "lenM", "widM",
+    # RunStore persists `cls`; the HTTP API serializes the Pydantic alias
+    # `classification`. Keep both source spellings for future migrations.
+    "id", "classification", "cls", "lat", "lon", "sarConf", "aisConf", "area", "lenM", "widM",
     "lenUncM", "hdg", "wake", "meanDb", "maxDb", "geo_pixel_centroid",
     "geo_centre_offset", "geolocationUncertaintyM",
 )
@@ -103,6 +105,12 @@ def _instant(raw: str, label: str) -> datetime:
 
 def _target_result(target: dict[str, Any]) -> dict[str, Any]:
     result = _selected(target, _TARGET_FIELDS)
+    # A corrupted/mixed-version record can carry contradictory keys. Never
+    # quietly choose one as authoritative, or emit two apparent conclusions.
+    if "classification" in result and "cls" in result and result["classification"] != result["cls"]:
+        result.pop("classification")
+        result.pop("cls")
+        result["classification_status"] = "INCONSISTENT_STORED_SOURCE_FIELDS"
     corr = target.get("corr")
     if not isinstance(corr, dict):
         result["correlation"] = None

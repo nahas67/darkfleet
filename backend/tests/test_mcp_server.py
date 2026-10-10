@@ -104,6 +104,32 @@ def test_reader_provenance_missingness_and_output_limits(tmp_path: Path) -> None
     assert {p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file()} == existing_files
 
 
+def test_mcp_preserves_real_serialized_processing_class_and_refuses_conflicts(tmp_path: Path) -> None:
+    """RunStore uses `cls` and the API maps it to `classification`."""
+    _seed(tmp_path)
+    store = run_store_for_data_dir(tmp_path)
+    record = store.get("DF-EVIDENCE-001")
+    assert record is not None
+    record["targets"][0]["cls"] = "SEA_CLUTTER"
+    store.save(record)
+    reader = EvidenceReader(tmp_path)
+    actual = reader.get_target_evidence("DF-EVIDENCE-001", "DF-001")
+    assert actual["target"]["cls"] == "SEA_CLUTTER"
+    assert "classification" not in actual["target"]
+    record["targets"][0].pop("cls")
+    record["targets"][0]["classification"] = "SEA_CLUTTER"
+    store.save(record)
+    actual = reader.get_target_evidence("DF-EVIDENCE-001", "DF-001")
+    assert actual["target"]["classification"] == "SEA_CLUTTER"
+    assert "cls" not in actual["target"]
+    assert reader.list_scan_targets("DF-EVIDENCE-001")["targets"][0]["classification"] == "SEA_CLUTTER"
+    record["targets"][0]["cls"] = "SAR_UNMATCHED"
+    store.save(record)
+    ambiguous = reader.get_target_evidence("DF-EVIDENCE-001", "DF-001")
+    assert ambiguous["target"]["classification_status"] == "INCONSISTENT_STORED_SOURCE_FIELDS"
+    assert "classification" not in ambiguous["target"] and "cls" not in ambiguous["target"]
+
+
 def test_scan_guard_and_invalid_inputs(tmp_path: Path) -> None:
     _seed(tmp_path)
     store = run_store_for_data_dir(tmp_path)

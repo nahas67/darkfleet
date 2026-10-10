@@ -477,3 +477,112 @@ genuine SAR scene or live AIS observation was acquired in this continuation**.
   licensed optional data sources verified until their independent gates pass.
   Actual GPU/frame-time, picking, resource lifecycle and real sensor acceptance
   evidence are required separately. **No push or deployment performed.**
+
+## 2026-10-10 — Actual SAR acquisition, real WebGL and source-backed local context
+
+**This is an additive later checkpoint to the interim no-scan/no-GPU states
+above.** The earlier results describe the installation *at their timestamps*,
+not the results of the final real-data experiments.
+
+### REAL Sentinel-1 two-pass acceptance — DF-X10 / DF-X11
+
+- Real Planetary Computer Sentinel-1 RTC VV acquisitions over bounded
+  Singapore AOI `[103.82, 1.24, 103.84, 1.26]`: `DF-0001` on 2026-09-27
+  and `DF-0002` on 2026-09-16, independently pinned and confirmed
+  `synthetic=false`, `COMPLETE` in **7.303/6.901 s** respectively. Real pixels,
+  georeferencing, speckle/CFAR, masks and source identifiers persisted.
+- Each native RTC raster 223×221, EPSG:32648, 10 m, 49,283 finite pixels.
+  Scan #1 recorded one weak `SEA_CLUTTER` target `DF-001`, confidence 0.44
+  at longitude 103.82656510323231 / latitude 1.2564822786737102. Scan #2
+  recorded zero CFAR components at chosen settings. AIS archive absent,
+  **NO AIS identity or AIS silence established**. Wake undetected and
+  genuine single-pol VV, no fabricated VH.
+- Two-scene `POST /api/sar/imagery/pair` returned READY from independent
+  checksum-verified RTC caches, even after complete backend restart.
+  `POST /api/sar/compare` returned MEASURED for exactly the same 49,283
+  pixel positions on EPSG32648 affine `[10,0,368710,0,-10,139300]`;
+  B−A mean **−0.029097969 dB**, absolute mean **3.756544689 dB**, RMS
+  **5.042406723 dB** and acquisition interval **252.623499 h**. B was the
+  older scene. No subpixel co-registration or vessel-change inference.
+- Actual interactive Chrome DARKFLEET Advanced→SAR imagery displayed the
+  two real scan selectors, READY state and **two fully loaded 223×221** source
+  PNG images after click. First pane zoom changed from 1× to 1.5×; second
+  remained at 1×, proving independent navigation. Raw source and browser
+  details in `docs/REAL_SAR_TWO_PASS_VALIDATION_2026-10-10.md`.
+
+### Actual source-linked investigation, evidence analyst and MCP
+
+- Created real-source-linked persisted case
+  `11b284a1-bdc3-4a85-bfdc-bdaa325e99cf` for `DF-0001`, plus explicitly
+  operator-authored annotation and review watchlist for `DF-001`. Reloaded
+  browser Reports UI displays these independently from measured SAR values.
+- Case source-honest JSON `PERSISTED_REAL` includes real sensor metadata and
+  separates the operator material. JSON and PDF served after normal server
+  restart; real-case PDF HTTP **200**, 7,306 bytes. No fabricated AIS match.
+- Analyst had a real defect: its five-class allowlist rejected `SEA_CLUTTER`
+  even though the actual RunStore had it at `$.targets[0].cls` (public target
+  API serializes Pydantic alias `classification`). `a377d52` expanded to
+  seven canonical classes and source-field-aware citations. It now supplies
+  **7 cited claims / 2 honest unknowns**. Follow-up tests also guard a
+  hypothetical migrated `classification`-only record and contradictory
+  field pairs. The MCP evidence reader now accepts either recorded key and
+  refuses contradictory ones without inventing a class. Focused analyst/MCP
+  post-refinement tests **12/12 passed**, Ruff clean. Direct MCP reader used
+  real stored scans and coastline; the separate production-data **stdio MCP
+  handshake** was attempted but hung and was cancelled, so this specific
+  workflow remains UNVERIFIED (independent fixture stdio integration passes).
+
+### Actual hardware AIS renderer — DF-X9.8 H7/H8
+
+- Commits `ef664ff` and `a00b821` preserve primitive ownership, optimize
+  dense-label arbitration and install a reproducible fail-closed Chrome GPU
+  runner. Real Chrome 154 WebGL2 reported **AMD Radeon Graphics / ANGLE
+  Direct3D11** hardware (not SwiftShader). 91 actual Cesium postRender
+  events per stage yielded contact counts 500/1K/2.5K/5K/10K with median
+  derived FPS **40.49 / 40.32 / 38.31 / 35.34 / 30.77**; 10K p50/p95
+  **32.5/37.1 ms**, 120 shown labels. These are callback wall intervals,
+  **not GPU draw timings**.
+- Verified topmost visible 10K AIS pick identity in **10/10** attempts,
+  median/p95 2.9/4.3 ms, selection update 43 ms. Another non-topmost contact
+  was occluded, correctly documented. Real 25 Cesium renderer lifetime cycles
+  maintained owned primitive count 5→0→5; one GC-controlled cleared JS heap
+  changed 121,669,344→112,478,428 B. 25 forced basemap fallback and manual
+  reselections retained one imagery layer. **VRAM, context-loss recovery,
+  automatic source recovery and real operational playback/FOLLOW lifetime
+  are NOT VERIFIED**. Raw signed-by-source-hashes browser JSON saved in
+  `docs/DF_X9_8_H7_H8_CHROME_HARDWARE_EVIDENCE_2026-10-10.json`.
+
+### Genuine Natural Earth offline reference — DF-X14
+
+- Public-domain Natural Earth 1:10m coastline GeoJSON was downloaded over
+  standard TLS from its upstream source, **10,110,735 bytes** and source
+  SHA256 `6f75ae0e0de157b14946e2255eb1f5486d9a13819032e26d4610852d296788f6`.
+  Offline importer `4bece16` validated and installed **4,133 genuine
+  LineString components / 410,957 WGS84 vertices** into source-versioned
+  local prepared storage with SHA256
+  `32866e314ca2450e8c7204281113230751ef2f0696cd1b918e9ce202fb764738`.
+  The origin and transformations are documented in
+  `docs/REAL_NATURAL_EARTH_LOCAL_INSTALL_2026-10-10.md`.
+- Publisher checksum for this **prepared** data was not independently
+  authenticated: `install_status=CHECKSUM_UNRECORDED`, `usable=true`,
+  `publisher_verified=false`, NOT a falsely verified READY state.
+- Genuine `DF-0001/DF-001` now reports approximate coastline distance
+  **867.6 m**, `DENSIFIED_POINT_METER` with 5,000 m densification spacing;
+  version/provenance trace back to Natural Earth. After backend restart
+  this context and real scan remained valid, while EEZ/ports/GEBCO remained
+  expressly NOT_INSTALLED. Not a navigation-grade sounding/boundary.
+
+### Validation and remaining acceptance
+
+- Full backend rerun after final MCP/analyst source-field refinements:
+  backend **1,222 passed, 11 skipped, 4 deselected, 0 failed** (4 expected
+  warnings); TypeScript
+  checked, frontend Vitest **834/834 passed** in 60 files, production Vite
+  built (904.51 KB JS chunk advisory), Ruff green and schema/route checks
+  previously current (34/35 product-reachable, one redundant default raster).
+  Focused final analyst/MCP 12/12 green. Full Python rerun complete.
+- AIS archive NOT_CONFIGURED; true SAR↔AIS match E2E and alert coverage cannot
+  be proven. EEZ/high seas, port, bathymetry, anchorages require authentic
+  legally obtainable data. Model-backed analysis absent; deterministic offline
+  cited fallback is running. Wake still EXPERIMENTAL — NOT CALIBRATED and
+  subpixel SAR co-registration not established. No GitHub push or deployment.
