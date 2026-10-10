@@ -264,6 +264,31 @@ export interface SceneCompareRequest {
   readonly second_scan_id: string;
 }
 
+export interface AnalystCaseListOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly cases: AnalystCaseBrief[];
+  readonly total: number;
+  readonly note?: string;
+}
+
+export interface GroundedAnalystOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly kind?: "DARKFLEET_GROUNDED_ANALYST";
+  readonly case_id: string;
+  readonly case_title: string;
+  readonly linked_scan_id: string | null;
+  readonly source_status: "PERSISTED_REAL" | "NO_SCAN_LINKED" | "SOURCE_MISSING" | "SOURCE_UNVERIFIED";
+  readonly intent: "SUMMARY" | "WATCHLIST" | "SAR_AIS" | "GAPS";
+  readonly focused_target_id: string | null;
+  readonly model_status?: "NO_MODEL_DETERMINISTIC_OFFLINE";
+  readonly claims: AnalystClaim[];
+  readonly unknowns: AnalystUnknown[];
+  readonly operator_note_count: number;
+  readonly operator_watch_count: number;
+  readonly source_canonical_sha256: string | null;
+  readonly disclaimer?: string;
+}
+
 export interface MissionListOut {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly missions: MissionOut[];
@@ -813,6 +838,12 @@ export interface DatasetHealthResponse {
   readonly verified_count: number;
 }
 
+export interface AnalystRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly intent?: "SUMMARY" | "WATCHLIST" | "SAR_AIS" | "GAPS";
+  readonly target_id?: string | null;
+}
+
 export interface AnnotationCreate {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly content: string;
@@ -1052,6 +1083,33 @@ export interface SceneIdentity {
   readonly raster_shape: number[] | null;
   readonly processing_version: string | null;
   readonly source?: "PERSISTED_REAL_SCAN_CALIBRATED_CACHE";
+}
+
+export interface AnalystCaseBrief {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly case_id: string;
+  readonly title: string;
+  readonly linked_scan_id: string | null;
+  readonly created_at: string;
+}
+
+export interface AnalystClaim {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly statement: string;
+  readonly value: string | number | boolean;
+  readonly classification: "SENSOR_RECORD" | "OPERATOR_RECORD";
+  readonly uncertainty: string;
+  readonly sources: AnalystSource[];
+}
+
+export interface AnalystUnknown {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly code: string;
+  readonly explanation: string;
+  readonly source_id: string | null;
+  readonly expected_field_path: string | null;
+  readonly next_check: string;
 }
 
 export interface RejectedCandidate {
@@ -1298,6 +1356,14 @@ export interface TargetChoice {
   readonly target_id: string;
 }
 
+export interface AnalystSource {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly kind: "PERSISTED_REAL_SCAN" | "OPERATOR_CASE" | "OPERATOR_WATCHLIST";
+  readonly source_id: string;
+  readonly record_path: string;
+  readonly field_path: string;
+}
+
 export interface ScanConfigRecord {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly config_hash: string;
@@ -1498,6 +1564,7 @@ export interface VerticalDatumContext {
  * not maintained by hand, so a new route's body is emitted automatically.
  */
 export type ContractRequestSchemaName =
+  | 'AnalystRequest'
   | 'AnnotationCreate'
   | 'GeometryCreate'
   | 'InvestigationCreate'
@@ -1541,6 +1608,8 @@ export type ContractSchemaName =
   | 'SceneCandidatesOut'
   | 'SceneComparisonOut'
   | 'SceneCompareRequest'
+  | 'AnalystCaseListOut'
+  | 'GroundedAnalystOut'
   | 'MissionListOut'
   | 'MissionBody'
   | 'MissionReplace'
@@ -1585,6 +1654,7 @@ export type ContractSchemaName =
   | 'ZoneGeometryResponse'
   | 'DatasetHealthEntry'
   | 'DatasetHealthResponse'
+  | 'AnalystRequest'
   | 'AnnotationCreate'
   | 'InvestigationCreate'
   | 'ProbeRequest'
@@ -1607,6 +1677,9 @@ export type ContractSchemaName =
   | 'SceneCandidateOut'
   | 'ComparisonMetrics'
   | 'SceneIdentity'
+  | 'AnalystCaseBrief'
+  | 'AnalystClaim'
+  | 'AnalystUnknown'
   | 'RejectedCandidate'
   | 'PolarizationEvidence'
   | 'WakeEvidence'
@@ -1635,6 +1708,7 @@ export type ContractSchemaName =
   | 'ContactChoice'
   | 'LayerChoice'
   | 'TargetChoice'
+  | 'AnalystSource'
   | 'ScanConfigRecord'
   | 'ScanDebugBlock'
   | 'PredictedPosition'
@@ -2032,6 +2106,41 @@ export const SCENECOMPARISONOUT_FIELDS = [
 export const SCENECOMPAREREQUEST_FIELDS = [
   'first_scan_id',
   'second_scan_id',
+] as const;
+
+/**
+ * Property names of {@link AnalystCaseListOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTCASELISTOUT_FIELDS = [
+  'cases',
+  'total',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link GroundedAnalystOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GROUNDEDANALYSTOUT_FIELDS = [
+  'kind',
+  'case_id',
+  'case_title',
+  'linked_scan_id',
+  'source_status',
+  'intent',
+  'focused_target_id',
+  'model_status',
+  'claims',
+  'unknowns',
+  'operator_note_count',
+  'operator_watch_count',
+  'source_canonical_sha256',
+  'disclaimer',
 ] as const;
 
 /**
@@ -2795,6 +2904,17 @@ export const DATASETHEALTHRESPONSE_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link AnalystRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTREQUEST_FIELDS = [
+  'intent',
+  'target_id',
+] as const;
+
+/**
  * Property names of {@link AnnotationCreate} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -3138,6 +3258,48 @@ export const SCENEIDENTITY_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link AnalystCaseBrief} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTCASEBRIEF_FIELDS = [
+  'case_id',
+  'title',
+  'linked_scan_id',
+  'created_at',
+] as const;
+
+/**
+ * Property names of {@link AnalystClaim} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTCLAIM_FIELDS = [
+  'id',
+  'statement',
+  'value',
+  'classification',
+  'uncertainty',
+  'sources',
+] as const;
+
+/**
+ * Property names of {@link AnalystUnknown} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTUNKNOWN_FIELDS = [
+  'code',
+  'explanation',
+  'source_id',
+  'expected_field_path',
+  'next_check',
+] as const;
+
+/**
  * Property names of {@link RejectedCandidate} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -3449,6 +3611,19 @@ export const LAYERCHOICE_FIELDS = [
 export const TARGETCHOICE_FIELDS = [
   'scan_id',
   'target_id',
+] as const;
+
+/**
+ * Property names of {@link AnalystSource} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANALYSTSOURCE_FIELDS = [
+  'kind',
+  'source_id',
+  'record_path',
+  'field_path',
 ] as const;
 
 /**

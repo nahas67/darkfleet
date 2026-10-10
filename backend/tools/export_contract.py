@@ -96,6 +96,10 @@ SCHEMAS: tuple[str, ...] = (
     "SceneCandidatesOut",
     "SceneComparisonOut",
     "SceneCompareRequest",
+    # Read-only persisted investigation analyst; source paths and unknowns
+    # remain server-authoritative rather than a frontend-only mirror.
+    "AnalystCaseListOut",
+    "GroundedAnalystOut",
     "MissionListOut",
     "MissionBody",
     "MissionReplace",

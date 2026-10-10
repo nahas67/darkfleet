@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from darkfleet import __version__
+from darkfleet.api.analyst_routes import router as analyst_router
 from darkfleet.api.investigations import router as investigations_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.missions import router as missions_router
@@ -87,6 +88,7 @@ def create_app(
     application.include_router(investigations_router)
     application.include_router(missions_router)
     application.include_router(reports_router)
+    application.include_router(analyst_router)
     application.include_router(sar_compare_router)
     application.include_router(saved_views_router)
     # Maritime context lives on its own router: the spatial surface will grow, and
