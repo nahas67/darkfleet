@@ -24,8 +24,9 @@
  *     because it is not JavaScript.
  *
  * The bundle digest CANNOT be a meta tag: a file cannot contain the hash of itself. So it is
- * emitted as `build-manifest.json` after the bundle is written, hashed over every emitted file
- * EXCEPT the manifest. That is what lets browser evidence name exactly what it measured.
+ * emitted as `build-manifest.json` after ALL plugin asset-copy operations, hashed over every
+ * physical emitted file EXCEPT the manifest (including Cesium's copied Workers/Assets tree).
+ * That is what lets browser evidence name exactly what it measured.
  *
  * No secret is exposed. A commit SHA, a timestamp and a content digest are public facts about a
  * public repository; nothing here reads the environment, the network, or the filesystem beyond
@@ -115,6 +116,25 @@ export function darkfleetBuildIdentity(options: { rootDir: string; strict?: bool
   const { rootDir, strict = false } = options;
   let identity: BuildIdentity | null = null;
   let resolvedMode = 'production';
+  let resolvedOutDir = path.join(rootDir, 'dist');
+
+  function allEmittedFiles(directory: string): string[] {
+    const files: string[] = [];
+    function walk(current: string, prefix: string): void {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const absolute = path.join(current, entry.name);
+        // Do not follow copied links out of dist or attest to bytes we did not emit.
+        if (entry.isSymbolicLink()) throw new Error(`Refusing symlink in emitted build: ${relative}`);
+        if (entry.isDirectory()) walk(absolute, relative);
+        else if (entry.isFile()) {
+          if (relative !== 'build-manifest.json') files.push(relative);
+        } else throw new Error(`Unsupported emitted filesystem entry: ${relative}`);
+      }
+    }
+    walk(directory, '');
+    return files.sort();
+  }
 
   return {
     name: 'darkfleet-build-identity',
@@ -125,6 +145,11 @@ export function darkfleetBuildIdentity(options: { rootDir: string; strict?: bool
       // targets. NODE_ENV may be inherited as `development` even for `vite
       // build`, so reading it gave a real production bundle a false identity.
       resolvedMode = config.mode;
+      // The production Vite config supplies both; unit tests also invoke the
+      // resolved-mode hook with a deliberately minimal test configuration.
+      if (config.root && config.build?.outDir) {
+        resolvedOutDir = path.resolve(config.root, config.build.outDir);
+      }
     },
 
     buildStart() {
@@ -163,22 +188,23 @@ export function darkfleetBuildIdentity(options: { rootDir: string; strict?: bool
     },
 
     /*
-     * `writeBundle` runs after every file is on disk, which is the only moment the bundle can be
-     * hashed. The manifest covers every emitted file EXCEPT itself -- a file cannot contain its
-     * own digest -- and the file list is sorted so the digest is stable across machines.
+     * The Cesium plugin copies Assets/Workers/Widgets in closeBundle, AFTER the
+     * Rollup writeBundle inventory is frozen. Our plugin is registered after
+     * Cesium in vite.config.ts, so its closeBundle executes after that copy.
+     * Hash the actual final physical dist tree, not Object.keys(bundle).
+     * Omitting any copied asset would make a correct digest certify an incomplete
+     * release; the verifier independently checks this exact tree coverage.
      */
-    async writeBundle(options, bundle) {
+    async closeBundle() {
       if (identity === null) identity = readBuildIdentity(rootDir, resolvedMode);
-
-      const outDir = options.dir ?? path.join(rootDir, 'dist');
-      const files = Object.keys(bundle)
-        .filter((name) => name !== 'build-manifest.json')
-        .sort();
+      const outDir = resolvedOutDir;
+      if (!fs.existsSync(outDir)) throw new Error(`Missing output directory: ${outDir}`);
+      const files = allEmittedFiles(outDir);
+      if (!files.includes('index.html')) throw new Error('Missing index.html in emitted build');
 
       const digest = createHash('sha256');
       for (const name of files) {
-        const filePath = path.join(outDir, name);
-        if (!fs.existsSync(filePath)) continue;
+        const filePath = path.join(outDir, ...name.split('/'));
         digest.update(name);
         digest.update(fs.readFileSync(filePath));
       }

@@ -276,18 +276,46 @@ describe('a dirty tree cannot produce a verification build', () => {
 describe('the served build is the real build output', () => {
   it('the plugin emits the manifest itself, so no snapshot directory is involved', () => {
     const plugin = darkfleetBuildIdentity({ rootDir: ROOT });
-    expect(typeof plugin.writeBundle).toBe('function');
+    expect(typeof plugin.closeBundle).toBe('function');
   });
 
   it('the manifest EXCLUDES itself -- a file cannot contain its own digest', () => {
     const source = fs.readFileSync(path.join(ROOT, 'build-tools', 'buildIdentity.ts'), 'utf8');
-    expect(source).toContain("name !== 'build-manifest.json'");
+    expect(source).toContain("relative !== 'build-manifest.json'");
     // And the file list is sorted, so the digest is stable across machines and checkouts.
     expect(source).toContain('.sort()');
   });
 
-  it('the hashed file list is every emitted file, not a hand-maintained one', () => {
+  it('the hashed file list includes assets copied by other plugins after writeBundle', () => {
     const source = fs.readFileSync(path.join(ROOT, 'build-tools', 'buildIdentity.ts'), 'utf8');
-    expect(source).toContain('Object.keys(bundle)');
+    expect(source).toContain('allEmittedFiles(outDir)');
+    expect(source).not.toContain('const files = Object.keys(bundle)');
+  });
+
+  it('hashes Cesium assets present in the final dist tree, not just Rollup entries', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'df-cesium-manifest-'));
+    try {
+      const nested = path.join(directory, 'cesium', 'Workers');
+      fs.mkdirSync(nested, { recursive: true });
+      fs.writeFileSync(path.join(directory, 'index.html'), '<head></head>');
+      fs.writeFileSync(path.join(nested, 'decode.js'), 'worker copy after Rollup');
+      const plugin = darkfleetBuildIdentity({ rootDir: ROOT });
+      const resolved = plugin.configResolved as unknown as
+        (config: { mode: string; root: string; build: { outDir: string } }) => void;
+      resolved.call({}, { mode: 'production', root: ROOT, build: { outDir: directory } });
+      (plugin.buildStart as () => void).call({ warn: () => {}, error: () => {} } as never);
+      const hook = plugin.closeBundle as unknown as () => Promise<void>;
+      await hook.call({} as never);
+      const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'build-manifest.json'), 'utf8'));
+      expect(manifest.files).toEqual(['cesium/Workers/decode.js', 'index.html']);
+      const expected = createHash('sha256');
+      for (const filename of manifest.files) {
+        expected.update(filename);
+        expected.update(fs.readFileSync(path.join(directory, ...filename.split('/'))));
+      }
+      expect(manifest.bundleDigest).toBe(expected.digest('hex'));
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

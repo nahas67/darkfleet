@@ -125,11 +125,38 @@ def validate_manifest(raw: bytes) -> dict[str, Any]:
     return manifest
 
 
+def physical_bundle_names(dist: Path) -> set[str]:
+    """Enumerate the final emitted dist tree, including assets copied in closeBundle.
+
+    A manifest covering only Rollup's bundle excludes Cesium static assets and
+    cannot attest to everything the preview serves. Never follow local links.
+    """
+    result: set[str] = set()
+    for entry in dist.rglob("*"):
+        relative = entry.relative_to(dist).as_posix()
+        if entry.is_symlink():
+            raise VerificationError(f"emitted path is a symlink: dist/{relative}")
+        if entry.is_file() and relative != "build-manifest.json":
+            result.add(relative)
+        elif not entry.is_dir() and not entry.is_file():
+            raise VerificationError(f"unsupported emitted entry: dist/{relative}")
+    return result
+
+
 def bundle_files(dist: Path, manifest: dict[str, Any]) -> tuple[str, dict[str, bytes]]:
-    """Mirror buildIdentity.ts: sha256.update(name UTF-8); update(file bytes)."""
+    """Mirror buildIdentity.ts: hash every physical emitted file, not a subset."""
     digest = hashlib.sha256()
     content: dict[str, bytes] = {}
     resolved_root = dist.resolve()
+    listed = set(manifest["files"])
+    physical = physical_bundle_names(dist)
+    unlisted = sorted(physical - listed)
+    missing = sorted(listed - physical)
+    if unlisted or missing:
+        raise VerificationError(
+            f"emitted-tree coverage mismatch: {len(unlisted)} unlisted files"
+            f" {unlisted[:5]}, {len(missing)} missing listed files {missing[:5]}"
+        )
     for name in manifest["files"]:
         file_path = dist.joinpath(*name.split("/"))
         if not file_path.resolve().is_relative_to(resolved_root):
@@ -148,6 +175,47 @@ def bundle_files(dist: Path, manifest: dict[str, Any]) -> tuple[str, dict[str, b
         digest.update(name.encode("utf-8"))
         digest.update(data)
     return digest.hexdigest(), content
+
+
+def check_cesium_copy(root: Path, emitted: dict[str, bytes]) -> tuple[int, list[str]]:
+    """Compare copied Cesium runtime resources against the installed source tree.
+
+    vite-plugin-cesium@1.2.23 catches copy failures and prints an error instead
+    of failing the Vite build. Enumerating dist alone could thus certify an
+    *incomplete* final tree. Match the package files that this repository's
+    default cesium() plugin is supposed to copy, not an arbitrary file-count
+    threshold. Generic isolated verifier fixtures without Vite/Cesium opt out.
+    """
+    config = root / "vite.config.ts"
+    if not config.is_file() or "cesium()" not in config.read_text(encoding="utf-8"):
+        return 0, []
+    source = root / "node_modules" / "cesium" / "Build" / "Cesium"
+    expected_roots = ("Assets", "ThirdParty", "Workers", "Widgets")
+    failures: list[str] = []
+    total = 0
+    if not source.is_dir():
+        return 0, ["installed Cesium Build/Cesium source tree unavailable"]
+    for folder in expected_roots:
+        origin_dir = source / folder
+        if not origin_dir.is_dir():
+            failures.append(f"Cesium source directory missing: {folder}")
+            continue
+        for entry in origin_dir.rglob("*"):
+            if entry.is_symlink():
+                failures.append(f"Cesium source contains symlink: {entry.relative_to(source)}")
+            elif entry.is_file():
+                total += 1
+                name = "cesium/" + entry.relative_to(source).as_posix()
+                if emitted.get(name) != entry.read_bytes():
+                    failures.append(f"missing or mismatched Cesium resource: {name}")
+    cesium_script = source / "Cesium.js"
+    if not cesium_script.is_file():
+        failures.append("installed Cesium.js is missing")
+    else:
+        total += 1
+        if emitted.get("cesium/Cesium.js") != cesium_script.read_bytes():
+            failures.append("missing or mismatched Cesium runtime: cesium/Cesium.js")
+    return total, failures
 
 
 def preview_url(url: str) -> str:
@@ -233,6 +301,10 @@ def verify(root: Path, dist: Path, preview: str) -> dict[str, Any]:
               f"source/manifest/HTML contract hashes: {contract}, {manifest['contractHash']}, {html_meta['contractHash']}")
         check("bundle_digest", actual_digest == manifest["bundleDigest"],
               f"SHA256 mismatch: actual {actual_digest}, manifest {manifest['bundleDigest']}")
+        cesium_expected, cesium_missing = check_cesium_copy(root, files)
+        report["cesiumSourceFileCount"] = cesium_expected
+        check("cesium_source_copy", not cesium_missing,
+              f"{len(cesium_missing)} missing or changed copied package resources: {cesium_missing[:5]}")
 
         opener = request.build_opener(request.ProxyHandler({}), RefuseRedirect())
         served_html = read_http(opener, preview, len(html), "preview index.html")
@@ -272,6 +344,8 @@ def verify(root: Path, dist: Path, preview: str) -> dict[str, Any]:
               and all(dist.joinpath(*name.split("/")).read_bytes() == content
                       for name, content in files.items()),
               "dist emitted bytes, manifest or source contract changed during validation")
+        check("dist_tree_stable", physical_bundle_names(dist) == set(manifest["files"]),
+              "dist file inventory changed during served preview verification")
     except (OSError, UnicodeError, VerificationError, ValueError, json.JSONDecodeError) as exc:
         report["failures"].append(f"BLOCKED: {exc}")
     report["status"] = "VERIFIED" if not report["failures"] else "FAILED"
@@ -408,6 +482,26 @@ class ReleaseVerifierTests(unittest.TestCase):
         (self.dist / "assets/app.js").write_bytes(b"modified fixture\n")
         result = verify(self.root, self.dist, self.url)
         self.assertEqual(result["checks"]["bundle_digest"], "FAIL")
+
+    def test_unlisted_copied_asset_fails_even_with_valid_listed_digest(self) -> None:
+        """Copy plugins can emit files after Rollup bundle inventory is fixed."""
+        copied = self.dist / "assets" / "Cesium" / "Workers" / "decode.js"
+        copied.parent.mkdir(parents=True)
+        copied.write_bytes(b"self.onmessage = function() {};\n")
+        result = verify(self.root, self.dist, self.url)
+        self.assertEqual(result["status"], "FAILED", result)
+        self.assertIn("unlisted", " ".join(result["failures"]).lower())
+
+    def test_silently_omitted_cesium_source_file_fails_even_if_digest_matches(self) -> None:
+        """A swallowed fs.copy error must not yield an apparently valid release."""
+        (self.root / "vite.config.ts").write_text("plugins:[cesium()]\n", encoding="utf-8")
+        source = self.root / "node_modules/cesium/Build/Cesium/Workers"
+        source.mkdir(parents=True)
+        (source / "decoder.js").write_bytes(b"source runtime worker bytes\n")
+        result = verify(self.root, self.dist, self.url)
+        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["checks"]["bundle_digest"], "PASS")
+        self.assertEqual(result["checks"]["cesium_source_copy"], "FAIL")
 
     def test_preview_asset_drift_fails_even_when_local_digest_matches(self) -> None:
         served = Path(self.tmp.name) / "served"

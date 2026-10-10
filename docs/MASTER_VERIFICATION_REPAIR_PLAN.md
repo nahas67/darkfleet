@@ -49,3 +49,18 @@ npm run build
 ```
 
 These are prescribed commands, not implied successful runs. The final document must record the commands actually run and their exit codes, counts, harness conditions, output identities and known limits.
+
+## Continuation acceptance cycle — 2026-10-11
+
+The prior cycle closed at local clean Git HEAD `5ddc0c5eed0443ce3d1027b3ddce41aa22f110af`; its attached `refs/notes/darkfleet-verification` receipt records 1,340 backend passes, 14 skips, four deselections, 880 frontend passes and 16/16 production-source/served-bundle identity checks. These figures are **historical evidence**, not proof of the remaining browser workflows. Any subsequent source/documentation commit invalidates the previous built-HEAD equality until a new strict build and served-preview verification is run from the new clean HEAD.
+
+This continuation prioritizes previously unexecuted **local acceptance**, without repeating established scientific fixture checks for their own sake:
+
+1. AIS operator browser: select a visible contact by real pointer input; preserve MMSI, fix identity and nullable kinematics; inspect historical track, play/pause/seek, FRAME TRACK/CONTACT, FOLLOW and manual-camera release; verify map layers, races and Cesium cleanup. A synthetic benchmark fixture may exercise mechanics, but must be identified as synthetic and cannot be relabeled a genuine live AIS acquisition.
+2. Writable browser workflows: create/update/reopen case, annotations/notes, geometries, evidence, missions, saved views, PDF/JSON reports and actual persisted settings where implemented. Restart the isolated real API and reopen a new browser page; verify server state and downloaded content, not just optimistic frontend text. Missing implemented UI/API capability is `NOT_IMPLEMENTED`, not an external block.
+3. WebGL performance: instrument a recognizable **hardware** adapter in Chrome with the production Cesium renderer, 100/1,000/5,000/10,000 controlled contacts, scene `postRender` and actual interaction/frame intervals, picking latency, cycles and resource/heap behavior. Distinguish JavaScript heap from unobservable VRAM and an isolated renderer fixture from the full operator application.
+4. CPU: benchmark all stages of the representative 10,000-contact display/orientation/label path in a quiet standalone process with repeated wall and thread CPU medians/p95/worst. Preserve exact fixture/output fingerprints and nullable/motion semantics; optimize only measured root causes. Do not silently relax the 100 ms performance target.
+5. Local runtime: probe Docker availability before attempting isolated Compose startup; exercise actual MCP read-only stdio and offline bounded behavior and interrupted-job recovery where locally testable; protect `data/` and all operator-owned records.
+6. Integration close: document each newly observed failure with before/after discriminating evidence, callers, tests, scoped local commit and explicit `PASS`/`FAIL`/`NOT_RUN`/`EXTERNAL_BLOCKER` or `NOT_IMPLEMENTED`. Then rerun affected/full quality gates, regenerate a clean production bundle from the **final** source HEAD, verify served byte/digest identity and attach a new local-only verification receipt. Never push.
+
+Separate dated subsystem reports provide detailed commands, browser evidence and limitations. The current dispositions belong in `MASTER_VERIFICATION_CHECKPOINT.md` and `FINAL_SYSTEM_VERIFICATION.md`, not in this execution specification.
