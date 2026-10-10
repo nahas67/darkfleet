@@ -114,13 +114,21 @@ function attr(value: string): string {
 export function darkfleetBuildIdentity(options: { rootDir: string; strict?: boolean }): Plugin {
   const { rootDir, strict = false } = options;
   let identity: BuildIdentity | null = null;
+  let resolvedMode = 'production';
 
   return {
     name: 'darkfleet-build-identity',
     apply: 'build',
 
+    configResolved(config) {
+      // Vite --mode is the authority for which environment the emitted bundle
+      // targets. NODE_ENV may be inherited as `development` even for `vite
+      // build`, so reading it gave a real production bundle a false identity.
+      resolvedMode = config.mode;
+    },
+
     buildStart() {
-      identity = readBuildIdentity(rootDir, process.env.NODE_ENV ?? 'production');
+      identity = readBuildIdentity(rootDir, resolvedMode);
 
       if (identity.head === 'UNKNOWN') {
         // Not fatal. A source tarball has no git and still produces a working build; the harness
@@ -140,7 +148,7 @@ export function darkfleetBuildIdentity(options: { rootDir: string; strict?: bool
     },
 
     transformIndexHtml(html) {
-      if (identity === null) identity = readBuildIdentity(rootDir, 'production');
+      if (identity === null) identity = readBuildIdentity(rootDir, resolvedMode);
       const tags = [
         ['darkfleet-build-head', identity.head],
         ['darkfleet-build-dirty', String(identity.dirty)],
@@ -160,7 +168,7 @@ export function darkfleetBuildIdentity(options: { rootDir: string; strict?: bool
      * own digest -- and the file list is sorted so the digest is stable across machines.
      */
     async writeBundle(options, bundle) {
-      if (identity === null) identity = readBuildIdentity(rootDir, 'production');
+      if (identity === null) identity = readBuildIdentity(rootDir, resolvedMode);
 
       const outDir = options.dir ?? path.join(rootDir, 'dist');
       const files = Object.keys(bundle)

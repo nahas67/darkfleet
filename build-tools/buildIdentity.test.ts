@@ -84,6 +84,26 @@ describe('readBuildIdentity', () => {
  * ============================================================================================== */
 
 describe('build identity reaches index.html', () => {
+  it('uses Vite resolved build mode, even when NODE_ENV is development', () => {
+    // A worker can inherit NODE_ENV=development while the command is `vite
+    // build` (Vite's resolved mode is production). That ambient environment
+    // must never identify a production artifact as a development build.
+    const plugin = darkfleetBuildIdentity({ rootDir: ROOT });
+    const previous = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'development';
+      const resolved = plugin.configResolved as unknown as (config: { mode: string }) => void;
+      resolved.call({}, { mode: 'production' });
+      (plugin.buildStart as () => void).call({ warn: () => {}, error: () => {} } as never);
+      const hook = plugin.transformIndexHtml as unknown as (html: string) => string;
+      const rendered = hook.call({} as never, '<head></head>');
+      expect(rendered).toContain('name="darkfleet-build-mode" content="production"');
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
+
   /** Drive the plugin's html hook the way vite would. */
   async function transform(identity: ReturnType<typeof readBuildIdentity>): Promise<string> {
     const plugin = darkfleetBuildIdentity({ rootDir: ROOT, strict: false });
