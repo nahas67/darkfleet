@@ -1,0 +1,762 @@
+{
+  "collectedAtUtc": "2026-10-10T10:46:19.639623+00:00",
+  "url": "http://127.0.0.1:5173/tools/ais-gpu/index.html",
+  "status": "MEASURED_BROWSER_GPU",
+  "reason": "Actual browser WebGL/JS stages completed; see per-metric verification flags",
+  "browserExecutable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "headed": false,
+  "source": "real Chrome/Edge browser executing the local AIS harness; synthetic contact fixtures",
+  "sourceIdentity": {
+    "gitHead": "4bece16043e7e0c832725013edbe27aa7101c401",
+    "sourceSha256": {
+      "src/globe/aisRenderer.ts": "e35d08c6b6355e00866e5d6acac48c6b5d7f340d5b75575a5672fbb4ed5a7fc4",
+      "src/globe/glyphGeometry.ts": "4b59827552b8f225fba6f8588d115851fd36476b5cd465c9d65d59f0f1d465a2",
+      "tools/ais-gpu/main.ts": "b68bbb9f46013ad834e35746222fbf371030c1b9e089adf4f7f6fa1c2954fe16",
+      "tools/ais-gpu/index.html": "e0de2f25e6378cb8a46d17c6c24699ca9e803148c0737f7d5812244d69552439"
+    },
+    "identityNote": "Live Vite development sources; compare file hashes when reproducing"
+  },
+  "browserVersion": "154.0.8037.98",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "webgl": {
+    "vendor": "WebKit",
+    "renderer": "WebKit WebGL",
+    "unmaskedVendor": "Google Inc. (AMD)",
+    "unmaskedRenderer": "ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "maxTextureSize": 16384,
+    "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "webgl2": true
+  },
+  "canvas": [
+    1440,
+    900
+  ],
+  "hardwareIdentity": "HARDWARE_IDENTIFIED",
+  "initialMemory": {
+    "gcAvailable": true,
+    "jsHeapAfterGcBytes": 88323935,
+    "note": "JS heap only, NOT GPU VRAM; GC exposure is checked rather than assumed."
+  },
+  "stages": [
+    {
+      "stage": 500,
+      "dense": false,
+      "firstBuildMs": 20.9,
+      "retainedUpdateMs": 11.2,
+      "frames": {
+        "rafSamples": 90,
+        "scenePostRenderEvents": 91,
+        "sceneRenderedDuringSample": true,
+        "rafP50ms": 27.7,
+        "rafP95ms": 28,
+        "rafFpsFromP50": 36.1,
+        "sceneIntervalP50ms": 24.7,
+        "sceneIntervalP95ms": 28.8,
+        "sceneFpsFromP50": 40.49
+      },
+      "first": {
+        "contacts": 500,
+        "billboards": 500,
+        "labels": 89,
+        "labelsShown": 89,
+        "labelsSuppressed": 411,
+        "reusedBillboards": 0,
+        "createdBillboards": 500,
+        "removedBillboards": 0,
+        "lastBuildMs": 20.299999997019768
+      },
+      "updated": {
+        "contacts": 500,
+        "billboards": 500,
+        "labels": 89,
+        "labelsShown": 89,
+        "labelsSuppressed": 411,
+        "reusedBillboards": 500,
+        "createdBillboards": 0,
+        "removedBillboards": 0,
+        "lastBuildMs": 11
+      },
+      "heapBytes": 105711355,
+      "primitives": 5,
+      "imageryLayers": 0,
+      "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+    },
+    {
+      "stage": 1000,
+      "dense": false,
+      "firstBuildMs": 19,
+      "retainedUpdateMs": 8.1,
+      "frames": {
+        "rafSamples": 90,
+        "scenePostRenderEvents": 91,
+        "sceneRenderedDuringSample": true,
+        "rafP50ms": 27.7,
+        "rafP95ms": 34.7,
+        "rafFpsFromP50": 36.1,
+        "sceneIntervalP50ms": 24.8,
+        "sceneIntervalP95ms": 31.8,
+        "sceneFpsFromP50": 40.32
+      },
+      "first": {
+        "contacts": 1000,
+        "billboards": 1000,
+        "labels": 96,
+        "labelsShown": 96,
+        "labelsSuppressed": 904,
+        "reusedBillboards": 500,
+        "createdBillboards": 500,
+        "removedBillboards": 0,
+        "lastBuildMs": 18.699999999254942
+      },
+      "updated": {
+        "contacts": 1000,
+        "billboards": 1000,
+        "labels": 96,
+        "labelsShown": 96,
+        "labelsSuppressed": 904,
+        "reusedBillboards": 1000,
+        "createdBillboards": 0,
+        "removedBillboards": 0,
+        "lastBuildMs": 7.900000002235174
+      },
+      "heapBytes": 103870131,
+      "primitives": 5,
+      "imageryLayers": 0,
+      "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+    },
+    {
+      "stage": 2500,
+      "dense": false,
+      "firstBuildMs": 19.7,
+      "retainedUpdateMs": 15.3,
+      "frames": {
+        "rafSamples": 90,
+        "scenePostRenderEvents": 91,
+        "sceneRenderedDuringSample": true,
+        "rafP50ms": 27.7,
+        "rafP95ms": 28.3,
+        "rafFpsFromP50": 36.1,
+        "sceneIntervalP50ms": 26.1,
+        "sceneIntervalP95ms": 28.5,
+        "sceneFpsFromP50": 38.31
+      },
+      "first": {
+        "contacts": 2500,
+        "billboards": 2500,
+        "labels": 114,
+        "labelsShown": 114,
+        "labelsSuppressed": 2386,
+        "reusedBillboards": 1000,
+        "createdBillboards": 1500,
+        "removedBillboards": 0,
+        "lastBuildMs": 19.399999998509884
+      },
+      "updated": {
+        "contacts": 2500,
+        "billboards": 2500,
+        "labels": 114,
+        "labelsShown": 114,
+        "labelsSuppressed": 2386,
+        "reusedBillboards": 2500,
+        "createdBillboards": 0,
+        "removedBillboards": 0,
+        "lastBuildMs": 15.099999997764826
+      },
+      "heapBytes": 122204243,
+      "primitives": 5,
+      "imageryLayers": 0,
+      "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+    },
+    {
+      "stage": 5000,
+      "dense": false,
+      "firstBuildMs": 41.9,
+      "retainedUpdateMs": 33.1,
+      "frames": {
+        "rafSamples": 90,
+        "scenePostRenderEvents": 91,
+        "sceneRenderedDuringSample": true,
+        "rafP50ms": 27.8,
+        "rafP95ms": 34.8,
+        "rafFpsFromP50": 35.97,
+        "sceneIntervalP50ms": 28.3,
+        "sceneIntervalP95ms": 32.8,
+        "sceneFpsFromP50": 35.34
+      },
+      "first": {
+        "contacts": 5000,
+        "billboards": 5000,
+        "labels": 116,
+        "labelsShown": 116,
+        "labelsSuppressed": 4884,
+        "reusedBillboards": 2500,
+        "createdBillboards": 2500,
+        "removedBillboards": 0,
+        "lastBuildMs": 41.80000000074506
+      },
+      "updated": {
+        "contacts": 5000,
+        "billboards": 5000,
+        "labels": 116,
+        "labelsShown": 116,
+        "labelsSuppressed": 4884,
+        "reusedBillboards": 5000,
+        "createdBillboards": 0,
+        "removedBillboards": 0,
+        "lastBuildMs": 32.899999998509884
+      },
+      "heapBytes": 127788963,
+      "primitives": 5,
+      "imageryLayers": 0,
+      "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+    },
+    {
+      "stage": 10000,
+      "dense": false,
+      "firstBuildMs": 112.4,
+      "retainedUpdateMs": 57.8,
+      "frames": {
+        "rafSamples": 90,
+        "scenePostRenderEvents": 91,
+        "sceneRenderedDuringSample": true,
+        "rafP50ms": 34.6,
+        "rafP95ms": 41.6,
+        "rafFpsFromP50": 28.9,
+        "sceneIntervalP50ms": 32.5,
+        "sceneIntervalP95ms": 37.1,
+        "sceneFpsFromP50": 30.77
+      },
+      "first": {
+        "contacts": 10000,
+        "billboards": 10000,
+        "labels": 120,
+        "labelsShown": 120,
+        "labelsSuppressed": 9880,
+        "reusedBillboards": 5000,
+        "createdBillboards": 5000,
+        "removedBillboards": 0,
+        "lastBuildMs": 112.19999999925494
+      },
+      "updated": {
+        "contacts": 10000,
+        "billboards": 10000,
+        "labels": 120,
+        "labelsShown": 120,
+        "labelsSuppressed": 9880,
+        "reusedBillboards": 10000,
+        "createdBillboards": 0,
+        "removedBillboards": 0,
+        "lastBuildMs": 57.600000001490116
+      },
+      "heapBytes": 123197719,
+      "primitives": 5,
+      "imageryLayers": 0,
+      "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+    }
+  ],
+  "picking": {
+    "selectionMs": 43,
+    "selectedMmsi": "257004898",
+    "requestedMmsi": "257005000",
+    "firstProbeMmsi": "257004898",
+    "pickTargetMode": "VISIBLE_TOPMOST_AIS_AT_ACTUAL_CLICK_PIXEL",
+    "probeSamples": 1,
+    "labelsShown": 120,
+    "withinView": true,
+    "pickSampleCount": 10,
+    "pickP50ms": 2.9,
+    "pickP95ms": 4.3,
+    "selectedContactPickCount": 10,
+    "pickVerified": true,
+    "pickIds": [
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      },
+      {
+        "domain": "AIS_CONTACT",
+        "mmsi": "257004898"
+      }
+    ],
+    "interpretation": "The clicked contact is the true topmost AIS tag at an actual screen pixel. The requested midpoint candidate may be occluded; the sampled selection must return the chosen visible tag for all ten picks. GPU-rendered picking timing is not a GPU timer query."
+  },
+  "dense10k": {
+    "stage": 10000,
+    "dense": true,
+    "firstBuildMs": 57.9,
+    "retainedUpdateMs": 39.5,
+    "frames": {
+      "rafSamples": 90,
+      "scenePostRenderEvents": 91,
+      "sceneRenderedDuringSample": true,
+      "rafP50ms": 28.3,
+      "rafP95ms": 34.8,
+      "rafFpsFromP50": 35.34,
+      "sceneIntervalP50ms": 31.2,
+      "sceneIntervalP95ms": 32.7,
+      "sceneFpsFromP50": 32.05
+    },
+    "first": {
+      "contacts": 10000,
+      "billboards": 10000,
+      "labels": 1,
+      "labelsShown": 1,
+      "labelsSuppressed": 9999,
+      "reusedBillboards": 10000,
+      "createdBillboards": 0,
+      "removedBillboards": 0,
+      "lastBuildMs": 57.80000000074506
+    },
+    "updated": {
+      "contacts": 10000,
+      "billboards": 10000,
+      "labels": 1,
+      "labelsShown": 1,
+      "labelsSuppressed": 9999,
+      "reusedBillboards": 10000,
+      "createdBillboards": 0,
+      "removedBillboards": 0,
+      "lastBuildMs": 39.399999998509884
+    },
+    "heapBytes": 147532444,
+    "primitives": 5,
+    "imageryLayers": 0,
+    "interpretation": "RAF intervals measure browser callback cadence; scene intervals measure wall-time between Cesium postRender callbacks. Neither is a GPU timer-query benchmark."
+  },
+  "lifecycle": {
+    "cycles": 25,
+    "initialPrimitives": 5,
+    "finalPrimitives": 5,
+    "initialImagery": 0,
+    "finalImagery": 0,
+    "firstHeap": 121669360,
+    "lastHeap": 112480248,
+    "perCycle": [
+      {
+        "cycle": 1,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 137811000
+      },
+      {
+        "cycle": 2,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 128936610
+      },
+      {
+        "cycle": 3,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 112341010
+      },
+      {
+        "cycle": 4,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 134623998
+      },
+      {
+        "cycle": 5,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 118732750
+      },
+      {
+        "cycle": 6,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 140966906
+      },
+      {
+        "cycle": 7,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 128397538
+      },
+      {
+        "cycle": 8,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 120618538
+      },
+      {
+        "cycle": 9,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 137176134
+      },
+      {
+        "cycle": 10,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 129315518
+      },
+      {
+        "cycle": 11,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 145863162
+      },
+      {
+        "cycle": 12,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 136437974
+      },
+      {
+        "cycle": 13,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 120337794
+      },
+      {
+        "cycle": 14,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 142425058
+      },
+      {
+        "cycle": 15,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 132723022
+      },
+      {
+        "cycle": 16,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 124909786
+      },
+      {
+        "cycle": 17,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 141471710
+      },
+      {
+        "cycle": 18,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 133661634
+      },
+      {
+        "cycle": 19,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 150249206
+      },
+      {
+        "cycle": 20,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 140831658
+      },
+      {
+        "cycle": 21,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 124709598
+      },
+      {
+        "cycle": 22,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 146776690
+      },
+      {
+        "cycle": 23,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 137052882
+      },
+      {
+        "cycle": 24,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 129214554
+      },
+      {
+        "cycle": 25,
+        "primitivesAfterClear": 5,
+        "primitivesAfterDestroy": 0,
+        "primitivesAfterRecreate": 5,
+        "labels": 0,
+        "billboards": 0,
+        "heapBytes": 145735106
+      }
+    ],
+    "gcAvailable": true,
+    "emptyHeapBeforeCycles": 121669344,
+    "emptyHeapAfterCycles": 112478428,
+    "emptyHeapDeltaBytes": -9190916,
+    "collectionsStable": true,
+    "note": "When window.gc is exposed, empty-collection JS heap is compared after forced GC at both endpoints; this is NOT GPU VRAM and does not establish long-run leak-free operation."
+  },
+  "postLifecycleMemory": {
+    "gcAvailable": true,
+    "jsHeapAfterGcBytes": 103940740,
+    "note": "End of full staged benchmark after 25 renderer cycles, not a clean identical-heap baseline."
+  },
+  "basemap": {
+    "cycles": 25,
+    "semantics": "forced failure plus manual primary reselection; does NOT test cooldown maybeRecover()",
+    "records": [
+      {
+        "cycle": 1,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 2,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 3,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 4,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 5,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 6,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 7,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 8,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 9,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 10,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 11,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 12,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 13,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 14,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 15,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 16,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 17,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 18,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 19,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 20,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 21,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 22,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 23,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 24,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      },
+      {
+        "cycle": 25,
+        "fallbackId": "ESRI",
+        "recoveryViaManualSelection": "OSM",
+        "imageryLayers": 1
+      }
+    ]
+  },
+  "pageErrors": []
+}

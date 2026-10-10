@@ -10,12 +10,13 @@ observations**. No actual satellite or maritime observation has been generated.
 
 | Requirement | Current evidence | Verdict |
 | --- | --- | --- |
-| H7 500/1K/2.5K/5K/10K hardware WebGL frame intervals (p50/p95), FPS, GPU identification | Browser instrumentation written and Vite local HTTP serves the page, but browser attach failed | **UNVERIFIED** |
-| H7 GPU scene picking and selection latency at 10K | Harness provides observed match counts, timing and explicit failure; no GPU browser run | **UNVERIFIED** |
+| H7 500/1K/2.5K/5K/10K hardware WebGL frame intervals (p50/p95), FPS, GPU identification | Isolated Chrome 154 with unmasked AMD Radeon D3D11 adapter; complete staged browser results recorded below | **MEASURED HARDWARE-BACKED SCENE INTERVALS** (not GPU timer queries) |
+| H7 GPU scene picking and selection latency at 10K | Hardware browser selected visible topmost MMSI, then verified 10/10 matching pick tags | **MEASURED BROWSER PICKING** (specific scene and point) |
 | H7 10K label selection determinism and 120-budget | Existing tests and new differential reference test (10K dense and dispersed) | **VERIFIED CPU-SIDE** |
-| H8 25-cycle Cesium primitive-collection ownership | New tests instantiate *actual Cesium collection classes* without WebGL; 25 renderer create/destroy cycles return to base count | **VERIFIED LOCAL RESOURCE OWNERSHIP** |
-| H8 browser heap trend, VRAM, WebGL context loss, timer/listener trend, application play/seek/FOLLOW/clear | No accessible hardware browser run | **UNVERIFIED** |
-| H8 25-cycle basemap failover, automatic cooldown recovery, offline survival | Browser harness can exercise forced failures and **manual** primary reselection only | **UNVERIFIED** |
+| H8 25-cycle Cesium primitive-collection ownership | Real Cesium tests and now hardware-backed browser repeat cycles: 5 → 0 → 5, no count drift | **VERIFIED IN BROWSER AND TESTS** |
+| H8 browser JS heap trend | 25-cycle **matched empty-collection** JS heap readings with explicit `window.gc`, documented below | **MEASURED JS HEAP ONLY**; no long-run leak-free assertion |
+| H8 VRAM, WebGL context loss, event/timer listener trend, application play/seek/FOLLOW/clear | Not exercised by the isolated harness | **UNVERIFIED** |
+| H8 25 forced basemap failover/manual reselections | Browser records one layer at each of 25 cycles | **MEASURED MANUAL FALLBACK**; automatic cooldown recovery/offline survival **UNVERIFIED** |
 
 ## What changed and why
 
@@ -89,18 +90,19 @@ application build does not execute the separate diagnostic HTML page.
 returned **HTTP 200**, `text/html`, with title *DarkFleet AIS GPU Measurement
 Harness*. This verifies HTTP serving only.
 
-## Browser access blocker
+## Historical browser connector blocker (bypassed by isolated hardware Chrome)
 
 The existing tab at
 `http://127.0.0.1:5173/tools/ais-gpu/index.html` appeared in the connected
 tab inventory as **unloaded**. Its DOM inspection reported a companion
 extension host-permission error. Attaching to that **same existing tab**
 failed with **`BROWSER_CDP_TIMEOUT: Page.enable did not acknowledge`**, matching
-two prior attempts reported by the prime agent. No browser GPU benchmark JSON,
-vendor, real frame p50/p95, browser picking latency or heap trend was recovered.
-No CPU result has been substituted for that absent hardware result.
+two prior attempts reported by the prime agent. No browser result could be
+recovered *from that tab*. The later isolated Python Playwright/Chrome run
+below **did succeed**; do not treat the historical attachment failure as the
+current status of H7 browser verification.
 
-## Procedure for completing the remaining hardware gate
+## Procedure for independently repeating the browser measurement
 
 Open the already-served local diagnostic page in a hardware-accelerated Chrome
 tab and keep the tab in the foreground during measurement. Use **Run staged
@@ -111,6 +113,9 @@ scene/RAF interval percentiles, 10K selected MMSI `picking.pickVerified`,
 or absent identity must be identified as such; an absence of `postRender` events
 invalidates apparent FPS. Check the browser's GPU diagnostics independently.
 
+Alternatively use the automated browser runner described below. It does not
+claim an unidentified WebGL adapter is hardware.
+
 For H8 operational closure, separately verify full application temporal
 load/play/seek/FOLLOW/release/clear, event/timer listener count, actual
 basemap-source outage and cooldown-based recovery, offline behavior, GPU memory
@@ -118,3 +123,110 @@ and long-run heap after GC or a controlled memory timeline. The diagnostic's
 basemap function only forces failure reports and manually reselects the
 primary; it **does not** establish `maybeRecover()` cooldown behavior. These
 requirements remain open pending direct browser evidence.
+
+## Hardware follow-up: isolated local Chrome, 2026-10-10
+
+An installed **Python Playwright** package was available even though the
+project did not contain Node `playwright`/`puppeteer`. The following command
+launched an **isolated Chrome browser process**, executed the actual Vite-served
+AIS renderer JavaScript, and wrote raw JSON evidence:
+
+```powershell
+python tools/ais-gpu/run_hardware_benchmark.py --output docs/DF_X9_8_H7_H8_CHROME_HARDWARE_EVIDENCE_2026-10-10.json --timeout-ms 30000
+python -m unittest discover -s tools/ais-gpu -p 'test_run_hardware_benchmark.py'
+```
+
+**Raw machine-readable evidence:**
+`docs/DF_X9_8_H7_H8_CHROME_HARDWARE_EVIDENCE_2026-10-10.json`.
+It contains the browser version, adapter, full samples and pick identities,
+heap/primitive series, timestamps, HTTP URL, Git HEAD and SHA-256 for the exact
+local `aisRenderer.ts`, `glyphGeometry.ts`, and both harness source files.
+The run uses only synthetic test contacts; external data requests are blocked
+at the browser context boundary. The exposed Vite development server is NOT
+a production build provenance claim; verify its hashes on reproduction.
+
+### Browser and hardware provenance
+
+- **Browser:** Chrome/HeadlessChrome **154.0.8037.98**, Windows 10/11
+  (User-Agent identifies Windows NT 10.0), WebGL **2.0**.
+- **Unmasked adapter:** `ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638)
+  Direct3D11 vs_5_0 ps_5_0, D3D11)`; `Google Inc. (AMD)` unmasked vendor.
+- **Maximum texture size:** 16,384; `--disable-software-rasterizer` was set.
+  The runner refuses to benchmark unknown/masked/software adapters. This is
+  actual browser-reported adapter identity, not a GPU timer query or an
+  independently audited driver stack.
+- **Result:** `MEASURED_BROWSER_GPU` in JSON, **zero `pageErrors`**.
+- **Source Git HEAD at capture:** `4bece16043e7e0c832725013edbe27aa7101c401`
+  (the JSON binds subsequent uncommitted harness edits by SHA-256).
+
+### Stage measurements from the completed browser run
+
+Every stage collected **91 actual Cesium `postRender` events** while the
+renderer displayed the requested fixture size. These percentiles are **wall
+intervals between Cesium render callbacks** (not GPU draw durations, nor pure
+RAF callbacks). Derived FPS is `1000 / p50_ms`.
+
+| AIS contacts | Cesium interval p50 | Cesium interval p95 | FPS from p50 | Labels shown | Parent primitives |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 24.7 ms | 28.8 ms | 40.49 | 89 | 5 |
+| 1,000 | 24.8 ms | 31.8 ms | 40.32 | 96 | 5 |
+| 2,500 | 26.1 ms | 28.5 ms | 38.31 | 114 | 5 |
+| 5,000 | 28.3 ms | 32.8 ms | 35.34 | 116 | 5 |
+| 10,000 | 32.5 ms | 37.1 ms | 30.77 | 120 | 5 |
+
+A second *dense* 10K fixture measured 31.2 ms p50, 32.7 ms p95
+(32.05 FPS-from-median). The hardware ran in headless Chrome, at a 1440×900
+viewport, with network access to non-local providers blocked. These samples
+cannot certify foreground interactive performance on other operating systems,
+GPU drivers or production basemaps. The 30.77 FPS figure is an observation,
+not a predeclared service-level pass threshold.
+
+### Observed picking, including occlusion caveat
+
+The first completed browser run revealed that arbitrary midpoint contact
+`257005000` was occluded by the actually topmost glyph `257004898` at its
+projected pixel: **10 of 10 picks returned `257004898`**, not the arbitrary
+requested MMSI. That run therefore correctly reported `pickVerified=false`.
+This is a real overlapping-glyph behavior, not an invented failure or proof
+that clicking the visible contact is broken.
+
+The hardened harness now reads the actual **topmost AIS tag at the clicked
+visible pixel**, selects that tag's MMSI, and requires all 10 subsequent
+`scene.pick` results to match it. In the final measured run:
+
+- Requested arbitrary contact: `257005000`; visibly picked contact: `257004898`.
+- Selected-contact update: **43.0 ms**, while 10K contacts remained loaded.
+- 10/10 returned the selected contact's exact `AIS_CONTACT` MMSI tag.
+- Pick call latency: **2.9 ms p50, 4.3 ms p95**; `pickVerified=true`.
+
+This proves selection/picking at that **specific visible point** during the
+hardware browser run, not correctness of all overlapping glyphs/positions.
+
+### H8 resource and heap measurements
+
+- **25 cycles** of renderer load→clear→destroy→recreate in actual browser
+  Cesium: each cycle had **5 primitives after clear**, **0 after destroy**,
+  **5 after recreate**. Final count **5**, `collectionsStable=true`.
+- With `window.gc()` exposed and invoked at both **cleared renderer** endpoints,
+  reported `performance.memory.usedJSHeapSize` fell from **121,669,344** bytes
+  to **112,478,428** bytes (**−9,190,916** bytes). This is a single
+  garbage-collected JavaScript heap comparison, not measured VRAM or a claim of
+  leak-free long-duration sessions.
+- `25` forced-failure basemap cycles reported **ESRI fallback**, manual OSM
+  reselection and **one imagery layer** in each record; no actual tile success,
+  autonomous cooldown recovery or provider uptime was established.
+
+One intermediate Vite-run attempt lost its page execution context during the
+2.5K→5K transition and returned **UNVERIFIED** with an explicit navigation
+error. It was not treated as evidence. The subsequent complete run succeeded
+with all requested stages, and the committed JSON is that successful run.
+
+### Remaining qualification
+
+H7 is now **observed on one locally identified hardware WebGL2 adapter** with
+documented frame and pick measurements; this is not a promise of 60 FPS or an
+endorsement of every configuration. H8 primitive counts and an initial
+GC-controlled JS heap comparison are genuinely measured. **GPU VRAM, WebGL
+context-loss recovery, full application playback/FOLLOW lifecycle, listener
+and timer leak analysis, offline data survival, and automatic basemap cooldown
+recovery remain UNVERIFIED.** None were replaced with CPU-only estimates.

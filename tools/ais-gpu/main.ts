@@ -145,16 +145,49 @@ async function runStage(count: number, dense = false): Promise<unknown> {
 
 async function measureSelectionAndPick(): Promise<unknown> {
   if (!contacts.length) throw new Error('Run a stage first');
-  const contact = contacts[Math.floor(contacts.length / 2)];
+  // Pick the *visible topmost* AIS contact at an actual rendered screen pixel,
+  // then select that MMSI. An arbitrary array-index contact might be hidden by
+  // a different billboard on the same pixel. That would measure occlusion,
+  // not the click -> selection -> retained-renderer picking workflow.
+  const requested = contacts[Math.floor(contacts.length / 2)];
+  const byMmsi = new Map(contacts.map((item) => [item.mmsi, item]));
+  const candidates = [requested, ...contacts.filter((_, index) => index % Math.max(1, Math.floor(contacts.length / 64)) === 0)];
+  let point: Cartesian2 | undefined;
+  let contact: RenderableContact | undefined;
+  let firstProbeMmsi: string | null = null;
+  let probes = 0;
+  for (const candidate of candidates) {
+    if (candidate.state.lon === null || candidate.state.lat === null) continue;
+    const candidatePoint = viewer.scene.cartesianToCanvasCoordinates(
+      Cartesian3.fromDegrees(candidate.state.lon, candidate.state.lat));
+    if (!candidatePoint || candidatePoint.x < 0 || candidatePoint.y < 0 ||
+        candidatePoint.x > viewer.canvas.clientWidth || candidatePoint.y > viewer.canvas.clientHeight) continue;
+    const tagged = viewer.scene.pick(new Cartesian2(candidatePoint.x, candidatePoint.y)) as
+      { id?: { domain?: unknown; mmsi?: unknown } } | undefined;
+    probes++;
+    if (candidate.mmsi === requested.mmsi) {
+      firstProbeMmsi = typeof tagged?.id?.mmsi === 'string' ? tagged.id.mmsi : null;
+    }
+    if (tagged?.id?.domain !== 'AIS_CONTACT' || typeof tagged.id.mmsi !== 'string') continue;
+    const visible = byMmsi.get(tagged.id.mmsi);
+    if (!visible) continue;
+    point = candidatePoint;
+    contact = visible;
+    break;
+  }
+  if (!point || !contact) {
+    const missing = { pickingVerified: false, reason: 'NO_VISIBLE_TAGGED_AIS_CONTACT',
+      requestedMmsi: requested.mmsi, firstProbeMmsi, probeSamples: probes };
+    runLog.push(missing); print(missing); return missing;
+  }
   contact.selected = true;
   const selectedAt = performance.now();
   const stats = render(contacts);
   const selectionMs = performance.now() - selectedAt;
   await raf(); await raf();
-  const point = viewer.scene.cartesianToCanvasCoordinates(Cartesian3.fromDegrees(contact.state.lon!, contact.state.lat!));
-  const withinView = Boolean(point && point.x >= 0 && point.y >= 0 && point.x <= viewer.canvas.clientWidth && point.y <= viewer.canvas.clientHeight);
+  const withinView = point.x >= 0 && point.y >= 0 && point.x <= viewer.canvas.clientWidth && point.y <= viewer.canvas.clientHeight;
   const picks: Array<{ durationMs: number; id: unknown }> = [];
-  if (point && withinView) {
+  if (withinView) {
     for (let i = 0; i < 10; i++) {
       const start = performance.now();
       const picked = viewer.scene.pick(new Cartesian2(point.x, point.y)) as { id?: unknown } | undefined;
@@ -167,16 +200,28 @@ async function measureSelectionAndPick(): Promise<unknown> {
     const tag = id as { mmsi?: unknown } | null;
     return tag !== null && typeof tag === 'object' && tag.mmsi === contact.mmsi;
   }).length;
-  const result = { selectionMs, selectedMmsi: contact.mmsi, labelsShown: stats.labelsShown,
+  const result = { selectionMs, selectedMmsi: contact.mmsi, requestedMmsi: requested.mmsi,
+    firstProbeMmsi, pickTargetMode: 'VISIBLE_TOPMOST_AIS_AT_ACTUAL_CLICK_PIXEL',
+    probeSamples: probes, labelsShown: stats.labelsShown,
     withinView, pickSampleCount: picks.length, pickP50ms: percentile(latencies, 0.5),
     pickP95ms: percentile(latencies, 0.95), selectedContactPickCount,
-    pickVerified: selectedContactPickCount > 0, pickIds: pickedIds,
-    interpretation: 'Pick timing is observed only when selected contact projects inside canvas. Overlapping contacts can produce another ID; zero matching IDs means selection/picking is unverified.',
+    pickVerified: picks.length === 10 && selectedContactPickCount === 10, pickIds: pickedIds,
+    interpretation: 'The clicked contact is the true topmost AIS tag at an actual screen pixel. The requested midpoint candidate may be occluded; the sampled selection must return the chosen visible tag for all ten picks. GPU-rendered picking timing is not a GPU timer query.',
   };
   runLog.push(result); print(result); return result;
 }
 
 async function lifecycle(cycles = 25): Promise<unknown> {
+  // Compare memory at two *empty renderer* points, not a 10K populated scene
+  // against an empty scene. If exposed by the browser runner, force GC at both
+  // points to reduce the effect of incidental allocation, but never infer VRAM.
+  contacts = [];
+  render([]);
+  await raf();
+  const gc = (window as Window & { gc?: () => void }).gc;
+  const gcAvailable = typeof gc === 'function';
+  if (gcAvailable) gc();
+  const emptyHeapBeforeCycles = heapBytes();
   const initialPrimitives = viewer.scene.primitives.length;
   const initialImagery = viewer.imageryLayers.length;
   const firstHeap = heapBytes();
@@ -197,12 +242,19 @@ async function lifecycle(cycles = 25): Promise<unknown> {
       labels: cleared.labels, billboards: cleared.billboards, heapBytes: heapBytes() });
   }
   contacts = [];
+  render([]);
+  await raf();
+  if (gcAvailable) gc();
+  const emptyHeapAfterCycles = heapBytes();
   const result = { cycles, initialPrimitives, finalPrimitives: viewer.scene.primitives.length,
     initialImagery, finalImagery: viewer.imageryLayers.length, firstHeap, lastHeap: heapBytes(), perCycle,
+    gcAvailable, emptyHeapBeforeCycles, emptyHeapAfterCycles,
+    emptyHeapDeltaBytes: emptyHeapBeforeCycles !== null && emptyHeapAfterCycles !== null
+      ? emptyHeapAfterCycles - emptyHeapBeforeCycles : null,
     collectionsStable: perCycle.every((row) => row.primitivesAfterClear === initialPrimitives
       && row.primitivesAfterDestroy === initialPrimitives - 5
       && row.primitivesAfterRecreate === initialPrimitives),
-    note: 'Heap samples are observations only; GC is not forced and allocator trends are not GPU memory measurements.',
+    note: 'When window.gc is exposed, empty-collection JS heap is compared after forced GC at both endpoints; this is NOT GPU VRAM and does not establish long-run leak-free operation.',
   };
   runLog.push(result); print(result); return result;
 }
