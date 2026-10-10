@@ -9,6 +9,7 @@ import type { InvestigationOut } from '../api/contract';
 import { explain } from '../api/errors';
 import { store, useStore } from '../state/store';
 import { fmtInstant } from '../design/format';
+import { InvestigationGeometryPanel } from './InvestigationGeometryPanel';
 
 export function InvestigationNotebook() {
   const state = useStore();
@@ -207,10 +208,13 @@ export function InvestigationNotebook() {
             </ul>}
         </div>
 
+        <InvestigationGeometryPanel key={selected.id} caseId={selected.id}
+          scanId={selected.scan_id} />
+
         <div className="border-t border-structural pt-2">
           {confirmDelete ? <div className="space-y-2">
             <p className="text-[11px] text-ink-dim">
-              Delete this case and its notes? Source evidence remains intact.
+              Delete this case, its notes, watchlist and saved geometries? Source evidence remains intact.
             </p>
             <button type="button" className="df-btn" disabled={busy}
               onClick={() => void run(async () => {

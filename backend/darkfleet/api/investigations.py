@@ -7,6 +7,7 @@ SQLite transactions make case/annotation/watch operations restart-safe.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from darkfleet.api.routes import State
+from darkfleet.investigation_geometry import GeometryInput, Measurements, measure_geometry
 
 __all__ = ["router"]
 
@@ -73,6 +75,32 @@ class InvestigationListOut(BaseModel):
     investigations: list[InvestigationOut]
 
 
+class GeometryCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: Title
+    notes: Annotated[str, StringConstraints(max_length=4000)] = ""
+    geometry: GeometryInput
+
+
+class GeometryOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    investigation_id: str
+    scan_id: str | None
+    provenance: str = "OPERATOR_ANNOTATION_NOT_SENSOR_EVIDENCE"
+    label: str
+    notes: str
+    geometry: GeometryInput
+    measurements: Measurements
+    created_at: str
+    updated_at: str
+
+
+class GeometryListOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    geometries: list[GeometryOut]
+
+
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 
 _SCHEMA = """
@@ -98,6 +126,18 @@ CREATE TABLE IF NOT EXISTS investigation_watchlist (
  created_at TEXT NOT NULL,
  UNIQUE(investigation_id, target_id)
 );
+-- DF-X16 additive migration: no changes to existing notes, watchlist or cases.
+CREATE TABLE IF NOT EXISTS investigation_geometries (
+ id TEXT PRIMARY KEY,
+ investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+ label TEXT NOT NULL,
+ notes TEXT NOT NULL DEFAULT '',
+ geometry_json TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS investigation_geometries_case
+ ON investigation_geometries (investigation_id, created_at, id);
 """
 
 
@@ -114,6 +154,11 @@ def _database(data_dir: Path) -> Iterator[sqlite3.Connection]:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.executescript(_SCHEMA)
+        # The pre-DF-X16 database has user_version=0. This idempotent additive
+        # migration runs even for databases created by the original notebook.
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version < 2:
+            connection.execute("PRAGMA user_version=2")
         with connection:
             yield connection
     finally:
@@ -303,3 +348,99 @@ def delete_watch_entry(case_id: str, entry_id: str, state: State) -> None:
                 "error": "UNKNOWN_WATCH_ENTRY", "status": "UNKNOWN_WATCH_ENTRY",
                 "message": "Watchlist entry does not exist in this investigation.",
             })
+
+
+def _geo_missing() -> HTTPException:
+    return HTTPException(status_code=404, detail={
+        "error": "UNKNOWN_GEOMETRY", "status": "UNKNOWN_GEOMETRY",
+        "message": "Geometry does not exist in this investigation.",
+    })
+
+
+def _geometry_row(connection: sqlite3.Connection, case_id: str, geo_id: str) -> sqlite3.Row:
+    row = connection.execute(
+        "SELECT * FROM investigation_geometries WHERE investigation_id=? AND id=?",
+        (case_id, geo_id),
+    ).fetchone()
+    if row is None:
+        raise _geo_missing()
+    return cast(sqlite3.Row, row)
+
+
+def _geometry_out(row: sqlite3.Row, case: sqlite3.Row) -> GeometryOut:
+    geometry = GeometryInput.model_validate(json.loads(row["geometry_json"]))
+    return GeometryOut(
+        id=row["id"], investigation_id=case["id"], scan_id=case["scan_id"],
+        label=row["label"], notes=row["notes"], geometry=geometry,
+        measurements=measure_geometry(geometry), created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.get("/{case_id}/geometries", response_model=GeometryListOut)
+def list_case_geometries(case_id: str, state: State) -> GeometryListOut:
+    with _database(state.data_dir) as connection:
+        case = _case(connection, case_id)
+        rows = connection.execute(
+            "SELECT * FROM investigation_geometries WHERE investigation_id=? "
+            "ORDER BY created_at, id", (case_id,),
+        ).fetchall()
+        return GeometryListOut(geometries=[_geometry_out(row, case) for row in rows])
+
+
+@router.post("/{case_id}/geometries", response_model=GeometryOut,
+             status_code=status.HTTP_201_CREATED)
+def create_case_geometry(case_id: str, body: GeometryCreate, state: State) -> GeometryOut:
+    # Source scan is fixed at CASE creation; no arbitrary scan_id or coordinate
+    # can be supplied as measured SAR evidence. An unlinked case is permitted.
+    measure_geometry(body.geometry)  # Validate physical metrics before persistence.
+    with _database(state.data_dir) as connection:
+        case = _case(connection, case_id)
+        if case["scan_id"] is not None:
+            _real_scan(state, case["scan_id"])
+        geo_id, created = str(uuid4()), _now()
+        connection.execute(
+            "INSERT INTO investigation_geometries "
+            "(id, investigation_id, label, notes, geometry_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (geo_id, case_id, body.label, body.notes,
+             body.geometry.model_dump_json(), created, created),
+        )
+        return _geometry_out(_geometry_row(connection, case_id, geo_id), case)
+
+
+@router.get("/{case_id}/geometries/{geo_id}", response_model=GeometryOut)
+def get_case_geometry(case_id: str, geo_id: str, state: State) -> GeometryOut:
+    with _database(state.data_dir) as connection:
+        case = _case(connection, case_id)
+        return _geometry_out(_geometry_row(connection, case_id, geo_id), case)
+
+
+@router.put("/{case_id}/geometries/{geo_id}", response_model=GeometryOut)
+def replace_case_geometry(
+    case_id: str, geo_id: str, body: GeometryCreate, state: State,
+) -> GeometryOut:
+    measure_geometry(body.geometry)
+    with _database(state.data_dir) as connection:
+        case = _case(connection, case_id)
+        _geometry_row(connection, case_id, geo_id)
+        if case["scan_id"] is not None:
+            _real_scan(state, case["scan_id"])
+        connection.execute(
+            "UPDATE investigation_geometries "
+            "SET label=?, notes=?, geometry_json=?, updated_at=? WHERE id=? AND investigation_id=?",
+            (body.label, body.notes, body.geometry.model_dump_json(), _now(), geo_id, case_id),
+        )
+        return _geometry_out(_geometry_row(connection, case_id, geo_id), case)
+
+
+@router.delete("/{case_id}/geometries/{geo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_case_geometry(case_id: str, geo_id: str, state: State) -> None:
+    with _database(state.data_dir) as connection:
+        _case(connection, case_id)
+        cursor = connection.execute(
+            "DELETE FROM investigation_geometries WHERE id=? AND investigation_id=?",
+            (geo_id, case_id),
+        )
+        if cursor.rowcount == 0:
+            raise _geo_missing()
