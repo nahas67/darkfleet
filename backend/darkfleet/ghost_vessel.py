@@ -176,16 +176,36 @@ def assess(
             f"No AIS candidate was available to correlate within the search window. "
             f"{considered or 0} candidate(s) were considered."
             if considered == 0
-            else f"No AIS candidate reached the association threshold of {threshold}."
+            else f"{considered} AIS candidate(s) were considered, but no rejected-candidate "
+                 "detail was recorded; the rejection cause is not established."
         )
     else:
-        reason = (
+        candidate_detail = (
             f"The closest candidate (MMSI {closest.get('mmsi')}"
             f"{', ' + str(closest.get('vesselName')) if closest.get('vesselName') else ''}) "
             f"scored {closest.get('score')} against a threshold of {threshold} "
-            f"-- short by {closest.get('shortfall')} at {closest.get('distanceMeters')} m "
+            f"at {closest.get('distanceMeters')} m "
             f"and {closest.get('timeDeltaSeconds')} s."
         )
+        rejection = closest.get("rejectionReason", closest.get("rejection_reason"))
+        if rejection == "BELOW_THRESHOLD":
+            reason = f"{candidate_detail} Its score was short by {closest.get('shortfall')}."
+        elif rejection == "ONE_TO_ONE_CONFLICT":
+            reason = (
+                f"{candidate_detail} The AIS identity was already assigned to another "
+                "SAR target under the one-to-one association rule."
+            )
+        elif rejection == "LOWER_RANKED_ALTERNATIVE":
+            reason = f"{candidate_detail} It was a lower-ranked alternative to another candidate."
+        elif rejection == "AMBIGUOUS_PAIR":
+            reason = (
+                f"{candidate_detail} Near-equal competing AIS candidates prevented "
+                "an unambiguous association."
+            )
+        else:
+            # Historical persisted records predate the reason field. A shortfall
+            # number alone does not prove why a candidate was rejected.
+            reason = f"{candidate_detail} The rejection cause was not recorded."
 
     return {
         "is_ghost_vessel": True,

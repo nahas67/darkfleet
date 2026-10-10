@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { coverageVerdict, COVERAGE_VERDICT_LABEL, type CoverageVerdict } from './GhostSemantics';
+import { coverageVerdict, COVERAGE_VERDICT_LABEL, rejectionReasonLabel, type CoverageVerdict } from './GhostSemantics';
 import type { GhostAssociationDecision } from '../../api/contract';
 
 const SEMANTICS = (await import('./GhostSemantics?raw')).default as string;
@@ -129,6 +129,15 @@ describe('coverageVerdict', () => {
     expect(coverageVerdict(decision({ ais_coverage_state: 'Not_Configured' }))).toBe(
       'AIS_SOURCE_NOT_CONFIGURED',
     );
+  });
+});
+
+describe('rejected candidate truthfulness', () => {
+  it('preserves the distinction between below-threshold and higher-scored conflicts', () => {
+    expect(rejectionReasonLabel('BELOW_THRESHOLD')).toContain('BELOW');
+    expect(rejectionReasonLabel('ONE_TO_ONE_CONFLICT')).toContain('ALREADY ASSIGNED');
+    expect(rejectionReasonLabel('AMBIGUOUS_PAIR')).toContain('AMBIGUOUS');
+    expect(rejectionReasonLabel(null)).toContain('NOT RECORDED');
   });
 });
 

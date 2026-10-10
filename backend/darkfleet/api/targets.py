@@ -99,8 +99,9 @@ class ScoreDecomposition(BaseModel):
 class RejectedCandidate(BaseModel):
     """The best AIS candidate that was considered and not accepted (GFST).
 
-    Carries its score and how far short it fell, so the rejection can be
-    arithmetic rather than assertion.
+    Carries the score and explicit rejection cause. A candidate can be above
+    threshold yet rejected due to a one-to-one or ambiguity conflict; only a
+    BELOW_THRESHOLD rejection has a positive score shortfall.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
@@ -122,7 +123,18 @@ class RejectedCandidate(BaseModel):
     )
     shortfall: float = Field(
         ge=0.0,
-        description="How far below the acceptance threshold this candidate scored.",
+        description="Nonnegative score gap to the threshold (zero when score meets it).",
+    )
+    rejection_reason: Literal[
+        "BELOW_THRESHOLD",
+        "ONE_TO_ONE_CONFLICT",
+        "LOWER_RANKED_ALTERNATIVE",
+        "AMBIGUOUS_PAIR",
+    ] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("rejectionReason", "rejection_reason"),
+        serialization_alias="rejectionReason",
+        description="Recorded reason for rejecting the scored candidate; null for older records.",
     )
 
 

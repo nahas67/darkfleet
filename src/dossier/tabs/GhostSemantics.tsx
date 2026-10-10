@@ -181,6 +181,17 @@ function observedRows(observed: GhostObservedEvidence): Array<[string, string | 
  * THE REJECTED NEAR MISS -- the finding that is not the finding
  * ============================================================================================== */
 
+/** Render only the recorded rejection category, without browser-side rescoring. */
+export function rejectionReasonLabel(reason: RejectedCandidate['rejectionReason']): string {
+  switch (reason) {
+    case 'BELOW_THRESHOLD': return 'BELOW ACCEPTANCE THRESHOLD';
+    case 'ONE_TO_ONE_CONFLICT': return 'AIS IDENTITY ALREADY ASSIGNED TO ANOTHER SAR TARGET';
+    case 'LOWER_RANKED_ALTERNATIVE': return 'LOWER-RANKED CANDIDATE';
+    case 'AMBIGUOUS_PAIR': return 'AMBIGUOUS NEAR-EQUAL CANDIDATES';
+    default: return 'REJECTION CAUSE NOT RECORDED';
+  }
+}
+
 function RejectedCandidateBlock({ candidate }: { candidate: RejectedCandidate }) {
   return (
     <div className="mt-1 border-l-2 border-structural-bright pl-2" data-df-ghost-rejected>
@@ -199,9 +210,14 @@ function RejectedCandidateBlock({ candidate }: { candidate: RejectedCandidate })
       <Row label="Composite score">
         <span className="df-num">{num(candidate.score)}</span>
       </Row>
-      <Row label="Short by" tone="warn">
-        <span className="df-num">{num(candidate.shortfall)}</span>
+      <Row label="Rejection cause">
+        <span className="df-num">{rejectionReasonLabel(candidate.rejectionReason)}</span>
       </Row>
+      {candidate.rejectionReason === 'BELOW_THRESHOLD' ? (
+        <Row label="Short by" tone="warn">
+          <span className="df-num">{num(candidate.shortfall)}</span>
+        </Row>
+      ) : null}
       <Row label="Separation">
         <span className="df-num">
           <Maybe value={metres(candidate.distanceMeters)} />

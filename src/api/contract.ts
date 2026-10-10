@@ -1168,8 +1168,10 @@ export interface RejectedCandidate {
   readonly score: number;
   readonly distanceMeters: number;
   readonly timeDeltaSeconds: number;
-  /** How far below the acceptance threshold this candidate scored. */
+  /** Nonnegative score gap to the threshold (zero when score meets it). */
   readonly shortfall: number;
+  /** Recorded reason for rejecting the scored candidate; null for older records. */
+  readonly rejectionReason?: "BELOW_THRESHOLD" | "ONE_TO_ONE_CONFLICT" | "LOWER_RANKED_ALTERNATIVE" | "AMBIGUOUS_PAIR" | null;
 }
 
 export interface PolarizationEvidence {
@@ -1375,8 +1377,8 @@ export interface TrackPointOut {
   readonly lon: number;
   readonly sar_conf: number;
   readonly classification: string;
-  readonly apparent_length_m: number;
-  readonly length_unc_m: number;
+  readonly apparent_length_m: number | null;
+  readonly length_unc_m: number | null;
 }
 
 export interface CameraSnapshot {
@@ -3436,6 +3438,7 @@ export const REJECTEDCANDIDATE_FIELDS = [
   'distanceMeters',
   'timeDeltaSeconds',
   'shortfall',
+  'rejectionReason',
 ] as const;
 
 /**

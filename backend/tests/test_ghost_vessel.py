@@ -55,6 +55,7 @@ def _unmatched(**overrides: Any) -> dict[str, Any]:
                 "distanceMeters": 1840.0,
                 "timeDeltaSeconds": -240,
                 "shortfall": 0.09,
+                "rejectionReason": "BELOW_THRESHOLD",
             },
         },
     }
@@ -150,6 +151,27 @@ def test_decision_block_explains_the_rejection_in_arithmetic() -> None:
     assert "0.31" in reason
     assert "0.4" in reason
     assert "123456789" in reason
+    assert "short by 0.09" in reason
+
+
+def test_above_threshold_rejection_is_not_misreported_as_low_score() -> None:
+    """A 1:1 conflict can reject a high score; the dossier must state that cause."""
+    target = _unmatched()
+    target["corr"]["closestRejected"].update(
+        score=0.71, shortfall=0.0, rejectionReason="ONE_TO_ONE_CONFLICT"
+    )
+    reason = assess(target)["decision"]["reason_no_association"].lower()
+    assert "one-to-one" in reason
+    assert "short by" not in reason
+    assert "0.71" in reason
+
+
+def test_legacy_rejection_without_reason_does_not_guess_threshold_failure() -> None:
+    target = _unmatched()
+    del target["corr"]["closestRejected"]["rejectionReason"]
+    reason = assess(target)["decision"]["reason_no_association"].lower()
+    assert "not recorded" in reason
+    assert "short by" not in reason
 
 
 def test_empty_search_is_distinguished_from_a_near_miss() -> None:

@@ -120,8 +120,9 @@ class TrackPointOut(BaseModel):
     lon: float
     sar_conf: float
     classification: str
-    apparent_length_m: float
-    length_unc_m: float
+    # Missing source pixel spacing cannot be turned into a measured vessel size.
+    apparent_length_m: float | None
+    length_unc_m: float | None
 
 
 class TrackGapOut(BaseModel):
