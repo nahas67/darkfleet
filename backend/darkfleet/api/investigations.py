@@ -35,6 +35,13 @@ class InvestigationCreate(BaseModel):
     scan_id: Identifier | None = None
 
 
+class InvestigationRename(BaseModel):
+    """Rename only: the original case ID and immutable scan link cannot drift."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: Title
+
+
 class AnnotationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: Note
@@ -138,6 +145,22 @@ CREATE TABLE IF NOT EXISTS investigation_geometries (
 );
 CREATE INDEX IF NOT EXISTS investigation_geometries_case
  ON investigation_geometries (investigation_id, created_at, id);
+-- Operator-provided files are not sensor evidence and never become scan records.
+-- Binary bytes and provenance metadata commit atomically in one SQLite transaction.
+CREATE TABLE IF NOT EXISTS investigation_attachments (
+ id TEXT PRIMARY KEY,
+ investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+ filename TEXT NOT NULL,
+ media_type TEXT NOT NULL,
+ size_bytes INTEGER NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 8388608),
+ sha256 TEXT NOT NULL,
+ data BLOB NOT NULL,
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS investigation_attachments_case
+ ON investigation_attachments (investigation_id, created_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS investigation_attachments_content
+ ON investigation_attachments (investigation_id, sha256);
 """
 
 
@@ -262,6 +285,20 @@ def create_investigation(body: InvestigationCreate, state: State) -> Investigati
 @router.get("/{case_id}", response_model=InvestigationOut)
 def get_investigation(case_id: str, state: State) -> InvestigationOut:
     with _database(state.data_dir) as connection:
+        return _detail(connection, _case(connection, case_id), state)
+
+
+@router.put("/{case_id}", response_model=InvestigationOut)
+def rename_investigation(
+    case_id: str, body: InvestigationRename, state: State,
+) -> InvestigationOut:
+    """Persist a title change without updating linked scan or derived evidence."""
+    with _database(state.data_dir) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _case(connection, case_id)
+        connection.execute(
+            "UPDATE investigations SET title=? WHERE id=?", (body.title, case_id),
+        )
         return _detail(connection, _case(connection, case_id), state)
 
 
@@ -444,3 +481,11 @@ def delete_case_geometry(case_id: str, geo_id: str, state: State) -> None:
         )
         if cursor.rowcount == 0:
             raise _geo_missing()
+
+
+# Imported after parent routes are declared: attachment endpoints share this
+# router without editing the prime-owned application factory. The child only
+# reads _database/_case after the parent module has finished initialising.
+from darkfleet.api.investigation_attachments import router as attachment_router
+
+router.include_router(attachment_router)

@@ -42,6 +42,7 @@ _SCORE_FIELDS = (
 _MAX_NOTES = 250
 _MAX_GEOMETRIES = 150
 _MAX_TARGETS = 100
+_MAX_ATTACHMENTS = 32
 
 
 def _redacted_scalar(value: Any) -> str | float | int | bool | None:
@@ -190,6 +191,17 @@ def build_report(
             "ORDER BY created_at,id LIMIT ?",
             (case_id, _MAX_GEOMETRIES + 1),
         ).fetchall() if geom_table else [])
+        attachment_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='investigation_attachments'"
+        ).fetchone() is not None
+        # Never select the binary BLOB into a report. Only upload receipts,
+        # hashes and explicitly operator-authored provenance belong here.
+        attachment_rows = (connection.execute(
+            "SELECT id,filename,media_type,size_bytes,sha256,created_at "
+            "FROM investigation_attachments WHERE investigation_id=? "
+            "ORDER BY created_at,id LIMIT ?",
+            (case_id, _MAX_ATTACHMENTS + 1),
+        ).fetchall() if attachment_table else [])
         geometry: list[dict[str, Any]] = []
         warnings: list[str] = []
         for row in geom_rows[:_MAX_GEOMETRIES]:
@@ -217,6 +229,8 @@ def build_report(
             warnings.append(f"ANNOTATIONS_TRUNCATED:only first {_MAX_NOTES} included")
         if len(geom_rows) > _MAX_GEOMETRIES:
             warnings.append(f"GEOMETRIES_TRUNCATED:only first {_MAX_GEOMETRIES} included")
+        if len(attachment_rows) > _MAX_ATTACHMENTS:
+            warnings.append(f"ATTACHMENTS_TRUNCATED:only first {_MAX_ATTACHMENTS} included")
         record, source_status = _scan_source(store, case["scan_id"])
         if source_status != "PERSISTED_REAL":
             warnings.append(source_status)
@@ -266,6 +280,19 @@ def build_report(
             ],
             "warnings": sorted(set(warnings)),
         }
+        # Keep the canonical schema-1 hash exactly stable for historical cases
+        # without attachments: an empty new field would otherwise change the
+        # digest for a report whose original evidence is unchanged.
+        if attachment_rows:
+            report["operator_material"]["attachments"] = [
+                {
+                    "id": row["id"], "filename": row["filename"],
+                    "media_type": row["media_type"], "size_bytes": row["size_bytes"],
+                    "sha256": row["sha256"], "created_at": row["created_at"],
+                    "provenance": "OPERATOR_ATTACHMENT_NOT_SENSOR_EVIDENCE",
+                }
+                for row in attachment_rows[:_MAX_ATTACHMENTS]
+            ]
         canonical = json.dumps(
             report, sort_keys=True, ensure_ascii=False,
             separators=(",", ":"), allow_nan=False,
@@ -367,6 +394,15 @@ def render_investigation_pdf(report: dict[str, Any]) -> bytes:
         for field in ("length_km", "perimeter_km", "area_km2", "radius_km", "initial_bearing_deg"):
             if measurements.get(field) is not None:
                 line(field, measurements[field])
+    attachments = material.get("attachments", [])
+    line("Binary operator attachments (metadata only)", len(attachments))
+    for attachment in attachments:
+        line("Uploaded file", attachment["filename"])
+        line("File type / bytes", f"{attachment['media_type']} / {attachment['size_bytes']}")
+        line("Uploaded SHA-256", attachment["sha256"])
+        line("Evidence class", "OPERATOR_ATTACHMENT_NOT_SENSOR_EVIDENCE")
+    if attachments:
+        line("File bytes", "Not embedded in PDF/JSON. Download separately and verify SHA-256.")
 
     heading("Scientific limits and incomplete evidence")
     for note in report["scientific_limits"]:
