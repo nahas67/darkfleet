@@ -26,6 +26,13 @@ from urllib.parse import urlsplit
 import numpy as np
 import psutil
 import rasterio
+from local_browser_harness_integrity import (
+    VITE_RAW_SOURCES,
+    assert_stable_sources,
+    source_hashes,
+    verify_fixture,
+    verify_vite_raw_source,
+)
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
@@ -35,13 +42,6 @@ UNREFERENCED = ROOT / "backend" / "tests" / "fixtures" / "cog" / "fixture_unrefe
 API_PORT = 8010
 WEB_PORT = 5175
 LOOPBACK = {"localhost", "127.0.0.1", "::1"}
-OWNED_CONTRACTS = (
-    "src/scenes/LocalSarImportPanel.tsx",
-    "backend/darkfleet/api/local_sar_routes.py",
-    "backend/darkfleet/local_sar_import.py",
-    "vite.config.ts",
-)
-
 # The ASGI process denies outbound IPv4/IPv6 connections outside loopback.
 # This guard runs before the application's modules are imported. It does not
 # intercept DNS calls that are independent of connect(), or Node subprocesses.
@@ -188,20 +188,21 @@ def reference_png_pixels(source: Path) -> np.ndarray:
 def run() -> dict:
     assert_unused_port(API_PORT)
     assert_unused_port(WEB_PORT)
-    checked(FIXTURE.is_file() and UNREFERENCED.is_file(), "Committed GeoTIFF fixtures missing")
-    fixture_sha = digest(FIXTURE.read_bytes())
-    sha_unreferenced = digest(UNREFERENCED.read_bytes())
+    fixture_identity = verify_fixture(ROOT, FIXTURE.relative_to(ROOT).as_posix())
+    unreferenced_identity = verify_fixture(ROOT, UNREFERENCED.relative_to(ROOT).as_posix())
+    fixture_sha = str(fixture_identity["sha256"])
+    sha_unreferenced = str(unreferenced_identity["sha256"])
     report: dict = {
         "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "fixture_relative": FIXTURE.relative_to(ROOT).as_posix(),
         "fixture_sha256": fixture_sha,
+        "fixture_git_blob_oid": fixture_identity["gitBlobOid"],
         "fixture_size": FIXTURE.stat().st_size,
         "unsupported_fixture_sha256": sha_unreferenced,
+        "unsupported_fixture_git_blob_oid": unreferenced_identity["gitBlobOid"],
         "ports": {"api": API_PORT, "vite": WEB_PORT},
         "checks": [],
-        "contract_source_sha256": {
-            relative: digest((ROOT / relative).read_bytes()) for relative in OWNED_CONTRACTS
-        },
+        "contract_source_sha256": source_hashes(ROOT),
     }
     with tempfile.TemporaryDirectory(prefix="darkfleet-local-sar-browser-") as scratch:
         temporary = Path(scratch)
@@ -277,6 +278,18 @@ def run() -> dict:
                                 route.abort("blockedbyclient")
 
                         context.route("**/*", local_only)
+                        raw_modules: dict[str, str] = {}
+                        for relative in VITE_RAW_SOURCES:
+                            response = context.request.get(f"{web_base}/{relative}?raw", timeout=12000)
+                            checked(response.status == 200,
+                                    f"Vite did not serve expected module: {relative} HTTP {response.status}")
+                            raw_modules[relative] = verify_vite_raw_source(
+                                relative, response.text(), (ROOT / relative).read_bytes(),
+                            )
+                            checked(raw_modules[relative] == report["contract_source_sha256"][relative],
+                                    f"Vite served an unexpected version of {relative}")
+                        report["vite_raw_source_sha256"] = raw_modules
+                        report["checks"].append("Vite dev raw source matches the five mounted UI modules")
                         page = context.new_page()
                         page.set_default_timeout(15000)
                         sar_responses = []
@@ -433,9 +446,9 @@ def run() -> dict:
                 report["git_head_end"] = subprocess.check_output(
                     ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
                 ).strip()
-                checked(all(digest((ROOT / relative).read_bytes()) == sha
-                            for relative, sha in report["contract_source_sha256"].items()),
-                        "GeoTIFF UI/backend contracts changed during the browser test")
+                assert_stable_sources(ROOT, report["contract_source_sha256"])
+                verify_fixture(ROOT, FIXTURE.relative_to(ROOT).as_posix())
+                verify_fixture(ROOT, UNREFERENCED.relative_to(ROOT).as_posix())
                 return report
             except BaseException:
                 api_log.flush()
