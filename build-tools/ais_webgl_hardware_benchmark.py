@@ -108,6 +108,7 @@ INSTALL = r"""async () => {
     primitives:viewer.scene.primitives.length,
     entities:viewer.entities.values.length,
     sceneRequestRenderMode:viewer.scene.requestRenderMode,
+    webglContextLost:gl.isContextLost(),
     aisStats:engine.aisRenderStats,
     webglCallsSinceInstall:Object.fromEntries(Object.entries(resources).map(([k,v])=>[k,{...v}])),
     ...mem()
@@ -125,6 +126,10 @@ INSTALL = r"""async () => {
   const debug = gl.getExtension('EXT_disjoint_timer_query_webgl2');
   return {renderer,vendor,glVersion:String(gl.getParameter(gl.VERSION)),
     maxTextureSize:gl.getParameter(gl.MAX_TEXTURE_SIZE),gpuTimerExtensionAvailable:!!debug,
+    maxRenderbufferSize:gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+    maxVertexAttribs:gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+    maxTextureImageUnits:gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
+    maxSamples:gl.getParameter(gl.MAX_SAMPLES),
     canvasPixels:[canvas.width,canvas.height],canvasConnected:canvas.isConnected,
     canvasSameAsDom:document.querySelector('.cesium-widget canvas')===canvas,
     documentVisible:document.visibilityState, initialWorkspace:store.getState().workspace,
@@ -236,7 +241,8 @@ CASE = r"""async ({count,frames,timeoutMs}) => {
     physicalPick,
     activeDrawEvents:drawEvents.length,postRenderListenerRemoved:true,
     complete:(intervals.length>=frames && afterDestroy.primitives===before.primitives &&
-      afterLoad.aisStats.billboards===count && cleared.aisStats.billboards===0),
+      !afterDestroy.webglContextLost && afterLoad.aisStats.billboards===count &&
+      cleared.aisStats.billboards===0),
   };
 }"""
 

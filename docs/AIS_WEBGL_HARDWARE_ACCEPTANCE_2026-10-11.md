@@ -12,7 +12,7 @@ The benchmark **uses SYNTHETIC fixtures, not historical AIS and not a live AIS f
 
 | Signal | Implementation | Claim limit |
 | --- | --- | --- |
-| GPU / WebGL hardware | Unmasked `WEBGL_debug_renderer_info` vendor/renderer plus WebGL2 on actual Cesium canvas. Software renderers and unknown/non-hardware IDs fail | Renderer **reported** by Chrome/ANGLE, not an independent physical GPU probe |
+| GPU / WebGL hardware | Unmasked `WEBGL_debug_renderer_info` vendor/renderer plus WebGL2 on actual Cesium canvas. Software renderers and unknown/non-hardware IDs fail. Check for context loss after each stage and record supported GL limits (texture/renderbuffer sizes, texture units, multisamples) | Renderer **reported** by Chrome/ANGLE, not an independent physical GPU probe |
 | Active frame intervals | A registered Cesium `scene.postRender` listener samples `performance.now()` **between real Cesium postRender callbacks**; updates AIS reference time 8↔10 minutes after every actual scene render; `requestRender()` / continuous scene mode ensures active frames | Includes browser JS/CPU + Cesium rendering and GPU-submit queue; **NOT true GPU time** or GPU timer-query elapsed |
 | AIS load/update cost | Monotonic JS wall-clock around engine calls, first load and per-frame playback updates; p50/p95/max separately | CPU-side renderer + Cesium update invocation, not separately measured GPU execution |
 | Contact count | Renderer statistics after insertion, 100 / 1,000 / 5,000 / 10,000 | Not a claim about 10,000 uniquely visible onscreen pixels |
