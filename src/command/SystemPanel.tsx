@@ -11,7 +11,7 @@
  *    one failing provider cannot hide behind a healthy sibling.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { loadDatasetHealth, loadProviders } from '../api/client';
 import { engine } from '../globe/engine';
 import { useStore } from '../state/store';
@@ -20,6 +20,16 @@ import { SHORTCUTS } from './useGlobalKeys';
 import { NOT_ESTABLISHED } from '../design/format';
 import { useArchiveCoverage } from '../ais/archiveCoverage';
 import { installStatusLabel, versionLabel } from '../maritime/datasetHealth';
+import type { ProviderHealthEntry } from '../api/contract';
+
+/** The group health is the least healthy reported member; an unknown status stays unknown. */
+export function worstProviderHealth(providers: readonly ProviderHealthEntry[]): string | null {
+  if (providers.length === 0) return null;
+  const values = providers.map((provider) => provider.status);
+  if (values.some((status) => !healthSeverity.includes(status))) return null;
+  return values.reduce((worst, status) =>
+    healthSeverity.indexOf(status) > healthSeverity.indexOf(worst) ? status : worst);
+}
 
 /**
  * Deployment-level AIS archive state.
@@ -38,8 +48,9 @@ function ArchiveCoverageSection() {
     <div className="border border-structural/60 px-2 py-1.5" data-df-archive-coverage>
       <div className="flex items-baseline justify-between gap-2">
         <span className="df-label text-[10px] uppercase">AIS archive (deployment)</span>
-        <button type="button" className="df-btn text-[10px]" onClick={coverage.reload}>
-          Re-probe
+        <button type="button" className="df-btn text-[10px]" onClick={coverage.reload}
+          disabled={coverage.status === 'loading'}>
+          {coverage.status === 'loading' ? 'Probing…' : 'Re-probe'}
         </button>
       </div>
 
@@ -92,6 +103,13 @@ function ArchiveCoverageSection() {
  */
 function BasemapSection() {
   const [, refresh] = useState(0);
+  // The map-source recovery probe runs inside the engine and does not write to
+  // the React store. Refresh this inspector while mounted so fallback/recovery
+  // transitions become visible without a unrelated state update.
+  useEffect(() => {
+    const interval = window.setInterval(() => refresh((value) => value + 1), 5_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const status = engine.basemapStatus();
   const sources = engine.basemapSources();
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -159,7 +177,8 @@ function BasemapSection() {
       <p className="pt-1 text-[10px] leading-relaxed text-ink-dim">
         Reference basemap, not analytical source evidence. It provides geographic context
         beneath SAR targets and is never an input to detection, correlation or
-        classification.
+        classification. Active means a provider was constructed; successful tile delivery
+        is assessed separately from repeated imagery request failures.
       </p>
     </div>
   );
@@ -189,20 +208,37 @@ function BasemapSection() {
  */
 function DatasetHealthSection() {
   const health = useStore();
+  const datasetStatus = health.datasetHealthError !== null
+    ? health.datasetHealth !== null ? 'stale-error' : 'failed'
+    : health.datasetHealthLoading
+      ? health.datasetHealth !== null ? 'refreshing' : 'loading'
+      : health.datasetHealth === null ? 'loading' : 'ready';
 
   return (
-    <div className="mt-3" data-df-dataset-health={health.datasetHealth === null ? health.datasetHealthError ? 'failed' : 'loading' : 'ready'}>
+    <div className="mt-3" data-df-dataset-health={datasetStatus}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <span className="df-label text-[10px]">Local reference data</span>
         <button
           type="button"
           className="df-btn text-[10px]"
+          disabled={health.datasetHealthLoading}
           // `force` so an operator who installs a dataset and presses Re-check sees it.
           onClick={() => void loadDatasetHealth(true)}
         >
-          Re-check
+          {health.datasetHealthLoading ? 'Checking…' : 'Re-check'}
         </button>
       </div>
+
+      {health.datasetHealth !== null && health.datasetHealthError !== null ? (
+        <p className="mb-2 text-[11px] text-fault" data-df-dataset-health-error role="alert">
+          The dataset store re-check failed: {health.datasetHealthError}. The inventory below is
+          from the last successful check and is not verified as current. Maritime toggles are unavailable.
+        </p>
+      ) : health.datasetHealth !== null && health.datasetHealthLoading ? (
+        <p className="mb-2 text-[11px] text-ink-dim" role="status">
+          Re-checking the local dataset store. The inventory below is the previous result.
+        </p>
+      ) : null}
 
       {health.datasetHealth === null && health.datasetHealthError === null ? (
         <p className="text-[11px] text-ink-dim">Reading the local dataset store…</p>
@@ -349,6 +385,19 @@ export function SystemPanel() {
         <DatasetHealthSection />
 
         <p className="df-label mb-1.5 mt-3 text-[10px]">Source health</p>
+        {state.providersLoading && state.providers.length > 0 ? (
+          <p className="mb-1 text-[11px] text-ink-dim" role="status">
+            Probing sources. The statuses below are from the previous check.
+          </p>
+        ) : null}
+        {worstProviderHealth(state.providers) !== null ? (
+          <p className="mb-1 text-[11px]" data-df-provider-overall>
+            <span className="df-label text-[10px]">Worst reported health: </span>
+            <span style={{ color: healthColor[worstProviderHealth(state.providers)!] ?? 'var(--df-text-dim)' }}>
+              {worstProviderHealth(state.providers)?.replace(/_/g, ' ')}
+            </span>
+          </p>
+        ) : null}
         {state.providers.length === 0 ? (
           <p className="text-[11px] text-ink-dim" data-df-providers-empty>
             {state.providersLoading
@@ -358,7 +407,9 @@ export function SystemPanel() {
         ) : (
           <ul className="space-y-1" data-df-provider-list>
             {state.providers.map((provider) => {
-              const status = String((provider as { status?: string }).status ?? 'NOT_CONFIGURED');
+              const reported = (provider as { status?: unknown }).status;
+              const status = typeof reported === 'string' && healthSeverity.includes(reported)
+                ? reported : 'NOT_ESTABLISHED';
               const tone = healthColor[status] ?? 'var(--df-text-dim)';
               return (
                 <li key={provider.provider} className="border-l-2 pl-2" style={{ borderColor: tone }}>
@@ -388,8 +439,8 @@ export function SystemPanel() {
           ))}
         </ol>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-          A group reports its worst member, so a single failing source cannot be hidden
-          behind a healthy sibling.
+          Overall status is computed from reported provider states. An unknown or absent
+          provider status does not establish group availability.
         </p>
 
         <p className="df-label mb-1.5 mt-4 text-[10px]">Keyboard</p>

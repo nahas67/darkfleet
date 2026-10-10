@@ -41,17 +41,16 @@ import type { DatasetHealthResponse } from '../api/contract';
  * DISABLED WITH A REASON -- never shown as an enabled toggle that draws nothing,
  * and never silently dropped from the list.
  */
-type Requirement = 'scan' | 'ais' | 'raster' | 'maritime';
+type Requirement = 'targets' | 'uncertainty' | 'ais' | 'tracks' | 'prediction' | 'raster' | 'maritime';
 
 const REQUIREMENT: Partial<Record<LayerId, Requirement>> = {
   SAR_RASTER: 'raster',
-  SAR_SCENE_FOOTPRINT: 'scan',
-  SAR_DETECTIONS: 'scan',
-  UNCERTAINTY_RADII: 'scan',
+  SAR_SCENE_FOOTPRINT: 'raster',
+  SAR_DETECTIONS: 'targets',
+  UNCERTAINTY_RADII: 'uncertainty',
   AIS_CONTACTS: 'ais',
-  AIS_TRACKS: 'ais',
-  AIS_PREDICTED: 'ais',
-  CORRELATION_LINKS: 'scan',
+  AIS_TRACKS: 'tracks',
+  AIS_PREDICTED: 'prediction',
   // Maritime reference layers are gated on the LOCAL DATASET STORE, not on a scan.
   REFERENCE_COASTLINE: 'maritime',
   EEZ_BOUNDARIES: 'maritime',
@@ -158,6 +157,8 @@ const LAYER_DATASET: Partial<Record<LayerId, string>> = {
  * server-side in ANALYTICS. The globe attaches ONE raster at a time.
  */
 const BLOCKED: Partial<Record<LayerId, string>> = {
+  CORRELATION_LINKS:
+    'Correlation-link geometry is not currently sent to the globe. No source calls the correlation-link renderer.',
   LAND_MASK:
     'The globe draws one SAR raster at a time. View the land mask in ANALYTICS, or run it as the raster layer.',
   CFAR_DEBUG:
@@ -204,23 +205,42 @@ export function deriveLayers(
   maritimeHealth: DatasetHealthResponse | null = null,
   maritimeRefusals: Readonly<Record<string, string>> = {},
 ): LayerRow[] {
-  const hasScan = state.scanId !== null && state.targets.length > 0;
+  const hasTargets = state.scanId !== null && state.targets.length > 0;
   // Both must hold: the artifact exists AND it is actually on the globe.
   const hasRaster = state.rasterLoaded && state.scanId !== null;
-  const hasAis = state.aisOnly.length > 0 || state.track !== null;
+  const hasAis = state.aisOnly.length > 0 || state.aisObservations?.length > 0 ||
+    (state.track?.observed?.length ?? 0) > 0;
+  const usableFixesByMmsi = new Map<string, number>();
+  for (const fix of state.aisObservations ?? []) {
+    if (!Number.isFinite(fix.lat) || !Number.isFinite(fix.lon) || !Number.isFinite(Date.parse(fix.timestamp))) continue;
+    usableFixesByMmsi.set(fix.mmsi, (usableFixesByMmsi.get(fix.mmsi) ?? 0) + 1);
+  }
+  const hasTracks = [...usableFixesByMmsi.values()].some((count) => count >= 2) ||
+    (state.track?.observed?.length ?? 0) >= 2;
+  const hasPredictions = (state.targetDetail ?? []).some((target) => {
+    const corr = target.corr;
+    return corr && Number.isFinite(corr.predictedLat) && Number.isFinite(corr.predictedLon);
+  });
   // Maritime layers do NOT require a scan. A coastline is the same whether or not a vessel
   // was detected in it, and gating reference context on a detection would mean the sea is
   // invisible on an empty scan -- which is exactly when an operator wants to see it.
   const satisfied: Record<Requirement, boolean> = {
-    scan: hasScan,
+    targets: hasTargets,
+    uncertainty: state.targets.some((target) =>
+      target.geolocationUncertaintyM !== null && Number.isFinite(target.geolocationUncertaintyM) && target.geolocationUncertaintyM > 0),
     ais: hasAis,
+    tracks: hasTracks,
+    prediction: hasPredictions,
     raster: hasRaster,
     maritime: true,
   };
 
   const reasons: Record<Requirement, string> = {
-    scan: 'No completed scan has produced detections.',
+    targets: 'No completed scan has produced detections.',
+    uncertainty: 'No detection has a recorded positive geolocation uncertainty.',
     ais: 'No AIS source has answered for the current selection.',
+    tracks: 'No vessel has at least two usable recorded positions for a track.',
+    prediction: 'No correlated detection has a recorded predicted AIS position.',
     raster: 'This scan has no rendered raster artifact.',
     maritime: '',
   };
@@ -241,7 +261,11 @@ export function deriveLayers(
     // them could be missing while the others draw.
     const datasetId = LAYER_DATASET[id];
     if (!unavailableReason && datasetId !== undefined) {
-      unavailableReason = maritimeLayerReason(maritimeHealth, datasetId);
+      unavailableReason = state.datasetHealthError
+        ? `The local reference-data re-check failed: ${state.datasetHealthError}. Installed data cannot be verified.`
+        : state.datasetHealthLoading
+          ? 'The local reference-data inventory is being checked.'
+          : maritimeLayerReason(maritimeHealth, datasetId);
     }
 
     /*
@@ -269,7 +293,9 @@ export function deriveLayers(
       opacity: choice?.opacity ?? 1,
       // Opacity on a point or vector layer has no meaning, so the control is not
       // rendered. A slider that does nothing is an inert control.
-      supportsOpacity: entry.supportsOpacity,
+      // The globe currently applies layer visibility only. Its engine has no
+      // opacity setter, so exposing a slider here would be a decorative control.
+      supportsOpacity: false,
       ...(unavailableReason ? { unavailableReason } : {}),
       /*
        * THE THREE STATES, DERIVED ONCE AND ON THE ROW.
@@ -314,13 +340,13 @@ export function LayerConsole() {
    * is the difference between one path and two: an earlier version drove GRATICULE
    * here directly while every other layer went nowhere.
    */
-  const commit = (id: LayerId, patch: { visible?: boolean; opacity?: number }) => {
+  const commit = (id: LayerId, visible: boolean) => {
     store.set((prev) => ({
       layerState: {
         ...prev.layerState,
         [id]: {
-          visible: patch.visible ?? prev.layerState[id].visible,
-          opacity: patch.opacity ?? prev.layerState[id].opacity,
+          visible,
+          opacity: prev.layerState[id].opacity,
           ...(prev.layerState[id].unavailableReason
             ? { unavailableReason: prev.layerState[id].unavailableReason }
             : {}),
@@ -334,6 +360,9 @@ export function LayerConsole() {
       <header className="df-panel-head">
         <span className="df-label">Active layers</span>
       </header>
+      <p className="px-3 pt-2 text-[10px] text-ink-dim" data-df-layer-opacity-status>
+        Layer visibility is adjustable. Globe opacity adjustment is unavailable in this renderer.
+      </p>
       <div className="p-3">
         {CATEGORY_ORDER.map((category) => {
           const groupRows = rows.filter((row) => row.category === category);
@@ -402,29 +431,11 @@ export function LayerConsole() {
                           disabled={disabled}
                           aria-pressed={ariaPressedFor(controlState)}
                           title={row.unavailableReason ?? row.label}
-                          onClick={() => commit(row.id, { visible: !row.visible })}
+                          onClick={() => commit(row.id, !row.visible)}
                         >
                           <span className="df-mono text-[10px]">{shown ? '◉' : '○'}</span>
                           <span className="truncate normal-case tracking-normal">{row.label}</span>
                         </button>
-                        {row.supportsOpacity && !disabled ? (
-                          <input
-                            type="range"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={row.opacity}
-                            aria-label={`${row.label} opacity`}
-                            className="w-16 accent-[var(--df-cyan)]"
-                            onChange={(event) =>
-                              commit(row.id, { opacity: Number(event.target.value) })
-                            }
-                          />
-                        ) : (
-                          <span className="df-num w-16 text-right text-ink-dim">
-                            {row.supportsOpacity ? 'n/a' : '—'}
-                          </span>
-                        )}
                       </div>
                       {disabled ? (
                         <p className="df-num mt-0.5 pl-1 text-[10px] text-ink-dim">
