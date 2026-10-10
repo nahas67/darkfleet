@@ -1,4 +1,4 @@
-/** Persistent operator WGS84 annotations; no claim of SAR detection or globe drawing. */
+/** Persistent operator WGS84 annotations; globe clicks are operator drawings, never sensor evidence. */
 import { useEffect, useState } from 'react';
 import {
   createGeoAnnotation, deleteGeoAnnotation, listGeoAnnotations, parseLonLatLines,
@@ -8,8 +8,9 @@ import {
 import { explain } from '../api/errors';
 import { fmtInstant } from '../design/format';
 import { engine } from '../globe/engine';
+import { editVertices, initialVertexHistory, redoVertices, undoVertices } from './geometryVertexHistory';
 
-const EMPTY = { label: '', notes: '', vertices: '', radius: '1000', kind: 'point' as GeometryKind };
+const EMPTY = { label: '', notes: '', radius: '1000', kind: 'point' as GeometryKind };
 const show = (value: number | null) => value === null ? '—' : value.toLocaleString(undefined, {
   maximumFractionDigits: 3,
 });
@@ -17,6 +18,7 @@ const show = (value: number | null) => value === null ? '—' : value.toLocaleSt
 export function InvestigationGeometryPanel(props: { caseId: string; scanId: string | null }) {
   const [items, setItems] = useState<GeoAnnotation[]>([]);
   const [draft, setDraft] = useState(EMPTY);
+  const [vertices, setVertices] = useState(initialVertexHistory);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,41 +39,42 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
   // WGS84 geodesic measurements on save, and a half-typed vertex is not drawn.
   useEffect(() => {
     try {
-      if (!draft.vertices.trim()) {
+      if (!vertices.current.trim()) {
         engine.showOperatorDraft(null);
         return;
       }
-      const vertices = parseLonLatLines(draft.vertices);
+      const coordinates = parseLonLatLines(vertices.current);
       const radius = Number(draft.radius);
       engine.showOperatorDraft({
         kind: draft.kind,
-        coordinates: vertices,
+        coordinates,
         radius_m: draft.kind === 'range_ring' && Number.isFinite(radius) ? radius : null,
       });
     } catch {
       engine.showOperatorDraft(null);
     }
-  }, [draft]);
+  }, [draft, vertices.current]);
 
   useEffect(() => {
     if (!drawing) return;
     const disarm = engine.armOperatorDrawing(([lon, lat]) => {
-      setDraft((prior) => {
+      setVertices((prior) => {
         const nextPoint = `${lon.toFixed(7)}, ${lat.toFixed(7)}`;
-        if (prior.kind === 'point' || prior.kind === 'range_ring') {
-          return { ...prior, vertices: nextPoint };
+        if (draft.kind === 'point' || draft.kind === 'range_ring') {
+          return editVertices(prior, nextPoint);
         }
-        const lines = prior.vertices.trim();
-        return { ...prior, vertices: lines ? `${lines}\n${nextPoint}` : nextPoint };
+        const lines = prior.current.trim();
+        return editVertices(prior, lines ? `${lines}\n${nextPoint}` : nextPoint);
       });
     });
     return () => disarm();
-  }, [drawing, props.caseId]);
+  }, [drawing, props.caseId, draft.kind]);
 
   useEffect(() => {
     let active = true;
     setItems([]);
     setDraft(EMPTY);
+    setVertices(initialVertexHistory());
     setEditingId(null);
     setDrawing(false);
     setPendingDelete(null);
@@ -95,9 +98,10 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     setEditingId(null);
     setPendingDelete(null);
     setDraft(EMPTY);
+    setVertices(initialVertexHistory());
   };
   const save = () => run(async () => {
-    const coordinates = parseLonLatLines(draft.vertices);
+    const coordinates = parseLonLatLines(vertices.current);
     const radius = Number(draft.radius);
     if (draft.kind === 'range_ring' && (!draft.radius.trim() ||
         !Number.isFinite(radius) || radius < 1 || radius > 2_000_000)) {
@@ -127,9 +131,11 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       label: item.label,
       notes: item.notes,
       kind: item.geometry.kind,
-      vertices: item.geometry.coordinates.map(([lon, lat]) => `${lon}, ${lat}`).join('\n'),
       radius: String(item.geometry.radius_m ?? 1000),
     });
+    setVertices(initialVertexHistory(item.geometry.coordinates.map(
+      ([lon, lat]) => `${lon}, ${lat}`,
+    ).join('\n')));
   };
   const remove = (id: string) => run(async () => {
     await deleteGeoAnnotation(props.caseId, id);
@@ -168,8 +174,8 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       </label>
       <textarea id="df-geo-vertices" data-df-geo-vertices className="df-input w-full"
         rows={3} maxLength={6000} spellCheck={false} disabled={busy}
-        value={draft.vertices} placeholder={'103.801, 1.281\n103.811, 1.292'}
-        onChange={(event) => setDraft((prior) => ({ ...prior, vertices: event.target.value }))} />
+        value={vertices.current} placeholder={'103.801, 1.281\n103.811, 1.292'}
+        onChange={(event) => setVertices((prior) => editVertices(prior, event.target.value))} />
       <p className="text-[10px] text-ink-dim">
         {draft.kind === 'point' || draft.kind === 'range_ring' ? 'Exactly 1 vertex.' :
           draft.kind === 'polyline' ? 'At least 2 vertices.' :
@@ -184,14 +190,14 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
           {drawing ? 'Stop globe drawing' : 'Draw by globe clicks'}
         </button>
         <button type="button" className="df-btn" data-df-geo-undo-point
-          disabled={busy || !draft.vertices.trim()}
-          onClick={() => setDraft((prior) => ({
-            ...prior,
-            vertices: prior.vertices.trim().split('\n').slice(0, -1).join('\n'),
-          }))}>Undo vertex</button>
+          disabled={busy || vertices.past.length === 0}
+          onClick={() => setVertices(undoVertices)}>Undo vertices</button>
+        <button type="button" className="df-btn" data-df-geo-redo-point
+          disabled={busy || vertices.future.length === 0}
+          onClick={() => setVertices(redoVertices)}>Redo vertices</button>
         <button type="button" className="df-btn" data-df-geo-clear-points
-          disabled={busy || !draft.vertices.trim()}
-          onClick={() => setDraft((prior) => ({ ...prior, vertices: '' }))}>Clear vertices</button>
+          disabled={busy || !vertices.current.trim()}
+          onClick={() => setVertices((prior) => editVertices(prior, ''))}>Clear vertices</button>
       </div>
       {drawing ? <p className="text-[10px] text-ink" data-df-geo-drawing-status role="status">
         Globe drawing armed · click ocean or land to add a WGS84 vertex. For a point
@@ -212,7 +218,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
         onChange={(event) => setDraft((prior) => ({ ...prior, notes: event.target.value }))} />
       <div className="flex gap-2">
         <button className="df-btn" type="button" data-df-geo-save
-          disabled={busy || !draft.label.trim() || !draft.vertices.trim()} onClick={save}>
+          disabled={busy || !draft.label.trim() || !vertices.current.trim()} onClick={save}>
           {editingId ? 'Update geometry' : 'Save geometry'}
         </button>
         {editingId ? <button className="df-btn" type="button" disabled={busy}

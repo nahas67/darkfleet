@@ -29,6 +29,7 @@ describe('DF-X16 discoverability and operator provenance', () => {
     expect(markup).toContain('data-df-geo-kind');
     expect(markup).toContain('data-df-geo-vertices');
     expect(markup).toContain('data-df-geo-save');
+    expect(markup).toContain('data-df-geo-redo-point');
     expect(markup).toContain('WGS84 vertices');
     expect(markup).toContain('NOT SAR/AIS sensor evidence');
     expect(markup).toContain('Case linked to persisted scan REAL-001');
