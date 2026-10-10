@@ -102,7 +102,9 @@ if(!Number.isInteger(apiPort)||!Number.isInteger(vitePort)||
 const allowedHost=h=>['127.0.0.1','localhost','::1'].includes(String(h).toLowerCase());
 const socketConnect=net.Socket.prototype.connect;
 net.Socket.prototype.connect=function(...args){
-  const value=args[0];let host='localhost',port;
+  // Node's internal net.normalizeArgs can pass a single [options, cb] tuple
+  // to Socket.connect; treat only that exact wrapper as a TCP endpoint.
+  const value=Array.isArray(args[0])?args[0][0]:args[0];let host='localhost',port;
   if(value&&typeof value==='object'){
     host=value.host||value.hostname||host;port=Number(value.port);
   }else if(typeof value==='number'){
@@ -112,7 +114,7 @@ net.Socket.prototype.connect=function(...args){
     throw new Error('GPU_SCRATCH_NODE_PIPE_CONNECT_BLOCKED');
   }
   if(!allowedHost(host)||![apiPort,vitePort].includes(port))
-    throw new Error('GPU_SCRATCH_NODE_OUTBOUND_EGRESS_BLOCKED');
+    throw new Error('GPU_SCRATCH_NODE_OUTBOUND_EGRESS_BLOCKED_'+String(host)+'_'+String(port));
   return socketConnect.apply(this,args);
 };
 const originalLookup=dns.lookup;
