@@ -20,6 +20,11 @@ Two processes: the Python API and the Vite dev server. **The API must be running
 for the UI to work** — there is no local analysis path in the browser to fall
 back on.
 
+The unauthenticated API listens on `127.0.0.1` by default, and Docker Compose
+publishes its API and web ports on host loopback only. A deployment intended for
+other machines requires an explicit network exposure decision and an authenticating
+reverse proxy; changing `DARKFLEET_API_HOST` alone does not provide authentication.
+
 **Prerequisites:** Node.js, and Python 3.12 for the backend.
 
 ### 1. Start the backend (serves the API on `http://127.0.0.1:8000`)

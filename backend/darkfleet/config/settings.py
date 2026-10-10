@@ -77,7 +77,10 @@ class Settings(BaseSettings):
     runtime_mode: Literal["REAL"] = "REAL"
 
     data_dir: str = "data"
-    api_host: str = "0.0.0.0"
+    # Local-first is a security boundary: the API has no authentication, so a
+    # direct `python -m darkfleet` must never expose mutable operator data to
+    # other hosts on the network. Container deployments opt into 0.0.0.0.
+    api_host: str = "127.0.0.1"
     api_port: int = 8000
     log_level: str = "INFO"
 

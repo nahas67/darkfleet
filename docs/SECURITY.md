@@ -48,6 +48,12 @@ never credentials.
 
 **CORS.** An explicit origin allowlist, `allow_credentials=False`.
 
+**Local API binding.** `Settings.api_host` defaults to `127.0.0.1`, and the
+Compose published API/web ports default to host loopback. The API has no operator
+authentication, so network publication requires explicit configuration and an
+authenticating reverse proxy. The container process binds to `0.0.0.0` inside
+its own network namespace so that the loopback-published host port can reach it.
+
 **Offline GeoTIFF intake.** `/api/sar/local/*` is a separate **loopback-only**
 operator interface. The route checks the actual ASGI peer address rather than
 trusting `Host`, `Origin` or proxy-forwarded headers. It accepts inbox-relative
