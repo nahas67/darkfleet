@@ -181,6 +181,20 @@ def test_renders_with_no_data_without_crashing() -> None:
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_missing_sensor_resolution_remains_explicit_in_exported_pdf() -> None:
+    target = {**TARGETS[0], "lenM": None, "lenUncM": None, "hdg": None,
+              "meanDb": None, "maxDb": None, "sarConf": None, "aisConf": None}
+    pdf = render_pdf(
+        scan_id="DF-MISSING-RES", title="Missing resolution evidence",
+        scene=PROV["sar"], provenance=PROV, targets=[target], ais_only=[],
+    )
+    # FPDF escapes PDF literal-string parentheses in content streams.
+    assert b"not established \\(sensor resolution unavailable\\)" in pdf
+    assert b"None m" not in pdf
+    assert b"None deg" not in pdf
+    assert b"None / None dB" not in pdf
+
+
 def test_no_data_colour_is_outside_the_greyscale_data_ramp() -> None:
     """Excluded pixels must be distinguishable from a valid low-backscatter pixel.
 

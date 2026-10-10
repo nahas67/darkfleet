@@ -161,6 +161,57 @@ export interface SavedViewsOut {
   readonly count: number;
 }
 
+export interface GeometryCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly label: string;
+  readonly notes?: string;
+  readonly geometry: GeometryInput;
+}
+
+export interface GeometryOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly investigation_id: string;
+  readonly scan_id: string | null;
+  readonly provenance?: string;
+  readonly label: string;
+  readonly notes: string;
+  readonly geometry: GeometryInput;
+  readonly measurements: Measurements;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface GeometryListOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly geometries: GeometryOut[];
+}
+
+export interface GeometryInput {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly kind: "point" | "polyline" | "polygon" | "range_ring";
+  readonly coordinates: readonly [number, number][];
+  readonly radius_m?: number | null;
+}
+
+export interface Measurements {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly ellipsoid?: "WGS84";
+  readonly method: string;
+  readonly length_m?: number | null;
+  readonly length_km?: number | null;
+  readonly length_nm?: number | null;
+  readonly initial_bearing_deg?: number | null;
+  readonly perimeter_m?: number | null;
+  readonly perimeter_km?: number | null;
+  readonly perimeter_nm?: number | null;
+  readonly area_m2?: number | null;
+  readonly area_km2?: number | null;
+  readonly radius_m?: number | null;
+  readonly radius_km?: number | null;
+  readonly radius_nm?: number | null;
+}
+
 export interface AisAssociation {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly matched: boolean;
@@ -1268,6 +1319,7 @@ export interface VerticalDatumContext {
  */
 export type ContractRequestSchemaName =
   | 'AnnotationCreate'
+  | 'GeometryCreate'
   | 'InvestigationCreate'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
@@ -1294,6 +1346,11 @@ export type ContractSchemaName =
   | 'ViewReplace'
   | 'SavedViewOut'
   | 'SavedViewsOut'
+  | 'GeometryCreate'
+  | 'GeometryOut'
+  | 'GeometryListOut'
+  | 'GeometryInput'
+  | 'Measurements'
   | 'AisAssociation'
   | 'VesselTarget'
   | 'AisOnlyTarget'
@@ -1620,6 +1677,82 @@ export const SAVEDVIEWOUT_FIELDS = [
 export const SAVEDVIEWSOUT_FIELDS = [
   'views',
   'count',
+] as const;
+
+/**
+ * Property names of {@link GeometryCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GEOMETRYCREATE_FIELDS = [
+  'label',
+  'notes',
+  'geometry',
+] as const;
+
+/**
+ * Property names of {@link GeometryOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GEOMETRYOUT_FIELDS = [
+  'id',
+  'investigation_id',
+  'scan_id',
+  'provenance',
+  'label',
+  'notes',
+  'geometry',
+  'measurements',
+  'created_at',
+  'updated_at',
+] as const;
+
+/**
+ * Property names of {@link GeometryListOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GEOMETRYLISTOUT_FIELDS = [
+  'geometries',
+] as const;
+
+/**
+ * Property names of {@link GeometryInput} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const GEOMETRYINPUT_FIELDS = [
+  'kind',
+  'coordinates',
+  'radius_m',
+] as const;
+
+/**
+ * Property names of {@link Measurements} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MEASUREMENTS_FIELDS = [
+  'ellipsoid',
+  'method',
+  'length_m',
+  'length_km',
+  'length_nm',
+  'initial_bearing_deg',
+  'perimeter_m',
+  'perimeter_km',
+  'perimeter_nm',
+  'area_m2',
+  'area_km2',
+  'radius_m',
+  'radius_km',
+  'radius_nm',
 ] as const;
 
 /**

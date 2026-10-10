@@ -20,9 +20,9 @@ from fastapi.responses import JSONResponse
 
 from darkfleet import __version__
 from darkfleet.api.investigations import router as investigations_router
-from darkfleet.api.views import router as saved_views_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.routes import ApiState, liveness_router, router
+from darkfleet.api.views import router as saved_views_router
 from darkfleet.config.settings import Settings
 from darkfleet.config.settings import settings as default_settings
 from darkfleet.observability import configure as configure_logging

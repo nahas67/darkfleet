@@ -112,12 +112,18 @@ def render_png(
     # The valid fraction is stated because an excluded area must never be read
     # as an observed absence of returns.
     draw.rectangle((12, y + 2, 26, y + 12), fill=NO_DATA_RGB, outline=(70, 90, 110))
+    measured = np.asarray(db[valid], dtype=np.float64)
+    measured = measured[np.isfinite(measured)]
+    stretch_note = (
+        f"stretch {float(np.percentile(measured, 2)):.1f}.."
+        f"{float(np.percentile(measured, 98)):.1f} dB"
+        if measured.size else "stretch not established (no valid measured pixels)"
+    )
     draw.text(
         (32, y),
         f"excluded from analysis {100.0 * (1.0 - valid_frac):.1f}%   "
         f"analysed {100.0 * valid_frac:.1f}%   "
-        f"stretch {float(np.nanpercentile(db[valid], 2)):.1f}.."
-        f"{float(np.nanpercentile(db[valid], 98)):.1f} dB",
+        f"{stretch_note}",
         fill=(130, 160, 172),
     )
 
@@ -232,11 +238,19 @@ def render_pdf(
         dec = corr.get("scoreDecomposition") or {}
         observed = [
             ("Position", f"{t.get('lat')}, {t.get('lon')}" if t.get("lat") is not None and t.get("lon") is not None else "not established"),
-            ("Apparent length", f"{t.get('lenM')} m +/- {t.get('lenUncM')} m"),
-            ("Orientation", f"{t.get('hdg')} deg"),
-            ("Mean / peak backscatter", f"{t.get('meanDb')} / {t.get('maxDb')} dB"),
-            ("SAR detection confidence", str(t.get("sarConf"))),
-            ("AIS association confidence", str(t.get("aisConf"))),
+            ("Apparent length", (
+                f"{t['lenM']} m +/- {t['lenUncM']} m"
+                if t.get('lenM') is not None and t.get('lenUncM') is not None
+                else "not established (sensor resolution unavailable)"
+            )),
+            ("Orientation", f"{t['hdg']} deg" if t.get('hdg') is not None else "not established"),
+            ("Mean / peak backscatter", (
+                f"{t['meanDb']} / {t['maxDb']} dB"
+                if t.get('meanDb') is not None and t.get('maxDb') is not None
+                else "not established"
+            )),
+            ("SAR detection confidence", str(t["sarConf"]) if t.get("sarConf") is not None else "not established"),
+            ("AIS association confidence", str(t["aisConf"]) if t.get("aisConf") is not None else "not established"),
             ("Candidate MMSI", str(corr.get("mmsi") or "none established")),
             ("Distance offset", f"{corr.get('distanceOffsetMeters')} m" if corr.get("distanceOffsetMeters") else "n/a"),
             ("Time delta", f"{corr.get('timeDeltaSeconds')} s" if corr.get("timeDeltaSeconds") else "n/a"),
