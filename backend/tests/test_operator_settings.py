@@ -10,7 +10,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from darkfleet.api.app import create_app
-from darkfleet.api.operator_settings import router
 from darkfleet.config.settings import Settings
 
 
@@ -22,12 +21,12 @@ DEFAULTS = {
 
 
 def _app(directory: Path):
-    app = create_app(Settings(data_dir=str(directory), log_level="WARNING"))
-    # Registration is owned by prime. Before their patch lands, exercise the
-    # exact production APIRouter on the identical create_app/lifespan state.
-    if not any(route.path == "/api/operator-settings" for route in app.routes):
-        app.include_router(router)
-    return app
+    # Exercise *the actual production route registration*. The operator router
+    # is now mounted by create_app; never patch it into a test-only app and
+    # accidentally certify a public API path missing from the shipped product.
+    # Some mounted router wrappers lack a .path attribute, so path enumeration
+    # would be an invalid test of application reachability.
+    return create_app(Settings(data_dir=str(directory), log_level="WARNING"))
 
 
 def _save(client: TestClient, revision: int, prefs: dict) -> object:
