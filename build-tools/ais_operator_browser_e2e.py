@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -44,6 +46,10 @@ CONTRACTS = (
     "src/sensors/LayerConsole.tsx", "src/state/store.ts",
     "backend/darkfleet/ais/archive.py", "backend/darkfleet/ais/delivery.py",
     "backend/darkfleet/api/routes.py", "vite.config.ts",
+    # These transitive dev modules have previously changed during an AIS run,
+    # triggering Vite HMR without changing any of the original 17 digests.
+    "src/globe/aisPick.ts", "src/command/SystemPanel.tsx",
+    "src/design/tokens.css", "index.html",
 )
 
 
@@ -57,8 +63,79 @@ def git(*args: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else "UNKNOWN"
 
 
-def hashes() -> dict[str, str]:
-    return {rel: hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() for rel in CONTRACTS}
+def hashes() -> dict[str, str | None]:
+    """Missing/unreadable watched input is explicit, never a successful hash.
+
+    The *pure* final acceptance check rejects even an identically missing file
+    in both snapshots; otherwise two equal partial snapshots could mean PASS.
+    """
+    snapshot: dict[str, str | None] = {}
+    for rel in CONTRACTS:
+        try:
+            snapshot[rel] = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+        except OSError:
+            snapshot[rel] = None
+    return snapshot
+
+
+def provenance_failures(
+    *,
+    head_before: str,
+    head_after: str,
+    hashes_before: dict[str, str | None],
+    hashes_after: dict[str, str | None],
+    watched: tuple[str, ...],
+    main_frame_navigations: int,
+    document_boots: list[int],
+    document_origins: list[float],
+    vite_messages: list[str],
+    source_present: bool,
+    hot_probe_attached: bool,
+) -> list[str]:
+    """Pure fail-closed browser acceptance, independent of existing UI gates.
+
+    MUST be called after teardown/final HEAD and final source-byte sampling;
+    never set PASS until this returns an empty list. `vite_messages` includes
+    both browser-console HMR events and the isolated Vite server log.
+    """
+    failures: list[str] = []
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", head_before or "") or head_before != head_after:
+        failures.append("GIT_HEAD_MISSING_OR_CHANGED")
+    if not watched or len(set(watched)) != len(watched):
+        failures.append("WATCH_SET_MISSING_OR_DUPLICATE")
+    if set(hashes_before) != set(watched) or set(hashes_after) != set(watched):
+        failures.append("WATCHED_SHA_SNAPSHOT_INCOMPLETE")
+    for path in watched:
+        before, after = hashes_before.get(path), hashes_after.get(path)
+        if not isinstance(before, str) or not re.fullmatch(r"[0-9a-f]{64}", before):
+            failures.append(f"WATCHED_SHA_MISSING_BEFORE:{path}")
+        if not isinstance(after, str) or not re.fullmatch(r"[0-9a-f]{64}", after):
+            failures.append(f"WATCHED_SHA_MISSING_AFTER:{path}")
+        if before != after:
+            failures.append(f"WATCHED_SHA_CHANGED:{path}")
+    if main_frame_navigations != 1:
+        failures.append("UNEXPECTED_MAIN_FRAME_NAVIGATION")
+    if not document_boots or any(boot != 1 for boot in document_boots):
+        failures.append("UNEXPECTED_DOCUMENT_BOOT_OR_MISSING_PROOF")
+    if (not document_origins or not all(isinstance(o, (int, float)) and math.isfinite(o)
+                                        for o in document_origins)
+            or len(set(document_origins)) != 1):
+        failures.append("DOCUMENT_ORIGIN_MISSING_OR_CHANGED")
+    if not hot_probe_attached:
+        failures.append("VITE_HOT_DIAGNOSTIC_NOT_ATTACHED")
+    if any(re.search(r"\b(?:hmr|hot.updated|beforeFullReload|beforeUpdate|afterUpdate|full.reload|page.reload|vite:error)\b",
+                     entry, re.IGNORECASE) for entry in vite_messages):
+        failures.append("VITE_UNEXPECTED_UPDATE_OR_RELOAD")
+    if not source_present:
+        failures.append("RAW_AIS_SOURCE_IDENTITY_ABSENT")
+    return failures
+
+
+def finalize_browser_status(provisional_status: str, failures: list[str]) -> str:
+    """Only the post-teardown provenance verdict can promote a provisional pass."""
+    if provisional_status == "CANDIDATE_PASS":
+        return "FAIL_PROVENANCE" if failures else "PASS"
+    return provisional_status
 
 
 def free_port() -> int:
@@ -560,7 +637,10 @@ def run() -> dict:
                             "noUncaughtBrowserErrors": not result["browserErrors"],
                             "sourceUnchanged": result["sourceHashesBefore"] == hashes(),
                         }
-                        result["status"] = "PASS" if all(result["postconditions"].values()) else "PARTIAL"
+                        # This is *not* final acceptance: source bytes and Git
+                        # HEAD must be sampled AFTER the browser/services close.
+                        result["status"] = ("CANDIDATE_PASS" if
+                            all(result["postconditions"].values()) else "PARTIAL")
                     finally:
                         browser.close()
             except (AssertionError, BrowserError, BrowserTimeout, OSError, ValueError, RuntimeError) as exc:
@@ -571,10 +651,39 @@ def run() -> dict:
             finally:
                 stop_owned(web_proc)
                 stop_owned(api_proc)
+                result["viteServerLogTail"] = (temp / "vite.log").read_text(
+                    encoding="utf-8", errors="replace")[-12000:]
     result["sourceHashesAfter"]=hashes()
     result["sourceChangedDuringRun"]=result["sourceHashesBefore"] != result["sourceHashesAfter"]
     result["headAfter"]=git("rev-parse","HEAD")
     result["headChangedDuringRun"]=result["gitHead"] != result["headAfter"]
+    result["rawSourceAttested"] = (
+        result.get("responseSummary", {}).get("count") == 499
+        and result.get("responseSummary", {}).get("source") == SOURCE
+        and result.get("clientArchiveLoad", {}).get("fixes") == 499
+        and result.get("clientArchiveLoad", {}).get("sources") == [SOURCE]
+        and bool(result.get("aisApiResponses"))
+        and all(item.get("status") == 200 for item in result["aisApiResponses"])
+        and len(result.get("navigationProbes", [])) == 11
+        and all(p.get("uniqueSources") == [SOURCE] and p.get("observations") == 499
+                for p in result["navigationProbes"])
+    )
+    result["provenanceFailures"] = provenance_failures(
+        head_before=result["gitHead"], head_after=result["headAfter"],
+        hashes_before=result["sourceHashesBefore"], hashes_after=result["sourceHashesAfter"],
+        watched=CONTRACTS,
+        main_frame_navigations=sum(1 for event in result["frameNavigations"]
+                                   if event.get("main")),
+        document_boots=[p.get("documentBoot") for p in result["navigationProbes"]],
+        document_origins=[p.get("documentTimeOrigin") for p in result["navigationProbes"]],
+        vite_messages=[m["text"] for m in result["viteMessages"]]
+        + result.get("viteServerLogTail", "").splitlines()
+        + [str(event.get("type", "")) for p in result["navigationProbes"]
+           for event in p.get("currentLifecycleEvents", [])],
+        source_present=result["rawSourceAttested"],
+        hot_probe_attached=result.get("viteProbe") == "VITE_HOT_CONTEXT_LISTENERS_ATTACHED",
+    )
+    result["status"] = finalize_browser_status(result["status"], result["provenanceFailures"])
     return result
 
 

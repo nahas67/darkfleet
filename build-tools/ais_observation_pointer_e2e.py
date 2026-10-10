@@ -20,13 +20,16 @@ from urllib.parse import urlsplit
 from ais_operator_browser_e2e import (
     BACKEND,
     CHROME,
+    CONTRACTS,
     ROOT,
     VITE_SERVER,
     fail_unless,
+    finalize_browser_status,
     free_port,
     git,
     hashes,
     http_json,
+    provenance_failures,
     stop_owned,
     wait_http,
 )
@@ -52,14 +55,18 @@ EXTRA_PROVENANCE_SOURCES = (
     "src/design/tokens.css",
     "src/command/SystemPanel.tsx",
 )
+WATCHED = tuple(dict.fromkeys((*CONTRACTS, *EXTRA_PROVENANCE_SOURCES)))
 
 
-def source_hashes() -> dict[str, str]:
+def source_hashes() -> dict[str, str | None]:
     """Include app/style HMR dependencies beyond the 17 AIS navigation anchors."""
-    return {**hashes(), **{
-        path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
-        for path in EXTRA_PROVENANCE_SOURCES
-    }}
+    snapshot = hashes()
+    for path in EXTRA_PROVENANCE_SOURCES:
+        try:
+            snapshot[path] = hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
+        except OSError:
+            snapshot[path] = None
+    return snapshot
 
 
 def seed(root: Path) -> dict:
@@ -120,7 +127,7 @@ def run() -> dict:
     result = {"status": "NOT_RUN", "sourceHashesBefore": source_hashes(),
               "headBefore": git("rev-parse", "HEAD"), "events": [],
               "browserErrors": [], "aisRequests": [], "mainFrameNavigations": [],
-              "viteConsole": [], "externalRequestsBlocked": 0,
+              "viteConsole": [], "viteHotEvents": [], "externalRequestsBlocked": 0,
               "fixtureStatus": "SYNTHETIC_NONLIVE_ONLY"}
     if not CHROME.is_file():
         return {**result, "status": "BLOCKED", "reason": "Installed Chrome not available"}
@@ -171,6 +178,10 @@ def run() -> dict:
                                 result["externalRequestsBlocked"] += 1
                                 route.abort("blockedbyclient")
                         context.route("**/*", offline)
+                        context.add_init_script("""(() => {
+                          const key='df_ais_pointer_document_boot';
+                          sessionStorage.setItem(key,String(Number(sessionStorage.getItem(key)||'0')+1));
+                        })()""")
                         page = context.new_page()
                         page.on("pageerror", lambda err: result["browserErrors"].append(str(err)[:300]))
                         page.on("framenavigated", lambda frame: result["mainFrameNavigations"].append(
@@ -186,6 +197,19 @@ def run() -> dict:
                         page.locator("[data-df-app]").wait_for(timeout=90000)
                         page.locator(".cesium-widget canvas").first.wait_for(timeout=45000)
                         result["firstDocumentOrigin"] = page.evaluate("() => performance.timeOrigin")
+                        result["viteProbe"] = page.evaluate("""async () => {
+                          try {
+                            const {createHotContext}=await import('/@vite/client');
+                            if(typeof createHotContext!=='function') return 'UNAVAILABLE';
+                            const hot=createHotContext('/__df_ais_pointer_provenance__');
+                            window.__dfAisPointerHotEvents=[];
+                            for(const type of ['vite:beforeFullReload','vite:beforeUpdate',
+                                               'vite:afterUpdate','vite:error']) {
+                              hot.on(type,()=>window.__dfAisPointerHotEvents.push(type));
+                            }
+                            return 'VITE_HOT_CONTEXT_LISTENERS_ATTACHED';
+                          }catch(error){return 'UNAVAILABLE: '+String(error).slice(0,160)}
+                        }""")
                         loaded = page.evaluate("""async id => {
                           const {store}=await import('/src/state/store.ts');
                           const {loadScanAis}=await import('/src/api/client.ts');
@@ -360,15 +384,23 @@ def run() -> dict:
                         fail_unless(final["mmsi"] == MMSI and final["observationAt"] == expected_next and
                                     final["fixDOM"] == expected_next and final["canvas"] == 1 and
                                     not final["error"], "Canvas identity lost on rail cleanup")
+                        result["documentProof"] = page.evaluate("""() => ({
+                          boot:Number(sessionStorage.getItem('df_ais_pointer_document_boot')||0),
+                          timeOrigin:performance.timeOrigin,
+                          hotEvents:window.__dfAisPointerHotEvents ?? null,
+                        })""")
+                        result["viteHotEvents"] = result["documentProof"]["hotEvents"] or []
                         page.close()
                         result["firstPageClosed"] = page.is_closed()
                         fresh = context.new_page()
                         fresh.goto(web_url, wait_until="commit", timeout=45000)
                         fresh.locator(".cesium-widget canvas").first.wait_for(timeout=45000)
                         result["newPageCanvas"] = fresh.locator(".cesium-widget canvas").count()
+                        # Check the original tab's document boot/history before
+                        # closing it, not the expected fresh second-page boot.
                         fresh.close()
                         context.close()
-                        result["status"] = "PASS" if (not result["browserErrors"]
+                        result["status"] = "CANDIDATE_PASS" if (not result["browserErrors"]
                             and result["firstPageClosed"] and result["newPageCanvas"] == 1
                             and result["sourceHashesBefore"] == source_hashes()) else "PARTIAL"
                     finally:
@@ -386,10 +418,47 @@ def run() -> dict:
             finally:
                 stop_owned(web_proc)
                 stop_owned(api_proc)
+                result["viteServerLogTail"] = (temp / "vite.log").read_text(
+                    encoding="utf-8", errors="replace")[-12000:]
     result["sourceHashesAfter"] = source_hashes()
     result["headAfter"] = git("rev-parse", "HEAD")
     result["sourcesStable"] = result["sourceHashesBefore"] == result["sourceHashesAfter"]
     result["headStable"] = result["headBefore"] == result["headAfter"]
+    first_event = result["events"][0] if result["events"] else {}
+    result["rawSourceAttested"] = (
+        result.get("apiRead", {}).get("count") == 7
+        and result.get("apiRead", {}).get("source") == SOURCE
+        and result.get("apiRead", {}).get("exactTargetAt") == TARGET_AT
+        and first_event.get("observations") == 7
+        and first_event.get("sources") == [SOURCE]
+        and bool(result["aisRequests"])
+        and all(reply.get("status") == 200 for reply in result["aisRequests"])
+        and all(event.get("sources") == [SOURCE] and event.get("observations") == 7
+                for event in result["events"])
+        and result.get("scenePickProbe", {}).get("status") == "INSTRUMENTED"
+        and any(
+            any(tag and tag.get("domain") == "AIS_OBSERVATION"
+                and tag.get("mmsi") == MMSI and tag.get("at") == TARGET_AT
+                for tag in ([hit.get("rawScenePick", {}).get("tag")]
+                            + (hit.get("rawScenePick", {}).get("underlyingTags") or [])))
+            for hit in result.get("nativeHitProbes", [])
+            if isinstance(hit.get("rawScenePick"), dict)
+        )
+    )
+    result["provenanceFailures"] = provenance_failures(
+        head_before=result["headBefore"], head_after=result["headAfter"],
+        hashes_before=result["sourceHashesBefore"], hashes_after=result["sourceHashesAfter"],
+        watched=WATCHED, main_frame_navigations=len(result["mainFrameNavigations"]),
+        document_boots=[result.get("documentProof", {}).get("boot")],
+        document_origins=[result.get("firstDocumentOrigin"),
+                          result.get("documentProof", {}).get("timeOrigin")],
+        vite_messages=[event["text"] for event in result["viteConsole"]]
+        + result.get("viteServerLogTail", "").splitlines()
+        + result.get("viteHotEvents", []),
+        source_present=result["rawSourceAttested"],
+        hot_probe_attached=result.get("viteProbe") == "VITE_HOT_CONTEXT_LISTENERS_ATTACHED",
+    )
+    result["status"] = finalize_browser_status(result["status"], result["provenanceFailures"])
     return result
 
 
