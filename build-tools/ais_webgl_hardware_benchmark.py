@@ -309,6 +309,11 @@ def run(url: str, frames: int, timeout: int) -> dict:
             result["hardware"]=hardware
             if hardware.get("error") or not hardware.get("canvasSameAsDom") or not hardware.get("canvasConnected"):
                 raise RuntimeError(f"HARDWARE_OR_APP_CANVAS_GATE_FAILED: {hardware}")
+            result["emptySceneBaselineAfterGc"]=page.evaluate("""() => {
+              const available=typeof window.gc==='function';
+              if(available) window.gc();
+              return {gcAvailable:available,...window.__dfGpuBench.snapshot()};
+            }""")
             try:
                 cdp=context.new_cdp_session(page)
                 cdp.send('Performance.enable')
@@ -327,6 +332,11 @@ def run(url: str, frames: int, timeout: int) -> dict:
                 try:
                     # Long enough for real 10k postRender events (not idle rAF).
                     row=page.evaluate(CASE,{"count":count,"frames":frames,"timeoutMs":timeout*1000})
+                    row["emptyAfterGc"] = page.evaluate("""() => {
+                      const available=typeof window.gc==='function';
+                      if(available) window.gc();
+                      return {gcAvailable:available,...window.__dfGpuBench.snapshot()};
+                    }""")
                     result["rows"].append(row)
                     if not row.get("complete"):
                         result["errors"].append(f"INCOMPLETE_{count}_COUNT_OR_PRIMITIVE_CLEANUP")
