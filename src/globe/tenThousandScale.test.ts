@@ -75,15 +75,47 @@ describe('DF-X9.7: 10,000 AIS performance and scaling', () => {
       ...estimateLabelBounds('257000000 · 45° · 8.0 kn'),
     }));
 
-    const t0 = performance.now();
-    const decision = arbitrateLabels(claims, { maxLabels: MAX_AIS_LABELS });
-    const elapsedMs = performance.now() - t0;
+    /*
+     * A CPU GUARD must measure CPU time. `performance.now()` is a WALL clock: Vitest
+     * workers run concurrently in the full suite, and a descheduled worker can spend
+     * >100 ms waiting while the arbiter performs <20 ms of CPU work. That used to
+     * intermittently fail this test despite a healthy label algorithm.
+     *
+     * Measure THIS worker thread instead of process.cpuUsage(), which includes
+     * other Vitest worker threads. Retain wall time as an explicit diagnostic:
+     * an operator still cares about a slow busy machine, but scheduler delay is
+     * not a CPU regression. Do not turn a CPU failure into a skipped assertion.
+     */
+    // Windows accounts thread CPU in coarse (~15 ms) increments. A genuine
+    // 3-9 ms arbitration can report 0 ms for an isolated sample. Exercise the
+    // COLD call plus repeated steady-state calls, require positive aggregate
+    // CPU usage, and enforce the original 100 ms bound for EVERY call.
+    const samples: Array<{ cpuMs: number; wallMs: number; ids: string }> = [];
+    const batchCpuStart = process.threadCpuUsage();
+    for (let iteration = 0; iteration < 6; iteration += 1) {
+      const cpuStart = process.threadCpuUsage();
+      const wallStart = performance.now();
+      const decision = arbitrateLabels(claims, { maxLabels: MAX_AIS_LABELS });
+      const wallMs = performance.now() - wallStart;
+      const usage = process.threadCpuUsage(cpuStart);
+      const cpuMs = (usage.user + usage.system) / 1_000;
 
-    expect(decision.shown.length).toBeLessThanOrEqual(MAX_AIS_LABELS);
-    expect(decision.shown.length).toBe(MAX_AIS_LABELS);
-    expect(decision.suppressed.length).toBe(10000 - MAX_AIS_LABELS);
-    // Budget bound ensures arbitration does not stall the main thread (< 100 ms)
-    expect(elapsedMs).toBeLessThan(100);
+      expect(decision.shown.length).toBe(MAX_AIS_LABELS);
+      expect(decision.suppressed.length).toBe(10000 - MAX_AIS_LABELS);
+      // Do not replace the per-invocation guard with a mean or best-of test:
+      // doing so would hide a genuinely slow cold path or GC-heavy iteration.
+      expect(cpuMs, `iteration ${iteration}: CPU ${cpuMs}ms, wall ${wallMs}ms`).toBeLessThan(100);
+      samples.push({ cpuMs, wallMs, ids: decision.shown.map((claim) => claim.id).join(',') });
+    }
+    const batchUsage = process.threadCpuUsage(batchCpuStart);
+    const aggregateCpuMs = (batchUsage.user + batchUsage.system) / 1_000;
+    expect(aggregateCpuMs).toBeGreaterThan(0);
+    expect(samples.every((sample) => sample.ids === samples[0].ids)).toBe(true);
+    console.info(
+      `10k label arbitration (six calls, 120 labels): aggregate thread CPU ${aggregateCpuMs.toFixed(2)} ms; ` +
+      `worst sampled thread CPU ${Math.max(...samples.map((sample) => sample.cpuMs)).toFixed(2)} ms; ` +
+      `worst wall ${Math.max(...samples.map((sample) => sample.wallMs)).toFixed(2)} ms`,
+    );
   });
 
   it('guarantees the selected contact label is ALWAYS shown even when 9,880 are suppressed', () => {
