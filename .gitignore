@@ -14,12 +14,12 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 *.egg-info/
-# Local-first data (archives, scans, caches, credentials-adjacent state)
-data/ais/
-data/cache/
-data/scans/
-data/local-sar-inbox/
-data/local-sar-imports/
+# Local-first operator data (archives, databases, reference downloads,
+# scans, caches and credentials-adjacent state). All runtime data belong to
+# the operator and must not be staged as source or make source-build identity
+# look dirty merely because the application saved a case or imported an image.
+# Existing tracked validation metadata remains tracked by Git.
+data/
 # Scratch data dirs an ad-hoc verification script may create under tests/.
 # A scan writes real artefacts (cache .npz, worldcover clips, scan records);
 # committing them bloats the repo and puts derived data under version control.

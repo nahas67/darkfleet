@@ -132,6 +132,7 @@ class RejectedCandidate(BaseModel):
         "AMBIGUOUS_PAIR",
     ] | None = Field(
         default=None,
+        exclude_if=lambda reason: reason is None,
         validation_alias=AliasChoices("rejectionReason", "rejection_reason"),
         serialization_alias="rejectionReason",
         description="Recorded reason for rejecting the scored candidate; null for older records.",

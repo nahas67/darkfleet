@@ -626,11 +626,11 @@ def test_debug_layers_return_compact_summaries(
     assert landmask["stats"]["finite_fraction"] == 1.0
     # The layer covers the whole measured window, unshrunk.
     assert landmask["stats"]["size"] == 400 * 400
-    # Exactly zero excluded pixels: this AOI is open water, offshore of the
-    # mainland, and the committed WorldCover clip agrees. Asserted as an exact
-    # measurement rather than "some land was masked", which was only true of the
-    # coastal extent the suite used before.
-    assert landmask["stats"]["true_count"] == 0
+    # The aligned, authoritative ESA WorldCover source excludes real coastal
+    # pixels. The old disjoint mask silently treated unknown coverage as water
+    # and reported zero exclusions for a raster it did not cover at all.
+    # The fixed checked-in clip measures 14,789 excluded pixels at this AOI.
+    assert landmask["stats"]["true_count"] == 14789
     # The layer is not a stub: the production reprojection of the WorldCover
     # clip ran, and the evidence record names the dataset it used.
     provenance = client.get(f"/api/scans/{scan_id}/targets").json()["provenance"]

@@ -1577,6 +1577,8 @@ export interface LandMaskProvenance {
   readonly water_class: number;
   readonly coastline_buffer_m: number;
   readonly port_exceptions: number;
+  readonly nodata_policy?: "EXCLUDED_UNKNOWN_NOT_WATER" | null;
+  readonly unknown_fraction?: number | null;
 }
 
 export interface SpeckleSettings {
@@ -4005,6 +4007,8 @@ export const LANDMASKPROVENANCE_FIELDS = [
   'water_class',
   'coastline_buffer_m',
   'port_exceptions',
+  'nodata_policy',
+  'unknown_fraction',
 ] as const;
 
 /**

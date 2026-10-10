@@ -48,6 +48,7 @@ from darkfleet.api.evidence_models import (
     EvidenceDocument,
     GhostVesselDossier,
     GhostVesselNotApplicable,
+    LandMaskProvenance,
     ObservedEvidence,
     ScanRecordDocument,
 )
@@ -99,6 +100,29 @@ DOCUMENT_KEYS = {
     "sar_chip",
     "provenance",
 }
+
+
+def test_land_mask_contract_handles_new_fail_closed_policy_and_legacy_absence() -> None:
+    """Provenance must not break summaries or retroactively assign historical policy."""
+    original = {
+        "source": "ESA WorldCover v200",
+        "water_href": "local-worldcover.tif",
+        "water_class": 80,
+        "coastline_buffer_m": 150,
+        "port_exceptions": 0,
+    }
+    legacy = LandMaskProvenance.model_validate(original)
+    assert legacy.nodata_policy is None
+    assert legacy.unknown_fraction is None
+    current = LandMaskProvenance.model_validate({
+        **original,
+        "nodata_policy": "EXCLUDED_UNKNOWN_NOT_WATER",
+        "unknown_fraction": 0.375,
+    })
+    assert current.nodata_policy == "EXCLUDED_UNKNOWN_NOT_WATER"
+    assert current.unknown_fraction == pytest.approx(0.375)
+    with pytest.raises(ValidationError):
+        LandMaskProvenance.model_validate({**original, "unknown_fraction": 1.25})
 
 #: `ScanScene` is declared `extra="allow"` (pre-existing, in a module this lane
 #: does not own) and does not declare these two. The record's scene carries them,

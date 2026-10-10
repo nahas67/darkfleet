@@ -590,5 +590,38 @@ def _real_land_mask(
 
 
 def rasterio_res(window_data: dict[str, Any]) -> float:
-    t = window_data["window_transform"]
-    return float(max(abs(t.a), abs(t.e)))
+    """Conservative ground pixel spacing in **meters** for the coastline buffer.
+
+    A raster affine is in its source CRS units. Reading ``abs(transform.a)``
+    directly as meters made 0.0001-degree pixels appear ten thousand times
+    smaller than they are and could trigger millions of dilation iterations.
+    Measure adjacent pixel centers geodesically, including rotation/shear and
+    projected CRS whose linear unit is not meters. Take the smaller spacing so
+    an isotropic pixel buffer does not silently fall below its requested size.
+    """
+    from pyproj import CRS, Geod, Transformer
+
+    try:
+        t = window_data["window_transform"]
+        crs = CRS.from_user_input(window_data["crs"])
+        win = window_data["window"]
+        col, row = float(win[3]) / 2.0, float(win[2]) / 2.0
+        transformer = Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True)
+        centers = [t @ (col, row), t @ (col + 1, row), t @ (col, row + 1)]
+        longitude, latitude = transformer.transform(
+            [p[0] for p in centers], [p[1] for p in centers]
+        )
+        geod = Geod(ellps="WGS84")
+        distances = [
+            geod.inv(longitude[0], latitude[0], longitude[i], latitude[i])[2]
+            for i in (1, 2)
+        ]
+        spacing = min(distances)
+        if not math.isfinite(spacing) or spacing <= 0:
+            raise ValueError("nonpositive or nonfinite pixel spacing")
+        return float(spacing)
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise RealDataUnavailableError(
+            "Raster ground pixel spacing cannot be established for land masking.",
+            details={"reason": type(exc).__name__},
+        ) from exc

@@ -564,6 +564,11 @@ class LandMaskProvenance(BaseModel):
     water_class: int
     coastline_buffer_m: int
     port_exceptions: int = Field(ge=0)
+    # Earlier persisted scans predate fail-closed handling of unknown WorldCover
+    # pixels. Keep those records readable without inventing a policy or an
+    # unknown-pixel count that they never recorded.
+    nodata_policy: Literal["EXCLUDED_UNKNOWN_NOT_WATER"] | None = None
+    unknown_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ProcessingProvenance(BaseModel):

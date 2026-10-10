@@ -25,7 +25,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 #: at the Malacca AOI the live scans use. Reading it with the wrong bbox returns a
 #: zero-width window and CFAR then fails with negative box dimensions, which is a
 #: confusing way to learn that the extent did not intersect.
-FIXTURE_BBOX: list[float] = [104.1011, 1.3569, 104.1371, 1.3931]
+# The EPSG:32648 fixture is at x=400000..404000, y=146000..150000;
+# transformed to WGS84 it lies around 104.10..104.14 E, 1.32..1.36 N.
+# The previous minimum latitude 1.3569 was NORTH of the scene and produced
+# a completely disjoint read that old clamping code silently moved onto data.
+# The corrected AOI genuinely covers the measured scene in WGS84.
+FIXTURE_BBOX: list[float] = [104.09, 1.31, 104.15, 1.37]
 FIXTURE_RESOLUTION_M = 10.0
 
 
@@ -104,7 +109,7 @@ def georef_override() -> Any:
     return inspect
 
 
-def land_mask_override(name: str = "mask/worldcover_sg_clip.tif") -> Any:
+def land_mask_override(name: str = "mask/worldcover_utm32648_clip.tif") -> Any:
     """Patch `_real_land_mask` to use the committed WorldCover clip.
 
     The clip is the same dataset for the same AOI, so `build_land_mask` -- the
@@ -146,7 +151,7 @@ def land_mask_override(name: str = "mask/worldcover_sg_clip.tif") -> Any:
     return _real_land_mask
 
 
-def install(monkeypatch: Any, *, mask_fixture: str | None = "mask/worldcover_sg_clip.tif") -> None:
+def install(monkeypatch: Any, *, mask_fixture: str | None = "mask/worldcover_utm32648_clip.tif") -> None:
     """Wire every injection point so `run_scan` runs end to end offline.
 
     Production code paths remain in charge: only the network is replaced.
