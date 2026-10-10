@@ -24,6 +24,7 @@ from darkfleet.api.investigations import router as investigations_router
 from darkfleet.api.local_sar_routes import router as local_sar_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.missions import router as missions_router
+from darkfleet.api.operator_settings import router as operator_settings_router
 from darkfleet.api.report_routes import router as reports_router
 from darkfleet.api.routes import ApiState, liveness_router, redact, redact_details, router
 from darkfleet.api.sar_compare_routes import router as sar_compare_router
@@ -95,6 +96,9 @@ def create_app(
     application.include_router(sar_imagery_router)
     application.include_router(local_sar_router)
     application.include_router(saved_views_router)
+    # Operator-owned display preferences are a durable local API, separate from
+    # deployment credentials and scientific processing configuration.
+    application.include_router(operator_settings_router)
     # Maritime context lives on its own router: the spatial surface will grow, and
     # it must not widen the core scan router. The route is scan-scoped, so a target
     # id is never resolvable without its scan.

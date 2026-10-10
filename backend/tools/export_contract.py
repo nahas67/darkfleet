@@ -76,8 +76,17 @@ SCHEMAS: tuple[str, ...] = (
     # immutable observations and generated from the same served API contract.
     "InvestigationOut",
     "InvestigationListOut",
+    "InvestigationRename",
     "AnnotationOut",
     "WatchEntryOut",
+    # Durable binary operator attachments are never SAR/AIS sensor records.
+    "AttachmentOut",
+    "AttachmentsOut",
+    # Presentation-only operator controls with optimistic revision semantics.
+    "PresentationPreferences",
+    "OperatorSettingsOut",
+    "ReplaceOperatorSettings",
+    "ResetOperatorSettings",
     # Completed-run catalogue for the analysis comparison workspace.
     "ScanCatalogueResponse",
     # Durable operator workspace bookmarks: snapshot fields come from the API

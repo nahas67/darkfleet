@@ -112,6 +112,11 @@ export interface InvestigationListOut {
   readonly investigations: InvestigationOut[];
 }
 
+export interface InvestigationRename {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+}
+
 export interface AnnotationOut {
   readonly id: string;
   readonly investigation_id: string;
@@ -125,6 +130,49 @@ export interface WatchEntryOut {
   readonly investigation_id: string;
   readonly target_id: string;
   readonly created_at: string;
+}
+
+export interface AttachmentOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly investigation_id: string;
+  readonly filename: string;
+  readonly media_type: string;
+  readonly size_bytes: number;
+  readonly sha256: string;
+  readonly created_at: string;
+  readonly provenance?: "OPERATOR_ATTACHMENT_NOT_SENSOR_EVIDENCE";
+  readonly download_url: string;
+}
+
+export interface AttachmentsOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly attachments: AttachmentOut[];
+  readonly count: number;
+}
+
+export interface PresentationPreferences {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly show_provider_details?: boolean;
+  readonly show_keyboard_reference?: boolean;
+  readonly show_provenance_summary?: boolean;
+}
+
+export interface OperatorSettingsOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly revision: number;
+  readonly preferences: PresentationPreferences;
+}
+
+export interface ReplaceOperatorSettings {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly expected_revision: number;
+  readonly preferences: PresentationPreferences;
+}
+
+export interface ResetOperatorSettings {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly expected_revision: number;
 }
 
 export interface ScanCatalogueResponse {
@@ -1622,11 +1670,14 @@ export type ContractRequestSchemaName =
   | 'GeometryCreate'
   | 'ImageryPairRequest'
   | 'InvestigationCreate'
+  | 'InvestigationRename'
   | 'LocalSarImportRequest'
   | 'MissionBody'
   | 'MissionReplace'
   | 'MissionScanLink'
   | 'ProbeRequest'
+  | 'ReplaceOperatorSettings'
+  | 'ResetOperatorSettings'
   | 'ScanCreateRequest'
   | 'SceneCompareRequest'
   | 'ViewCreate'
@@ -1646,8 +1697,15 @@ export type ContractSchemaName =
   | 'DetectorsOut'
   | 'InvestigationOut'
   | 'InvestigationListOut'
+  | 'InvestigationRename'
   | 'AnnotationOut'
   | 'WatchEntryOut'
+  | 'AttachmentOut'
+  | 'AttachmentsOut'
+  | 'PresentationPreferences'
+  | 'OperatorSettingsOut'
+  | 'ReplaceOperatorSettings'
+  | 'ResetOperatorSettings'
   | 'ScanCatalogueResponse'
   | 'ViewCreate'
   | 'ViewReplace'
@@ -1926,6 +1984,16 @@ export const INVESTIGATIONLISTOUT_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link InvestigationRename} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const INVESTIGATIONRENAME_FIELDS = [
+  'title',
+] as const;
+
+/**
  * Property names of {@link AnnotationOut} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1950,6 +2018,79 @@ export const WATCHENTRYOUT_FIELDS = [
   'investigation_id',
   'target_id',
   'created_at',
+] as const;
+
+/**
+ * Property names of {@link AttachmentOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ATTACHMENTOUT_FIELDS = [
+  'id',
+  'investigation_id',
+  'filename',
+  'media_type',
+  'size_bytes',
+  'sha256',
+  'created_at',
+  'provenance',
+  'download_url',
+] as const;
+
+/**
+ * Property names of {@link AttachmentsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ATTACHMENTSOUT_FIELDS = [
+  'attachments',
+  'count',
+] as const;
+
+/**
+ * Property names of {@link PresentationPreferences} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const PRESENTATIONPREFERENCES_FIELDS = [
+  'show_provider_details',
+  'show_keyboard_reference',
+  'show_provenance_summary',
+] as const;
+
+/**
+ * Property names of {@link OperatorSettingsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const OPERATORSETTINGSOUT_FIELDS = [
+  'revision',
+  'preferences',
+] as const;
+
+/**
+ * Property names of {@link ReplaceOperatorSettings} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const REPLACEOPERATORSETTINGS_FIELDS = [
+  'expected_revision',
+  'preferences',
+] as const;
+
+/**
+ * Property names of {@link ResetOperatorSettings} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const RESETOPERATORSETTINGS_FIELDS = [
+  'expected_revision',
 ] as const;
 
 /**
