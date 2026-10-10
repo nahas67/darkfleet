@@ -33,6 +33,7 @@ import {
 import { NOT_ESTABLISHED } from '../design/format';
 import { SceneComparisonWorkbench } from '../advanced/SceneComparisonWorkbench';
 import { SceneImageryWorkspace } from '../advanced/SceneImageryWorkspace';
+import { LocalSarImportPanel } from '../scenes/LocalSarImportPanel';
 import { AnalystWorkspace } from '../analyst/AnalystWorkspace';
 import type {
   DetectorsOut,
@@ -43,13 +44,14 @@ import type {
   TracksOut,
 } from '../api/contract';
 
-type Tab = 'REVISIT' | 'MULTIPASS' | 'COMPARE' | 'IMAGERY' | 'PATTERNS' | 'DETECTOR' | 'ANALYST';
+type Tab = 'REVISIT' | 'MULTIPASS' | 'COMPARE' | 'IMAGERY' | 'LOCAL_SAR' | 'PATTERNS' | 'DETECTOR' | 'ANALYST';
 
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
   ['REVISIT', 'Revisit'],
   ['MULTIPASS', 'Multipass'],
   ['COMPARE', 'SAR compare'],
   ['IMAGERY', 'SAR imagery'],
+  ['LOCAL_SAR', 'Local GeoTIFF'],
   ['PATTERNS', 'Patterns'],
   ['DETECTOR', 'Detector'],
   ['ANALYST', 'Analyst'],
@@ -160,6 +162,7 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
         {tab === 'MULTIPASS' ? <MultipassPanel state={tracks} /> : null}
         {tab === 'COMPARE' ? <SceneComparisonWorkbench /> : null}
         {tab === 'IMAGERY' ? <SceneImageryWorkspace /> : null}
+        {tab === 'LOCAL_SAR' ? <LocalSarImportPanel /> : null}
         {tab === 'PATTERNS' ? <PatternsPanel state={patterns} /> : null}
         {tab === 'DETECTOR' ? <DetectorPanel state={detectors} /> : null}
         {tab === 'ANALYST' ? <AnalystWorkspace /> : null}

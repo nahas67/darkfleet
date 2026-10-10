@@ -48,6 +48,23 @@ never credentials.
 
 **CORS.** An explicit origin allowlist, `allow_credentials=False`.
 
+**Offline GeoTIFF intake.** `/api/sar/local/*` is a separate **loopback-only**
+operator interface. The route checks the actual ASGI peer address rather than
+trusting `Host`, `Origin` or proxy-forwarded headers. It accepts inbox-relative
+GeoTIFF basenames, not URLs or absolute paths, and is limited to a configured
+local directory (default `<data_dir>/local-sar-inbox`). Intake enforces a file
+size, raster pixel count and raster edge bound before decoding, checks affine
+CRS and nonempty finite pixels, retains a SHA-256-verifiable private copy, and
+revalidates source/snapshot integrity on later reads. No imported document
+becomes a completed scan, calibrated observation or AIS association by being
+readable. See `docs/LOCAL_SAR_IMPORT_EVIDENCE.md` for the current validation.
+
+Loopback restrictions are **not user authentication**: any local process able
+to reach the API may invoke the import endpoint, and an operating-system user
+who can alter the local inbox or stored receipts may manipulate that filesystem
+content. Deployments behind reverse proxies must retain the local-peer policy;
+do not expose this endpoint as an anonymous upload/inspection service.
+
 **Container privileges.** The Docker images run as non-root with no capability
 additions and no privileged mounts.
 

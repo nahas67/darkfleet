@@ -123,6 +123,50 @@ derivative can be used for new detection analysis.
 
 ## Integration and remaining limits
 
+### Live local integration acceptance (2026-10-11)
+
+The prime mounted the new FastAPI router and **Advanced → Local GeoTIFF**
+panel, regenerated the canonical OpenAPI-derived TypeScript contract, and ran
+the live loopback backend and Vite frontend. The operator inbox contained
+`DF-0001-derived-real-RTC-VV.tif`, **a derived copy**, not the original provider
+GeoTIFF. It was produced from the persisted **genuine Planetary Computer**
+`DF-0001` Sentinel-1 RTC VV scan's measured gamma0-dB raster cache by
+conversion back to positive linear values (`10 ** (dB / 10)`), preserving the
+recorded native affine grid, pixel geometry and CRS. Derivation/source identity
+were explicitly written to GeoTIFF tags. This establishes intake of pixels
+derived from a real acquisition; it does **not** independently authenticate
+the copied GeoTIFF's calibration, provider asset or sensor metadata.
+
+- The local derived GeoTIFF measured **182,232 bytes**, SHA-256
+  `c5d03b07a85fd5c266fa902dfadc3611c6d5ce211eaecff395e618b173776451`.
+- `POST /api/sar/local/import` returned HTTP **201** and import ID
+  `1fa7533e24cc9c3f968b688ddfc5df5c`, status
+  `IMPORTED_NOT_ANALYZED`, separate source and snapshot `VERIFIED` integrity,
+  real image shape **221 rows × 223 columns**, **49,283 usable pixels**,
+  `EPSG:32648`, and the recorded first-pixel-center WGS84 point
+  `(103.8199753363927, 1.259974539433782)` (lon, lat).
+- `GET /api/sar/local/imports/{id}/image` served HTTP **200**,
+  **39,958-byte** valid PNG. The genuine running Chrome DarkFleet tab opened
+  Advanced → Local GeoTIFF (DOM click), displayed the full persisted receipt,
+  `GAMMA0_LINEAR · NOT VERIFIED`, original/snapshot checksums and limitations;
+  the actual loaded browser image reported **223 × 221** native dimensions.
+- New per-file tests **24 passed, 1 skipped** (Windows symlink privilege);
+  integration contract/local-import tests **51 passed, 1 skipped**;
+  full backend suite **1,246 passed, 12 skipped, 4 deselected**;
+  frontend suite **842 passed across 61 test files**;
+  Ruff, scoped mypy, TypeScript checking, contract regeneration/check, and
+  production Vite build passed. Vite retained its existing >500 kB chunk
+  advisory, now **931.75 kB** for the main JS asset.
+
+The backend process was also restarted after the import. A fresh direct
+HTTP query following that restart was not completed in this verification
+session because the computer tool rejected the follow-up request; durable
+receipt/restart and missing-source preservation **were verified by the
+integration tests**, not asserted as an independently retested live-HTTP
+restart acceptance. No imported source was promoted into a canonical scan.
+
+### Scope boundary
+
 The API router lives in `darkfleet.api.local_sar_routes` and exposes `router`.
 Register it once in `darkfleet.api.app.create_app` using
 `application.include_router(local_sar_router)`. The owner of `app.py` performs

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from darkfleet import __version__
 from darkfleet.api.analyst_routes import router as analyst_router
 from darkfleet.api.investigations import router as investigations_router
+from darkfleet.api.local_sar_routes import router as local_sar_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.missions import router as missions_router
 from darkfleet.api.report_routes import router as reports_router
@@ -92,6 +93,7 @@ def create_app(
     application.include_router(analyst_router)
     application.include_router(sar_compare_router)
     application.include_router(sar_imagery_router)
+    application.include_router(local_sar_router)
     application.include_router(saved_views_router)
     # Maritime context lives on its own router: the spatial surface will grow, and
     # it must not widen the core scan router. The route is scan-scoped, so a target

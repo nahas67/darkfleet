@@ -586,3 +586,40 @@ not the results of the final real-data experiments.
   legally obtainable data. Model-backed analysis absent; deterministic offline
   cited fallback is running. Wake still EXPERIMENTAL — NOT CALIBRATED and
   subpixel SAR co-registration not established. No GitHub push or deployment.
+
+## DF-X10-LOCAL — offline operator GeoTIFF import (2026-10-11)
+
+- **Code:** worker-scoped local file intake `5a281d8` and operator UI
+  `4e6a9e9`, plus separately committed prime API/Advanced-panel mounts and
+  generated OpenAPI request contract. Import is `IMPORTED_NOT_ANALYZED`; not
+  a canonical SAR scan, processing completion, detection, source-calibration
+  confirmation, or AIS association. Loopback peer gate, basename-only inbox,
+  symlink/hardlink and traversal rejection, 64 MiB/8M-pixel limits, CRS/affine
+  validation, WGS84 first pixel-centre, byte SHA256 archive, separate source
+  and stored snapshot integrity, bounded RGBA PNG preview.
+- **Integration evidence:** `DF-0001-derived-real-RTC-VV.tif` is an explicitly
+  derived copy of previously verified genuine RTC scan `DF-0001` gamma0 dB
+  raster data, inverted to gamma0 linear for intake; this is **not** the original
+  provider TIFF and does not independently establish calibration. File size
+  182,232 bytes; SHA256
+  `c5d03b07a85fd5c266fa902dfadc3611c6d5ce211eaecff395e618b173776451`.
+  Live HTTP 201 yielded import ID `1fa7533e24cc9c3f968b688ddfc5df5c`,
+  source/snapshot `VERIFIED`, shape 221×223, 49,283 valid pixels,
+  EPSG:32648, acquisition time operator-declared, and calibration explicitly
+  **NOT VERIFIED**. Live HTTP PNG 200 was 39,958 bytes. Existing Chrome
+  UI Advanced → Local GeoTIFF showed the original checksum and distinct
+  source/snapshot integrity; actual image loaded at 223×221 pixels.
+- **Gates:** new backend-focused tests **24 passed / 1 skipped** because
+  Windows symlink creation privilege was missing. Full Python suite after
+  regenerating 4080-line API contract **1,246 passed, 12 skipped,
+  4 deselected**, six warnings, zero failures. Frontend **842 passed in
+  61 files**, TypeScript and Vite production build passed with existing
+  >500kB main chunk warning (931.75 kB). Ruff all backend/tests and scoped
+  mypy passed, generated contract `--check` matched. API worker wrote detailed
+  threats/test matrix to `docs/LOCAL_SAR_IMPORT_EVIDENCE.md`.
+- **Restart bound:** Prime restarted the live loopback backend after import;
+  the post-restart direct HTTP query was blocked by the computer tool and
+  must **not** be represented as fresh live HTTP proof. Test-created source
+  reopens after a fresh FastAPI application instance and preserved snapshot
+  after original removal; genuine local import record persisted on disk.
+  The existing `DF-0001`/`DF-0002` scans were not modified. No remote push.

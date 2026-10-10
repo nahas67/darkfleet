@@ -18,6 +18,8 @@ __pycache__/
 data/ais/
 data/cache/
 data/scans/
+data/local-sar-inbox/
+data/local-sar-imports/
 # Scratch data dirs an ad-hoc verification script may create under tests/.
 # A scan writes real artefacts (cache .npz, worldcover clips, scan records);
 # committing them bloats the repo and puts derived data under version control.

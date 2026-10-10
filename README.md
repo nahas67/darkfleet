@@ -9,6 +9,11 @@ There is **no DEMO/synthetic mode**: every scan is a REAL scan against a live
 provider, and a provider that cannot serve the request returns an error rather
 than substituting data.
 
+An operator may also **inspect a local GeoTIFF without a STAC provider** using
+Advanced → Local GeoTIFF. This is a separate, checksum-tracked *source intake*,
+not a completed scan or a SAR/AIS detection. An imported image is never entered
+in the scan catalogue or assigned a vessel identity just because it is readable.
+
 ## Run Locally
 
 Two processes: the Python API and the Vite dev server. **The API must be running
@@ -56,6 +61,25 @@ DARKFLEET_API_URL=http://192.168.1.10:8000 npm run dev
 
 `npm start` is `vite preview` and serves a production build from `dist/`, so it
 needs `npm run build` first.
+
+### Local GeoTIFF intake (offline)
+
+Place a GeoTIFF in the backend's local inbox at
+`<DARKFLEET_DATA_DIR>/local-sar-inbox/` (by default `data/local-sar-inbox/`,
+relative to the backend process). In **Advanced → Local GeoTIFF**, enter its
+inbox-relative filename and explicitly declare the known product and acquisition
+metadata. Source files are read by the local backend, **not uploaded from your
+browser**. Do not enter URLs or absolute filesystem paths. The HTTP intake is
+restricted to loopback clients; it is not an authenticated remote import service.
+
+The importer validates file and raster bounds, georeferencing and finite pixels,
+records a SHA-256 digest and retains a local immutable snapshot for review.
+The panel distinguishes a missing or modified original from a verified snapshot.
+RTC calibration must not be inferred from pixels alone; GRD digital numbers are
+not calibrated backscatter without the appropriate calibration information.
+**`IMPORTED_NOT_ANALYZED` means no CFAR, AIS matching, or scan completion was
+performed.** Read `docs/LOCAL_SAR_IMPORT_EVIDENCE.md` for exact limits and
+threat-model decisions before placing sensitive imagery in the inbox.
 
 ### Docker instead
 

@@ -870,6 +870,15 @@ export interface InvestigationCreate {
   readonly scan_id?: string | null;
 }
 
+export interface LocalSarImportRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly relative_path: string;
+  readonly product: "RTC" | "GRD";
+  readonly polarization?: "VV" | "VH" | null;
+  readonly acquisition_time?: string | null;
+  readonly calibration?: "UNKNOWN" | "RAW_DN" | "GAMMA0_LINEAR" | "SIGMA0_LINEAR" | "GAMMA0_DB" | "SIGMA0_DB" | null;
+}
+
 export interface ProbeRequest {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   /** Row index in the window raster; 0 is the first row. */
@@ -1609,6 +1618,7 @@ export type ContractRequestSchemaName =
   | 'GeometryCreate'
   | 'ImageryPairRequest'
   | 'InvestigationCreate'
+  | 'LocalSarImportRequest'
   | 'MissionBody'
   | 'MissionReplace'
   | 'MissionScanLink'
@@ -1700,6 +1710,7 @@ export type ContractSchemaName =
   | 'AnalystRequest'
   | 'AnnotationCreate'
   | 'InvestigationCreate'
+  | 'LocalSarImportRequest'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
   | 'WatchEntryCreate'
@@ -3002,6 +3013,20 @@ export const ANNOTATIONCREATE_FIELDS = [
 export const INVESTIGATIONCREATE_FIELDS = [
   'title',
   'scan_id',
+] as const;
+
+/**
+ * Property names of {@link LocalSarImportRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const LOCALSARIMPORTREQUEST_FIELDS = [
+  'relative_path',
+  'product',
+  'polarization',
+  'acquisition_time',
+  'calibration',
 ] as const;
 
 /**
