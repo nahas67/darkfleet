@@ -98,6 +98,40 @@ export interface DetectorsOut {
   readonly note?: string;
 }
 
+export interface InvestigationOut {
+  readonly id: string;
+  readonly title: string;
+  readonly scan_id: string | null;
+  readonly aoi: number[] | null;
+  readonly created_at: string;
+  readonly annotations: AnnotationOut[];
+  readonly watchlist: WatchEntryOut[];
+}
+
+export interface InvestigationListOut {
+  readonly investigations: InvestigationOut[];
+}
+
+export interface AnnotationOut {
+  readonly id: string;
+  readonly investigation_id: string;
+  readonly content: string;
+  readonly target_id: string | null;
+  readonly created_at: string;
+}
+
+export interface WatchEntryOut {
+  readonly id: string;
+  readonly investigation_id: string;
+  readonly target_id: string;
+  readonly created_at: string;
+}
+
+export interface ScanCatalogueResponse {
+  readonly scans: ScanCatalogueEntry[];
+  readonly count: number;
+}
+
 export interface AisAssociation {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly matched: boolean;
@@ -563,6 +597,18 @@ export interface DatasetHealthResponse {
   readonly verified_count: number;
 }
 
+export interface AnnotationCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly content: string;
+  readonly target_id?: string | null;
+}
+
+export interface InvestigationCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+  readonly scan_id?: string | null;
+}
+
 export interface ProbeRequest {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   /** Row index in the window raster; 0 is the first row. */
@@ -583,6 +629,11 @@ export interface ScanCreateRequest {
   readonly product?: "rtc" | "grd";
   /** Overrides for the CA-CFAR/speckle configuration; unset keys keep pipeline defaults. */
   readonly cfar_config?: CfarConfig | null;
+}
+
+export interface WatchEntryCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly target_id: string;
 }
 
 export interface EvidenceDocument {
@@ -713,6 +764,18 @@ export interface DetectorCardOut {
   readonly limitations?: string;
   /** Digest of learned weights; None for deterministic detectors. */
   readonly weights_digest?: string | null;
+}
+
+export interface ScanCatalogueEntry {
+  readonly scan_id: string;
+  readonly created_at?: string | null;
+  readonly scene_id?: string | null;
+  readonly acquisition_time?: string | null;
+  readonly provider?: string | null;
+  readonly product?: string | null;
+  readonly polarization?: string | null;
+  readonly runtime_mode?: "REAL";
+  readonly synthetic?: false;
 }
 
 export interface RejectedCandidate {
@@ -1126,8 +1189,11 @@ export interface VerticalDatumContext {
  * not maintained by hand, so a new route's body is emitted automatically.
  */
 export type ContractRequestSchemaName =
+  | 'AnnotationCreate'
+  | 'InvestigationCreate'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'WatchEntryCreate'
 ;
 
 /** Schemas emitted into this file. */
@@ -1139,6 +1205,11 @@ export type ContractSchemaName =
   | 'TracksOut'
   | 'PatternsOut'
   | 'DetectorsOut'
+  | 'InvestigationOut'
+  | 'InvestigationListOut'
+  | 'AnnotationOut'
+  | 'WatchEntryOut'
+  | 'ScanCatalogueResponse'
   | 'AisAssociation'
   | 'VesselTarget'
   | 'AisOnlyTarget'
@@ -1174,8 +1245,11 @@ export type ContractSchemaName =
   | 'ZoneGeometryResponse'
   | 'DatasetHealthEntry'
   | 'DatasetHealthResponse'
+  | 'AnnotationCreate'
+  | 'InvestigationCreate'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'WatchEntryCreate'
   | 'EvidenceDocument'
   | 'NarrativeEnvelope'
   | 'ProbeGeoreferencing'
@@ -1188,6 +1262,7 @@ export type ContractSchemaName =
   | 'TrackHypothesisOut'
   | 'PatternOut'
   | 'DetectorCardOut'
+  | 'ScanCatalogueEntry'
   | 'RejectedCandidate'
   | 'PolarizationEvidence'
   | 'WakeEvidence'
@@ -1340,6 +1415,70 @@ export const DETECTORSOUT_FIELDS = [
   'default',
   'detectors',
   'note',
+] as const;
+
+/**
+ * Property names of {@link InvestigationOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const INVESTIGATIONOUT_FIELDS = [
+  'id',
+  'title',
+  'scan_id',
+  'aoi',
+  'created_at',
+  'annotations',
+  'watchlist',
+] as const;
+
+/**
+ * Property names of {@link InvestigationListOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const INVESTIGATIONLISTOUT_FIELDS = [
+  'investigations',
+] as const;
+
+/**
+ * Property names of {@link AnnotationOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANNOTATIONOUT_FIELDS = [
+  'id',
+  'investigation_id',
+  'content',
+  'target_id',
+  'created_at',
+] as const;
+
+/**
+ * Property names of {@link WatchEntryOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const WATCHENTRYOUT_FIELDS = [
+  'id',
+  'investigation_id',
+  'target_id',
+  'created_at',
+] as const;
+
+/**
+ * Property names of {@link ScanCatalogueResponse} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANCATALOGUERESPONSE_FIELDS = [
+  'scans',
+  'count',
 ] as const;
 
 /**
@@ -1974,6 +2113,28 @@ export const DATASETHEALTHRESPONSE_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link AnnotationCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const ANNOTATIONCREATE_FIELDS = [
+  'content',
+  'target_id',
+] as const;
+
+/**
+ * Property names of {@link InvestigationCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const INVESTIGATIONCREATE_FIELDS = [
+  'title',
+  'scan_id',
+] as const;
+
+/**
  * Property names of {@link ProbeRequest} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -1997,6 +2158,16 @@ export const SCANCREATEREQUEST_FIELDS = [
   'provider',
   'product',
   'cfar_config',
+] as const;
+
+/**
+ * Property names of {@link WatchEntryCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const WATCHENTRYCREATE_FIELDS = [
+  'target_id',
 ] as const;
 
 /**
@@ -2184,6 +2355,24 @@ export const DETECTORCARDOUT_FIELDS = [
   'validation_data',
   'limitations',
   'weights_digest',
+] as const;
+
+/**
+ * Property names of {@link ScanCatalogueEntry} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCANCATALOGUEENTRY_FIELDS = [
+  'scan_id',
+  'created_at',
+  'scene_id',
+  'acquisition_time',
+  'provider',
+  'product',
+  'polarization',
+  'runtime_mode',
+  'synthetic',
 ] as const;
 
 /**

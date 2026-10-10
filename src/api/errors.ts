@@ -140,6 +140,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const body = await readBody(response);
   if (!response.ok) throw parseErrorBody(response.status, body);
+  // A successful DELETE has no representation by HTTP definition.
+  if (response.status === 204) return undefined as T;
   if (body === null || body === '') {
     throw new ApiError(response.status, 'EMPTY_RESPONSE', 'The server returned no body.');
   }
@@ -176,4 +178,6 @@ export const api = {
    */
   post: <T>(path: string, payload: unknown, signal?: AbortSignal) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(payload), signal }),
+  delete: (path: string, signal?: AbortSignal) =>
+    request<void>(path, { method: 'DELETE', signal }),
 };

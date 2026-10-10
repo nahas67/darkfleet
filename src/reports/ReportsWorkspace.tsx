@@ -9,10 +9,9 @@
  * 400s is worse than no link.
  */
 
-import { useState } from 'react';
-
 import { useStore } from '../state/store';
 import { NOT_ESTABLISHED } from '../design/format';
+import { InvestigationNotebook } from './InvestigationNotebook';
 
 const FORMATS = [
   { id: 'json', label: 'Analytical JSON', note: 'full record with provenance' },
@@ -24,7 +23,6 @@ const FORMATS = [
 
 export function ReportsWorkspace() {
   const state = useStore();
-  const [note, setNote] = useState('');
   const scanId = state.scanId;
 
   return (
@@ -73,23 +71,7 @@ export function ReportsWorkspace() {
           </p>
         </div>
 
-        <div>
-          <label className="df-label mb-1 block text-[10px]" htmlFor="df-note">
-            Analyst note
-          </label>
-          <textarea
-            id="df-note"
-            className="df-input w-full"
-            style={{ height: 72, padding: 6 }}
-            placeholder="Record what you checked and what you could not establish."
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-          <p className="df-num mt-1 text-[10px] text-ink-dim">
-            Held in this session only. Persistent annotations are not yet backed by an
-            endpoint, so this field deliberately does not pretend to save.
-          </p>
-        </div>
+        <InvestigationNotebook />
       </div>
     </section>
   );

@@ -72,6 +72,14 @@ SCHEMAS: tuple[str, ...] = (
     "TracksOut",
     "PatternsOut",
     "DetectorsOut",
+    # Analyst-authored investigation notes and watch entries, kept separate from
+    # immutable observations and generated from the same served API contract.
+    "InvestigationOut",
+    "InvestigationListOut",
+    "AnnotationOut",
+    "WatchEntryOut",
+    # Completed-run catalogue for the analysis comparison workspace.
+    "ScanCatalogueResponse",
     "AisAssociation",
     "VesselTarget",
     "AisOnlyTarget",

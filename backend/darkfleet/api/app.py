@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from darkfleet import __version__
+from darkfleet.api.investigations import router as investigations_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.routes import ApiState, liveness_router, router
 from darkfleet.config.settings import Settings
@@ -74,11 +75,12 @@ def create_app(
         CORSMiddleware,
         allow_origins=list(cors_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     application.include_router(liveness_router)
     application.include_router(router)
+    application.include_router(investigations_router)
     # Maritime context lives on its own router: the spatial surface will grow, and
     # it must not widen the core scan router. The route is scan-scoped, so a target
     # id is never resolvable without its scan.

@@ -128,8 +128,8 @@ export function HistoryTab({
           <Maybe value={measurement(target.lenUncM, { digits: 0, unit: 'm' })} />
         </Row>
         <div className="pt-1 text-[10px] leading-tight text-ink-dim">
-          Report generation and analyst annotation are not events this product records, so they are
-          absent from this list rather than shown as empty rows.
+          Analyst annotations are persisted in Reports / Investigation notebook, separate
+          from measured observations. Report generation is not logged as a scan event.
         </div>
       </div>
 
@@ -171,7 +171,7 @@ export function HistoryTab({
 
       <Provenance label="What is not persisted">
         <ul className="list-inside list-disc text-[11px] text-ink-2">
-          <li>Analyst notes and annotations.</li>
+          <li>Report-generation actions, which are not tracked as scan events.</li>
           <li>Pipeline stage events, which are an in-memory stream rather than a ledger.</li>
           <li>
             A stable cross-scan target identity. Ids are per-scan, so continuity of identity is a
