@@ -26,7 +26,7 @@ without a position or an identity is not an observation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -56,4 +56,11 @@ class AisObservation(BaseModel):
     source: str | None = None
 
     def dedup_key(self) -> str:
-        return f"{self.mmsi}|{self.timestamp.isoformat()}"
+        # Two offset representations can denote the same transmission.
+        # Arrow reads archived instants in UTC, so use the same canonical key
+        # before and after a restart. Naive legacy inputs are assumed UTC.
+        timestamp = (
+            self.timestamp.replace(tzinfo=UTC)
+            if self.timestamp.tzinfo is None else self.timestamp.astimezone(UTC)
+        )
+        return f"{self.mmsi}|{timestamp.isoformat()}"

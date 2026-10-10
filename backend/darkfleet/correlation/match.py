@@ -377,12 +377,27 @@ def correlate(
     # different findings. The closest rejected candidate is what makes the
     # decision inspectable, which is the whole point of a Ghost Vessel workflow.
     closest_rejected: dict[int, Candidate] = {}
+    rejection_reasons: dict[int, str] = {}
     for c in cands:
-        if c["idx"] in matched or c["idx"] in unresolved:
+        idx = c["idx"]
+        winner = matched.get(idx)
+        if winner is c:
             continue
-        incumbent = closest_rejected.get(c["idx"])
+        # Multiple fixes from the same MMSI are still one vessel; only a
+        # different MMSI is an alternate claimant to an already selected match.
+        if winner is not None and str(c["ais"]["mmsi"]) == str(winner["ais"]["mmsi"]):
+            continue
+        incumbent = closest_rejected.get(idx)
         if incumbent is None or c["score"] > incumbent["score"]:
-            closest_rejected[c["idx"]] = c
+            closest_rejected[idx] = c
+            if idx in unresolved:
+                rejection_reasons[idx] = "AMBIGUOUS_PAIR"
+            elif winner is not None:
+                rejection_reasons[idx] = "LOWER_RANKED_ALTERNATIVE"
+            elif c["score"] >= MIN_SCORE:
+                rejection_reasons[idx] = "ONE_TO_ONE_CONFLICT"
+            else:
+                rejection_reasons[idx] = "BELOW_THRESHOLD"
 
     targets: list[dict[str, Any]] = []
     for idx, comp in enumerate(components):
@@ -462,10 +477,18 @@ def correlate(
             tags.append("SUB_THRESHOLD_CANDIDATE")
         else:
             cls = "SAR_UNMATCHED"
-            assessment = (
-                f"Unmatched surface radar return ({apparent_length_note}). No sufficiently "
-                f"confident AIS association in the available observations."
-            )
+            competing = closest_rejected.get(idx)
+            if competing is not None and competing["score"] >= MIN_SCORE:
+                assessment = (
+                    f"Unmatched surface radar return ({apparent_length_note}). An AIS candidate "
+                    "exceeded the acceptance threshold but was assigned to another SAR "
+                    "detection under the one-to-one association rule."
+                )
+            else:
+                assessment = (
+                    f"Unmatched surface radar return ({apparent_length_note}). No sufficiently "
+                    f"confident AIS association in the available observations."
+                )
             tags += ["SAR_UNMATCHED", "AIS_UNASSOCIATED"]
             # A wake detection is recorded as a TAG, never as a score adjustment.
             # "Wake-like linear evidence present" is an observation; it is not a
@@ -505,7 +528,11 @@ def correlate(
                 "score": round(rejected["score"], 3),
                 "distanceMeters": round(rejected["dist"]),
                 "timeDeltaSeconds": rejected["dt"],
-                "shortfall": round(MIN_SCORE - rejected["score"], 3),
+                # A candidate may exceed the threshold but lose the one-to-one
+                # assignment to another detection. Its threshold deficit is
+                # zero, never a negative quantity invalid under the API model.
+                "shortfall": round(max(0.0, MIN_SCORE - rejected["score"]), 3),
+                "rejectionReason": rejection_reasons[idx],
             }
             if rejected is not None
             else None

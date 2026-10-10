@@ -7,7 +7,13 @@ The archive is the authority; memory never is. Restart-safe by construction.
 from __future__ import annotations
 
 import logging
+import os
+import re
+import tempfile
+import threading
 from datetime import datetime
+from functools import wraps
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +24,30 @@ import pyarrow.parquet as pq
 from .models import AisObservation
 
 logger = logging.getLogger(__name__)
+
+# Read and append calls usually construct separate AisArchive instances.
+# Keep the lock at the root level so a Windows reader cannot retain an open
+# Parquet handle while another thread tries to atomically replace that part.
+# This coordinates processes' threads only; external writers require an
+# interprocess lock and are not covered by this in-process guarantee.
+_LOCK_REGISTRY_GUARD = threading.Lock()
+_ROOT_LOCKS: dict[Path, threading.RLock] = {}
+_ROOT_REVISIONS: dict[Path, int] = {}
+
+
+def _root_lock(root: Path) -> threading.RLock:
+    with _LOCK_REGISTRY_GUARD:
+        if root not in _ROOT_LOCKS:
+            _ROOT_LOCKS[root] = threading.RLock()
+        return _ROOT_LOCKS[root]
+
+
+def _synchronized(method: Any) -> Any:
+    @wraps(method)
+    def locked(self: AisArchive, *args: Any, **kwargs: Any) -> Any:
+        with _root_lock(self._root_key):
+            return method(self, *args, **kwargs)
+    return locked
 
 _SCHEMA = pa.schema(
     [
@@ -62,7 +92,16 @@ def _connect_utc() -> Any:
 
 
 def _part_path(root: Path, day: datetime, source: str) -> Path:
-    return root / f"{day.year:04d}" / f"{day.month:02d}" / f"{day.day:02d}" / f"part-{source}.parquet"
+    # Source is provider metadata, not a filesystem path. Preserve common
+    # historical names verbatim; use a deterministic safe name for arbitrary
+    # external labels (including slashes, Unicode, and Windows separators).
+    # Retain the original source in the Parquet column for provenance.
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", source):
+        filename_source = source
+    else:
+        prefix = re.sub(r"[^A-Za-z0-9_-]", "_", source)[:24]
+        filename_source = f"{prefix}-{sha256(source.encode('utf-8')).hexdigest()[:20]}"
+    return root / f"{day.year:04d}" / f"{day.month:02d}" / f"{day.day:02d}" / f"part-{filename_source}.parquet"
 
 
 def _to_table(obs: list[AisObservation]) -> pa.Table:
@@ -93,8 +132,10 @@ class AisArchive:
     def __init__(self, data_dir: str | Path):
         self.root = Path(data_dir) / "ais"
         self.root.mkdir(parents=True, exist_ok=True)
+        self._root_key = self.root.resolve()
         # LAZY (DF-X9.8B). Built on first append(), never at construction. See _seen_index.
         self._seen_cache: set[str] | None = None
+        self._indexed_revision: int | None = None
 
     def _seen_index(self) -> set[str]:
         """The mmsi|timestamp dedup index, built from what is ALREADY on disk.
@@ -131,30 +172,52 @@ class AisArchive:
             self._seen_cache = seen
         return self._seen_cache
 
+    @_synchronized
     def append(self, obs: list[AisObservation]) -> dict[str, int]:
         """Dedup by mmsi|timestamp; returns {written, duplicates}."""
         written = duplicates = 0
         by_part: dict[Path, list[AisObservation]] = {}
         # Built here, and only here, so that constructing an archive for a READ costs nothing.
+        revision = _ROOT_REVISIONS.get(self._root_key, 0)
+        # Another archive instance may have appended since this instance was
+        # last used. Rebuild only on such a change; live single-writer streams
+        # retain the one-time-index cost instead of rereading on every frame.
+        if self._indexed_revision != revision:
+            self._seen_cache = None
         seen = self._seen_index()
+        self._indexed_revision = revision
+        pending: set[str] = set()
         for o in obs:
             key = o.dedup_key()
-            if key in seen:
+            if key in seen or key in pending:
                 duplicates += 1
                 continue
-            seen.add(key)
+            pending.add(key)
             p = _part_path(self.root, o.timestamp, o.source or "unknown")
             by_part.setdefault(p, []).append(o)
-            written += 1
         for path, rows in by_part.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             new = _to_table(rows)
             if path.exists():
                 old = pq.read_table(path, schema=_SCHEMA)
                 new = pa.concat_tables([old, new])
-            pq.write_table(new, path, compression="snappy")
+            # Never publish half-written Parquet or mark a failed write as seen.
+            # Readers keep using the previous complete part until replacement.
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            os.close(fd)
+            temp_path = Path(tmp_name)
+            try:
+                pq.write_table(new, temp_path, compression="snappy")
+                temp_path.replace(path)
+            finally:
+                temp_path.unlink(missing_ok=True)
+            seen.update(o.dedup_key() for o in rows)
+            _ROOT_REVISIONS[self._root_key] = _ROOT_REVISIONS.get(self._root_key, 0) + 1
+            self._indexed_revision = _ROOT_REVISIONS[self._root_key]
+            written += len(rows)
         return {"written": written, "duplicates": duplicates}
 
+    @_synchronized
     def query(
         self,
         start: datetime,
@@ -191,6 +254,7 @@ class AisArchive:
         finally:
             con.close()
 
+    @_synchronized
     def coverage(self) -> dict[str, Any]:
         """Freshness + coverage report. (AIS-012)"""
         files = sorted(self.root.rglob("part-*.parquet"))

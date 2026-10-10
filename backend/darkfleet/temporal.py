@@ -49,8 +49,8 @@ def association_gap_patterns(
 
     patterns: list[Pattern] = []
     for cell, group in sorted(by_loc.items()):
-        group.sort(key=lambda o: str(o["acquisition_time"]))
-        if len(group) < min_passes:
+        group.sort(key=lambda o: _t(str(o["acquisition_time"])))
+        if len({str(o.get("scan_id") or o["acquisition_time"]) for o in group}) < min_passes:
             continue
         states = [bool(o.get("correlated_mmsi")) for o in group]
         gaps = _interior_false_runs(states)
@@ -59,6 +59,19 @@ def association_gap_patterns(
                 continue
             before = group[start - 1] if start > 0 else None
             after = group[end + 1] if end + 1 < len(group) else None
+            # The same approximate cell can hold multiple distinct vessels.
+            # An association before and after is evidence of an interruption
+            # only when both ends identify the same vessel; otherwise a gap
+            # between unrelated contacts is manufactured.
+            if before is None or after is None or str(before.get("correlated_mmsi")) != str(after.get("correlated_mmsi")):
+                continue
+            # A single SAR scan can hold both matched and unmatched targets in
+            # the same coarse location cell. That does not establish a gap
+            # between passes, even if the targets appear sequentially in input.
+            window = group[start - 1:end + 2]
+            scans = [str(o.get("scan_id") or o["acquisition_time"]) for o in window]
+            if len(scans) != len(set(scans)):
+                continue
             duration_h = (
                 _t(group[end]["acquisition_time"]) - _t(group[start]["acquisition_time"])
             ).total_seconds() / 3600.0
@@ -132,9 +145,16 @@ def repeated_unmatched_patterns(
 
     patterns: list[Pattern] = []
     for cell, group in sorted(by_loc.items()):
+        # Multiple detections in one acquisition are not repeated sightings
+        # over time. Count separate SAR passes, retaining one representative
+        # observation per pass for transparent evidence.
+        unique: dict[str, dict[str, Any]] = {}
+        for obs in group:
+            unique.setdefault(str(obs.get("scan_id") or obs["acquisition_time"]), obs)
+        group = list(unique.values())
         if len(group) < min_count:
             continue
-        group.sort(key=lambda o: str(o["acquisition_time"]))
+        group.sort(key=lambda o: _t(str(o["acquisition_time"])))
         span_h = (
             _t(group[-1]["acquisition_time"]) - _t(group[0]["acquisition_time"])
         ).total_seconds() / 3600.0
@@ -167,25 +187,33 @@ def repeated_unmatched_patterns(
 
 
 def convergence_patterns(observations: list[dict[str, Any]], *, min_passes: int = 3) -> list[Pattern]:
-    """Detect: two or more tracks converging into the same cell, then separating."""
-    by_cell: dict[tuple[float, float], set[str]] = {}
+    """Report AIS-associated co-location only when seen in the same SAR pass.
+
+    Cell overlap across separate dates is not an observed encounter or
+    convergence, and no trajectory/separation claim can be made from a cell
+    index. min_passes remains reserved for future longitudinal evidence.
+    """
+    by_cell: dict[tuple[float, float], dict[str, set[str]]] = {}
     for obs in observations:
         mmsi = obs.get("correlated_mmsi")
         if not mmsi:
             continue
         cell = (round(float(obs["lat"]), 1), round(float(obs["lon"]), 1))
-        by_cell.setdefault(cell, set()).add(str(mmsi))
+        scan = str(obs.get("scan_id") or obs["acquisition_time"])
+        by_cell.setdefault(cell, {}).setdefault(scan, set()).add(str(mmsi))
 
     patterns: list[Pattern] = []
-    for cell, mmsis in sorted(by_cell.items()):
-        if len(mmsis) < 2:
+    for cell, passes in sorted(by_cell.items()):
+        same_pass = [(scan, mmsis) for scan, mmsis in passes.items() if len(mmsis) >= 2]
+        if not same_pass:
             continue
+        scan, mmsis = min(same_pass, key=lambda entry: (-len(entry[1]), entry[0]))
         joined = ", ".join(sorted(mmsis))
         patterns.append(
             Pattern(
                 pattern_id=f"PAT-C{len(patterns) + 1:03d}",
                 kind="CO_LOCATED_TRACKS",
-                observed=f"{len(mmsis)} AIS-associated track(s) observed within ~11 km of {cell[0]:.1f}N {cell[1]:.1f}E: {joined}.",
+                observed=f"{len(mmsis)} AIS-associated track(s) observed in the same SAR pass ({scan}) within ~11 km of {cell[0]:.1f}N {cell[1]:.1f}E: {joined}.",
                 hypothesis=(
                     "Co-location within SAR resolution and corridor uncertainty. "
                     "Rendezvous, escort, anchorage congestion, or simply a busy "
@@ -197,7 +225,7 @@ def convergence_patterns(observations: list[dict[str, Any]], *, min_passes: int 
                     "Duration and purpose of the co-location.",
                     "Whether either vessel altered course because of the other.",
                 ],
-                evidence=[f"mmsi {m}" for m in sorted(mmsis)],
+                evidence=[f"scan {scan}, mmsi {m}" for m in sorted(mmsis)],
             )
         )
     if patterns:

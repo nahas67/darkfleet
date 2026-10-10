@@ -51,8 +51,8 @@ class TrackPoint:
     lon: float
     sar_conf: float
     classification: str
-    apparent_length_m: float
-    length_unc_m: float
+    apparent_length_m: float | None
+    length_unc_m: float | None
 
 
 @dataclass
@@ -111,7 +111,9 @@ def build_tracks(
 
     tracks: list[TrackHypothesis] = []
     for index, (mmsi, group) in enumerate(sorted(by_mmsi.items()), start=1):
-        group.sort(key=lambda o: str(o["acquisition_time"]))
+        # Offsets make ISO strings lexically nonchronological; geodesic speed
+        # and cross-pass assertions must use actual instants.
+        group.sort(key=lambda o: _t(str(o["acquisition_time"])))
         points = [
             TrackPoint(
                 scan_id=str(o.get("scan_id", "")),
@@ -121,8 +123,12 @@ def build_tracks(
                 lon=float(o["lon"]),
                 sar_conf=float(o.get("sar_conf", 0.0)),
                 classification=str(o.get("classification", "")),
-                apparent_length_m=float(o.get("apparent_length_m", 0.0)),
-                length_unc_m=float(o.get("length_unc_m", 0.0)),
+                apparent_length_m=(
+                    float(o["apparent_length_m"]) if o.get("apparent_length_m") is not None else None
+                ),
+                length_unc_m=(
+                    float(o["length_unc_m"]) if o.get("length_unc_m") is not None else None
+                ),
             )
             for o in group
         ]
