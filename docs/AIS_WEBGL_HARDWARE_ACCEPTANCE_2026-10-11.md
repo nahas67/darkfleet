@@ -107,3 +107,70 @@ The first actual installed-Chrome run (`EXIT 1`) established that the bare Vite 
 ## Acceptance disposition
 
 **PASS narrowly:** actual selected AMD WebGL2 hardware + actual live app Cesium canvas, deterministic synthetic 100/1k/5k/10k contacts, all 36 active scene-render interval samples per density, exact Vite module/source hash parity, real `scene.pick` selected visible tags, billboards/primitives clearing to zero after teardown, no context loss, zero measured assertion failures. **NOT PASS / NOT ESTABLISHED:** acceptable smooth 10k framerate, GPU-only frame duration, GPU VRAM usage, long-run heap leak-free behavior, actual user pointer→store behavior, source-backed real AIS playback/identity, or strict clean production-build identity. These are separate acceptance criteria and must not be inferred from a successful synthetic benchmark runner exit.
+
+## Post-commit AMD WebGL2 retest, cf6b3bc — 2026-10-11 (UTC 2026-10-10)
+
+**Result `MEASURED`, exit 0; Chrome closed and GPU slot immediately released to prime.** The exclusive bounded rerun was permitted after backend **1,346 passed / 14 skipped / 4 deselected** and frontend **887/887 passed**, and worker-4 committed the `displayState.ts` fast path as `cf6b3bc5f2d509a10cede2e637f942d6e6cc8521`. The command, contact fixture (5 explicitly **SYNTHETIC** observations per MMSI), Chrome hardware flags, 1,440 × 900 viewport, 998 × 790 actual app canvas, and **36 active `scene.postRender` frame intervals** at each 100/1,000/5,000/10,000-contact density were unchanged. The selected GPU matched the first run exactly: **ANGLE AMD Radeon(TM) Graphics (0x00001638), Direct3D11, WebGL2**, CDP driver `31.0.21914.8004`. CDP also listed a separate NVIDIA GeForce RTX 3050 Laptop GPU; it was **not** the active WebGL adapter. `document.visibilityState=visible`, context not lost. No production source file was modified by this retest.
+
+```powershell
+$ev=Join-Path $env:TEMP 'darkfleet_ais_gpu_worker7_post_cf6b3bc_20261011.json'
+$stderr=Join-Path $env:TEMP 'darkfleet_ais_gpu_worker7_post_cf6b3bc_20261011.stderr'
+python -B build-tools/ais_webgl_hardware_benchmark.py --run --url http://localhost:5174/ --frames 36 --timeout 90 1> $ev 2> $stderr
+# ACTUAL exit: 0; JSON status MEASURED, rows=4, 4/4 complete, zero runner errors
+```
+
+Retest raw JSON evidence (original retained **unchanged**):
+
+| Raw evidence | First run | Retest |
+| --- | --- | --- |
+| Windows TEMP file basename | `darkfleet_ais_gpu_worker7_run4_20261011.json` | `darkfleet_ais_gpu_worker7_post_cf6b3bc_20261011.json` |
+| Output bytes | 151,412 | 151,256 |
+| SHA-256 | `47a7f798e997086f0af03569052d41aeac54454b5acc83e0888642bc2883bada` | `ca4cad7cd3e08ad2185e5bbdbe2413df4e32129da9ce05b24797d48a2886ce6f` |
+| JSON UTC recorded | `2026-10-10T23:02:03.178569+00:00` | `2026-10-10T23:13:40.271005+00:00` |
+| Git HEAD start = end | `19f7f49cb7d8b05c2ca278f4a3994426e4bbee46` | `cf6b3bc5f2d509a10cede2e637f942d6e6cc8521` |
+| Working tree dirty start/end | `true` / `true` | `true` / `true` |
+| Six source SHA-256s: Vite-served raw modules vs local filesystem before AND after | all matched | all matched |
+| Instrumented Chrome adaptor | AMD D3D11 | same AMD D3D11 |
+| Chrome process after run | closed | closed |
+
+### Essential source-provenance qualification: **not a pre-optimization A/B test**
+
+Both Chrome GPU benchmark runs used the **identical optimized, already-present worktree content** of `src/ais/displayState.ts`, SHA-256 **`a6435ed7556d06c895ae4c5086f83407dd84400d480d47ea63107fda0a462795`**, as verified by the *actual Vite-served module bytes and local worktree SHA-256*. The optimized source existed as an uncommitted file during the first run (`dirty=true`, old Git HEAD `19f7f49`). Only later was the optimized source committed by worker-4 as `cf6b3bc`. Inspecting the **committed** source bytes at the old revision (and at `cf6b3bc^`) gives SHA-256 `7cdb8d8771579bd04aa3574de87d8e07aeb6d2ff9f4d70994bac0bb7925c27cc`, but these old committed bytes were **NOT the code executed in the first Chrome run**. The optimization commit includes a new `displayTimeOrder` path replacing `inTimeOrder` inside `displayStateOf`. Git revision labels alone would give a **false before/after interpretation**.
+
+Therefore, the two measured Chrome runs are a **repeatability / run-to-run variability comparison of one and the same optimized source**, **NOT** a hardware regression (or improvement) caused by `cf6b3bc`. Worker-4's separately reported controlled **8-process CPU A/B speedup** pertains to its own deterministic harness and must not be extrapolated to GPU `postRender` responsiveness. A legitimate old-vs-new hardware causal test would need a newly scheduled baseline with genuine pre-optimization source in a controlled, isolated and approved environment; it was **not** performed in this bounded slot. All other five watched application source hashes matched between first and second GPU runs too, and the app-loaded Vite engine module URL was the same `.../src/globe/engine.ts?t=1791672825656`.
+
+### Actual matched-workload results (same optimized source, two independent runs)
+
+Frame intervals are **active real Cesium `scene.postRender`** with forced AIS playback changes, **not** idle rAF, raw GPU execution time, or whole-source live AIS performance. Values in ms; `Δ` is retest minus first run (positive = slower observed sample), **not** optimization effect.
+
+| Synthetic contact count | First frame p50 / p95 / worst | Retest frame p50 / p95 / worst | Δ p50 / p95 | First playback-update p50 / p95 | Retest playback-update p50 / p95 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 14.5 / 25.2 / 254.9 | **17.5 / 48.0 / 436.1** | +3.0 / +22.8 | 2.2 / 3.8 | **3.6 / 7.1** |
+| 1,000 | 20.8 / 38.0 / 41.0 | **31.6 / 57.6 / 87.8** | +10.8 / +19.6 | 12.2 / 21.5 | **19.0 / 23.4** |
+| 5,000 | 64.1 / 96.3 / 110.6 | **79.1 / 127.5 / 209.6** | +15.0 / +31.2 | 52.5 / 77.4 | **65.8 / 94.4** |
+| 10,000 | 93.3 / 145.7 / 147.1 | **136.4 / 195.1 / 209.4** | +43.1 / +49.4 | 80.7 / 119.0 | **118.5 / 176.1** |
+
+One run per revision label, 36 observed intervals per density, nonrandomized sample order (100→10k), shared live Vite development environment and unrelated dirty work. The 10k **retained-source** p50 differed by **46.2%** (+43.1 ms) between runs even though the source and GPU adapter matched. No causal statement about the optimization, reliable p95 distribution, or 10k smooth-fps release acceptance is justified. In particular, **the 10k p50=136.4 ms/p95=195.1 ms retest is NOT a 30/60 FPS pass**.
+
+| Density | First select→`postRender` | Retest select→`postRender` | First actual `scene.pick` p50/p95 | Retest actual `scene.pick` p50/p95 | Retest `scene.pick` success |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 36.9 | **14.5** | 1.4 / 15.5 | **2.7 / 5.2** | 8/8 |
+| 1,000 | 37.2 | **22.4** | 3.4 / 16.1 | **3.0 / 24.0** | 8/8 |
+| 5,000 | 83.9 | **128.3** | 3.8 / 26.0 | **4.6 / 26.4** | 8/8 |
+| 10,000 | 112.2 | **217.3** | 4.1 / 17.2 | **6.8 / 8.2** | 8/8 |
+
+Retest selection build/load timings respectively were **3.1 / 22.4 ms** at 100; **13.4 / 19.7 ms** at 1k; **99.4 / 113.5 ms** at 5k; **177.2 / 143.8 ms** at 10k (all directly from the recorded JSON). `scene.pick` was applied to actual visible canvas pixels, not OS/DOM pointer events; selected tag may represent a frontmost different overlapping vessel. A picked MMSI was found on all 8 probes for each density, including 10k `257004966`; no full pointer→UI store workflow assertion.
+
+### Memory and GPU resource lifecycle comparison
+
+| Density | First empty-scene JS heap after GC (bytes) | Retest empty-scene JS heap after GC (bytes) | Retest billboards after clear | Retest primitives loaded→after destroy |
+| ---: | ---: | ---: | ---: | ---: |
+| Initial empty baseline | 107,591,341 | **101,100,373** | — | 0 |
+| 100 | 107,563,937 | **107,011,660** | 0 | 5→0 |
+| 1,000 | 110,090,586 | **109,514,744** | 0 | 5→0 |
+| 5,000 | 116,823,278 | **116,226,664** | 0 | 5→0 |
+| 10,000 | 121,149,490 | **120,431,824** | 0 | 5→0 |
+
+Retest empty-scene heap after forced available `window.gc` rose **19,331,451 bytes** from its own baseline (first run grew **13,558,149 bytes**). That is **not** a clean isolation of retained objects, a trend across multiple matched 10k cycles, or proof of a memory leak, but it also **does not establish leak-free steady state**. Renderer billboards were exactly requested count after load, then zero after clear for all sizes, and all **five** AIS Cesium parent primitive collections were removed on destroy; `scene.primitives` returned to 0 after each stage and WebGL context loss was false. Observed, cumulative **instrumented** post-destroy WebGL net allocations remained stable at all four empty endpoints within each run: first run `Buffer=21, Texture=3, Framebuffer=2, Renderbuffer=1, VertexArray=19, Program=10–12, Shader=0`; retest `Buffer=19, Texture=3, Framebuffer=2, Renderbuffer=1, VertexArray=17, Program=9–11, Shader=0`. These counts exclude allocations before instrumentation, and are NOT GPU VRAM measurements.
+
+**Retest disposition:** Hardware/SHA/lifecycle/sample-collection gate **PASS narrowly**; smooth 10k operation **NOT PASSED**; strict production build **NOT CLAIMED**; hardware pre- vs post-optimization performance comparison **INVALID because first measured source was already optimized**; long-run heap-leak freedom **NOT PROVEN**. Original raw JSON remains unchanged, and Chrome was closed/released directly after the successful rerun. No push; only this GPU acceptance report is amended.
