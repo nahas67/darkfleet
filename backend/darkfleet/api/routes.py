@@ -105,7 +105,7 @@ from darkfleet.geolocation import (
     transform_wgs84,
 )
 from darkfleet.jobs.models import ScanStage, is_terminal
-from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent
+from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent, redact_stage_detail
 from darkfleet.narrative import summarise
 from darkfleet.pipeline import run_scan
 from darkfleet.providers import ProviderStatus, RealDataUnavailableError
@@ -247,8 +247,9 @@ _SECRET_DETAIL_KEY_RE: Final[re.Pattern[str]] = re.compile(
 
 
 def redact(text: str) -> str:
-    """Blank out anything shaped like ``key=value`` credentials."""
-    return _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", str(text))
+    """Scrub old stage records too: they predate durable runner-side redaction."""
+    safe = redact_stage_detail(text)
+    return _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", safe)
 
 
 def redact_details(value: Any) -> Any:

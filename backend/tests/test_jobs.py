@@ -307,6 +307,46 @@ def test_worker_failure_redacts_credentials_from_state_events_and_logs(
     assert recovered.error == job.error
 
 
+def test_successful_provider_stage_redacts_signed_tokens_before_any_output(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An upstream STAC scene ID may contaminate a successful stage detail.
+
+    Failure-only redaction cannot protect the durable job, logs or subscribers.
+    Preserve scientific measurements and source identity while hiding secrets.
+    """
+    marker = "SUCCESS_STAGE_SIGNED_CANARY_DO_NOT_EXPOSE"
+    normal = "scene selected S1A_FIXTURE_20240101T000000; resolution_m=10; 41 detections"
+    provider_detail = (
+        f"{normal}; https://storage.invalid/blob?sig={marker}&access_token={marker}; "
+        f"Authorization: Bearer {marker}; body={{\"apiKey\":\"{marker}\"}}"
+    )
+
+    def work() -> Iterator[tuple[ScanStage, str]]:
+        for stage in PIPELINE[1:]:
+            yield stage, provider_detail if stage is ScanStage.SEARCHING_SCENE else DETAILS[stage]
+
+    caplog.set_level(logging.INFO, logger="darkfleet")
+    runner = ScanRunner(tmp_path)
+    job = _run_to_end(runner, work)
+    assert job.stage is ScanStage.COMPLETE
+    assert job.error is None
+    selected = job.history[1].detail
+    assert normal in selected
+    assert "sig=<redacted>" in selected
+    assert "access_token=<redacted>" in selected
+    assert "Bearer <redacted>" in selected
+    assert marker not in selected
+    assert marker not in (tmp_path / "jobs" / f"{job.scan_id}.json").read_text(encoding="utf-8")
+    assert marker not in "\n".join(event.detail for event in _drain(runner.subscribe(job.scan_id)))
+    assert marker not in "\n".join(record.getMessage() for record in caplog.records)
+
+    restored = ScanRunner(tmp_path).get(job.scan_id)
+    assert restored is not None and restored.stage is ScanStage.COMPLETE
+    assert restored.history[1].detail == selected
+    assert restored.history[-1].detail == DETAILS[ScanStage.COMPLETE]
+
+
 def test_illegal_transition_from_worker_fails_the_job() -> None:
     runner = ScanRunner()
     job = _run_to_end(runner, _skipping_work)

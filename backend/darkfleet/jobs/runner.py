@@ -18,8 +18,8 @@ Rules this module enforces:
   stage that was in flight identified from the canonical machine;
 * a worker that returns without reaching ``COMPLETE`` becomes ``FAILED`` -- the
   runner will not invent a terminal state on the worker's behalf;
-* ``detail`` is stored and logged verbatim, so counts come only from the code
-  that measured them;
+* ``detail`` preserves measured progress after credential-shaped values are
+  redacted before logging, persistence and subscriber delivery;
 * when a state directory is configured, every transition is written to disk so
   a fresh ``ScanRunner`` over the same directory sees prior jobs (OPS-013).
 """
@@ -54,6 +54,7 @@ __all__ = [
     "ScanWork",
     "StageEvent",
     "default_state_dir",
+    "redact_stage_detail",
 ]
 
 logger = logging.getLogger("darkfleet")
@@ -74,12 +75,25 @@ _SECRET_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def _safe_failure_text(detail: object) -> str:
-    """Retain the diagnostic while excluding access credentials from durable job state."""
+def redact_stage_detail(detail: object) -> str:
+    """Retain producer measurements, not embedded URL/authentication credentials.
+
+    Called before storing all worker stages (including successful stages), so
+    subscriber queues, durable JSON and logger messages share one safe detail.
+    """
     value = str(detail)
     value = _AUTH_VALUE_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}<redacted>", value)
+    def replace_assignment(match: re.Match[str]) -> str:
+        # The preceding pass has already masked the bearer/basic secret. Keep
+        # the harmless scheme in an Authorization header as diagnostic context.
+        if match.group(1).lower() == "authorization" and match.group(2).lower() in {
+            "bearer", "basic",
+        }:
+            return match.group(0)
+        return f"{match.group(1)}=<redacted>"
+
     return _SECRET_ASSIGNMENT_RE.sub(
-        lambda match: f"{match.group(1)}=<redacted>", value
+        replace_assignment, value
     )
 
 
@@ -232,7 +246,7 @@ class ScanRunner:
         except IllegalTransitionError as exc:
             if self._record_failure(scan_id, exc, illegal=True):
                 return
-            logger.error("SCAN   %s rejected transition: %s", scan_id, _safe_failure_text(exc))
+            logger.error("SCAN   %s rejected transition: %s", scan_id, redact_stage_detail(exc))
         except Exception as exc:  # noqa: BLE001 - job outcome, not runner crash
             self._record_failure(scan_id, exc, illegal=False)
         else:
@@ -244,8 +258,9 @@ class ScanRunner:
             job = self._require(scan_id)
             validate_transition(job.stage, stage)
             job.stage = stage
-            self._append(job, StageEvent(stage, _utcnow(), detail))
-            line = self._line(job, detail)
+            safe_detail = redact_stage_detail(detail)
+            self._append(job, StageEvent(stage, _utcnow(), safe_detail))
+            line = self._line(job, safe_detail)
         logger.info("%s", line)
         if is_terminal(stage):
             self._close(scan_id)
@@ -260,7 +275,7 @@ class ScanRunner:
             where = failed_at.value if failed_at else job.stage.value
             job.stage = ScanStage.FAILED
             job.failed_at = failed_at
-            safe_cause = _safe_failure_text(exc)
+            safe_cause = redact_stage_detail(exc)
             job.error = f"{type(exc).__name__}: {safe_cause}"
             detail = (
                 f"{where} rejected: {safe_cause}" if illegal else f"{where} aborted: {safe_cause}"
