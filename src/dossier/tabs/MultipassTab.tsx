@@ -70,7 +70,7 @@ export function MultipassTab({ target }: { target: VesselTarget }) {
         <Row label="Hypotheses in archive">
           <span className="df-num">{(tracks.tracks ?? []).length}</span>
         </Row>
-        <Row label="Hypotheses touching this position">
+        <Row label="Hypotheses near this position">
           <span className="df-num" data-df-multipass-relevant>
             {relevant.length}
           </span>
@@ -83,7 +83,7 @@ export function MultipassTab({ target }: { target: VesselTarget }) {
           detail={
             (tracks.scans_considered ?? 0) < 2
               ? 'A multi-pass hypothesis needs at least two acquisitions of the same water. One scan cannot produce one, and this surface will not draw a line between a single point and itself.'
-              : tracks.note || 'The archive contains hypotheses, but none has an observation within 400 m of this target.'
+              : 'The archive contains no hypothesis with an observation within 400 m of this coordinate. No target identity is inferred.'
           }
         />
       ) : (
@@ -99,7 +99,7 @@ export function MultipassTab({ target }: { target: VesselTarget }) {
               <DataTable
                 rows={track.points ?? []}
                 rowKey={(row, index) => `${row.scan_id}-${index}`}
-                caption="Passes joined by this hypothesis. Each is an independent detection in its own scene."
+                caption="Stored SAR detections grouped into a track hypothesis. Scan and scene identifiers may coincide when scene provenance was not retained."
                 columns={[
                   { key: 'scan', header: 'Pass', render: (row) => <span className="df-num">{row.scan_id}</span> },
                   { key: 'scene', header: 'Scene', render: (row) => <span className="df-num">{row.item_id}</span> },
@@ -192,10 +192,10 @@ export function MultipassTab({ target }: { target: VesselTarget }) {
       )}
 
       <div className="text-[10px] leading-tight text-ink-dim">
-        Hypotheses are matched to this target by position, within 400 m. That radius is a stated
-        tolerance for inclusion on this screen, not a physical quantity and not a correlation
-        parameter. Multpass geometry does not modify <span className="df-num">sarConf</span>, AIS
-        association or classification.
+        Hypotheses are selected by proximity to this coordinate, within 400 m. Proximity alone
+        does not establish that the current target belongs to any listed track. The display
+        radius is not a correlation parameter. Multipass geometry does not modify
+        <span className="df-num">sarConf</span>, AIS association or classification.
       </div>
     </div>
   );

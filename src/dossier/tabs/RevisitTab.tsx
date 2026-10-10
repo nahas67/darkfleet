@@ -25,7 +25,7 @@ import { useCallback } from 'react';
 
 import type { RevisitPlanOut, VesselTarget } from '../../api/contract';
 import { loadRevisitAround } from '../api';
-import { measurement, readInterval, text } from '../format';
+import { readInterval, text } from '../format';
 import type { TargetRef } from '../../intelligence/targetRef';
 import {
   DataTable,
@@ -66,8 +66,14 @@ export function RevisitTab({ targetRef, target }: { targetRef: TargetRef; target
       <div>
         <SectionTitle>Query</SectionTitle>
         <Row label="Query AOI">
-          <span className="df-num">0.01° box around the target</span>
+          <span className="df-num">
+            {plan.requested_bbox?.length === 4
+              ? plan.requested_bbox.join(', ')
+              : 'NOT ESTABLISHED'}
+          </span>
         </Row>
+        <Row label="Window start"><span className="df-num">{plan.window?.start ?? 'NOT ESTABLISHED'}</span></Row>
+        <Row label="Window end"><span className="df-num">{plan.window?.end ?? 'NOT ESTABLISHED'}</span></Row>
         <Row label="Provider">
           <Maybe value={text(plan.provider ?? null)} />
         </Row>

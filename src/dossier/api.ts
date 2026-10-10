@@ -222,9 +222,9 @@ export function loadRevisitAround(
     // is stated and the answer is not presented as vessel-specific.
     const pad = 0.01;
     const bbox = [
-      target.lon - pad,
+      wrapLongitude(target.lon - pad),
       target.lat - pad,
-      target.lon + pad,
+      wrapLongitude(target.lon + pad),
       target.lat + pad,
     ].join(',');
     const raw = await api.get<unknown>(
@@ -279,8 +279,16 @@ function withinMeters(
   const midLat = (lat1 + lat2) / 2;
   const metresPerDegLon = metresPerDegLat * Math.cos((midLat * Math.PI) / 180);
   const dy = (lat1 - lat2) * metresPerDegLat;
-  const dx = (lon1 - lon2) * metresPerDegLon;
+  // Longitude is circular. A separation across +180/-180 can be metres
+  // rather than nearly 360 degrees; using raw subtraction drops real nearby
+  // hypotheses for targets on the antimeridian.
+  const dx = wrapLongitude(lon1 - lon2) * metresPerDegLon;
   return Math.hypot(dx, dy) <= radius;
+}
+
+function wrapLongitude(degrees: number): number {
+  const wrapped = ((degrees + 180) % 360 + 360) % 360 - 180;
+  return wrapped === -180 && degrees > 0 ? 180 : wrapped;
 }
 
 export { validateCoverage };
