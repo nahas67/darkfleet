@@ -53,6 +53,8 @@ __all__ = [
     "ProviderHealthEntry",
     "RuntimeModeLiteral",
     "ScanAccepted",
+    "ScanCatalogueEntry",
+    "ScanCatalogueResponse",
     "ScanCreateRequest",
     "ScanRecordDocument",
     "ScanStateResponse",
@@ -288,6 +290,29 @@ class ScanAccepted(BaseModel):
     status: str = Field(description="ScanStage the job was accepted in (always QUEUED).")
     runtime_mode: RuntimeModeLiteral
     synthetic: bool
+
+
+class ScanCatalogueEntry(BaseModel):
+    """An already persisted real scan, with only the metadata needed to reopen it.
+
+    Asset URLs and authentication material are intentionally excluded: the
+    catalogue can be shown in a browser without exposing signed source URLs.
+    """
+
+    scan_id: str
+    created_at: str | None = None
+    scene_id: str | None = None
+    acquisition_time: str | None = None
+    provider: str | None = None
+    product: str | None = None
+    polarization: str | None = None
+    runtime_mode: RuntimeModeLiteral = "REAL"
+    synthetic: Literal[False] = False
+
+
+class ScanCatalogueResponse(BaseModel):
+    scans: list[ScanCatalogueEntry]
+    count: int
 
 
 class StageEventOut(BaseModel):

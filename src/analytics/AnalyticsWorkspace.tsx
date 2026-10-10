@@ -23,7 +23,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadArrayLayer, loadTableLayer, tableColumns, tableRows, rowWindowLabel, layerNotes, cellText, cellIsMeasured, type LayerState, type TableRow } from '../api/debug';
 import { DEBUG_LAYERS, LAYER_LABELS, RASTER_LAYERS, inPipelineOrder, isRasterLayer, type DebugLayerId, type RasterLayerId } from '../api/debugLayers';
 import { usePixelProbe } from '../api/usePixelProbe';
-import { loadRaster } from '../api/client';
 import {
   analyticalToScreen,
   fitScale,
@@ -36,6 +35,7 @@ import {
 import { store, useStore, type SarTarget } from '../state/store';
 import { CfarLab } from './CfarLab';
 import { DetectorProvenance } from './DetectorProvenance';
+import { ScanComparePane } from './ScanComparePane';
 import { NOT_ESTABLISHED } from '../design/format';
 
 const TABLE_ROW_LIMIT = 200;
@@ -47,7 +47,10 @@ export function AnalyticsWorkspace() {
   if (!scanId) {
     return <NoScan />;
   }
-  return <ScanAnalytics scanId={scanId} targets={state.targets} />;
+  // A scan owns all its analytical layers, locked probes and outstanding requests.
+  // A keyed mount prevents responses to a previous scan from writing into the
+  // current scan's layer cache when the operator switches scans during loading.
+  return <ScanAnalytics key={scanId} scanId={scanId} targets={state.targets} />;
 }
 
 /* ------------------------------------------------------------- no scan yet */
@@ -78,6 +81,7 @@ function NoScan() {
 
 function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget[] }) {
   const [layer, setLayer] = useState<DebugLayerId>('raw');
+  const [comparing, setComparing] = useState(false);
   const [states, setStates] = useState<Record<string, LayerState>>({});
   const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const probe = usePixelProbe(scanId);
@@ -200,9 +204,18 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
     >
       <header className="df-panel-head flex shrink-0 items-center justify-between gap-2">
         <span className="df-label">SAR analytics</span>
+        <button type="button" className="df-btn" data-df-compare-open
+          onClick={() => setComparing((value) => !value)}>
+          {comparing ? 'PIPELINE' : 'COMPARE SCANS'}
+        </button>
         <span className="df-mono text-[10px] text-ink-dim">{scanId}</span>
       </header>
 
+      {comparing ? (
+        <div className="min-h-0 flex-1">
+          <ScanComparePane scanId={scanId} onClose={() => setComparing(false)} />
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1">
         {/* Pipeline navigation */}
         <nav
@@ -234,6 +247,7 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
           <div className="min-h-0 flex-1">
             {isRasterLayer(layer) ? (
               <RasterPane
+                key={`${scanId}:${layer}`}
                 scanId={scanId}
                 layer={layer}
                 state={active}
@@ -270,6 +284,7 @@ function ScanAnalytics({ scanId, targets }: { scanId: string; targets: SarTarget
           </div>
         </div>
       </div>
+      )}
     </section>
   );
 }
@@ -339,16 +354,15 @@ function RasterPane({
   // The raster metadata: analytical shape, rendered shape, downsample. All three
   // are needed for the pixel mapping; assuming any of them is 1:1 is the defect.
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
-    void loadRaster(scanId, layer);
-    return () => {
-      cancelled = true;
-    };
-  }, [scanId, layer]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch(`/api/scans/${scanId}/raster/${layer}`)
+    // The geometry is evidence for a specific (scan, layer) pair. Invalidation
+    // must happen before the next request resolves; an old transform would map a
+    // click on new imagery to the wrong source pixel without an obvious error.
+    setGeometry(null);
+    void fetch(`/api/scans/${encodeURIComponent(scanId)}/raster/${encodeURIComponent(layer)}`, {
+      signal: controller.signal,
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((body: unknown) => {
         if (cancelled) return;
@@ -360,6 +374,7 @@ function RasterPane({
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [scanId, layer]);
 

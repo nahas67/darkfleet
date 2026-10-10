@@ -11,6 +11,7 @@
  *    one failing provider cannot hide behind a healthy sibling.
  */
 
+import { useState } from 'react';
 import { loadDatasetHealth, loadProviders } from '../api/client';
 import { engine } from '../globe/engine';
 import { useStore } from '../state/store';
@@ -90,7 +91,10 @@ function ArchiveCoverageSection() {
  * makes a fallback look like a silent substitution.
  */
 function BasemapSection() {
+  const [, refresh] = useState(0);
   const status = engine.basemapStatus();
+  const sources = engine.basemapSources();
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   if (status === null) {
     return (
@@ -121,6 +125,24 @@ function BasemapSection() {
           {status.notice}
         </p>
       ) : null}
+      <div className="mt-2">
+        <label className="df-label block text-[10px]" htmlFor="df-map-source">Map source</label>
+        <select id="df-map-source" data-df-map-source className="df-btn mt-1 w-full"
+          aria-label="Map source"
+          value={sources.some((source) => source.id === status.activeId) ? status.activeId ?? '' : ''}
+          onChange={(event) => {
+            const chosen = engine.selectBasemapSource(event.target.value);
+            setSourceError(chosen?.activeId === event.target.value ? null
+              : `Map source ${event.target.value} could not be installed. The live provider status remains authoritative.`);
+            refresh((n) => n + 1);
+          }}>
+          <option value="" disabled>Select an available source</option>
+          {sources.map((source) => <option key={source.id} value={source.id} disabled={!source.configured}>
+            {source.label}{source.configured ? '' : ' · not configured'}
+          </option>)}
+        </select>
+        {sourceError ? <p role="status" className="df-note mt-1 text-[10px]">{sourceError}</p> : null}
+      </div>
       {Array.from(new Set(status.attempted))
         .filter((id) => id !== status.activeId)
         .map((id) => (

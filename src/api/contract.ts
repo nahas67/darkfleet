@@ -132,6 +132,35 @@ export interface ScanCatalogueResponse {
   readonly count: number;
 }
 
+export interface ViewCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+  readonly snapshot: Snapshot;
+}
+
+export interface ViewReplace {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+  readonly snapshot: Snapshot;
+  readonly expected_revision: number;
+}
+
+export interface SavedViewOut {
+  readonly id: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly snapshot: Snapshot | null;
+  readonly status: "OK" | "CORRUPT";
+  readonly missing_resources: string[];
+}
+
+export interface SavedViewsOut {
+  readonly views: SavedViewOut[];
+  readonly count: number;
+}
+
 export interface AisAssociation {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly matched: boolean;
@@ -778,6 +807,22 @@ export interface ScanCatalogueEntry {
   readonly synthetic?: false;
 }
 
+export interface Snapshot {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly schema_version?: 1;
+  readonly camera?: CameraSnapshot | null;
+  readonly map_source_id?: string | null;
+  readonly layers?: Record<string, LayerChoice>;
+  readonly scan_id?: string | null;
+  readonly target?: TargetChoice | null;
+  readonly contact?: ContactChoice | null;
+  readonly playback_at?: string | null;
+  readonly playback_speed?: number;
+  readonly workspace?: "TACTICAL" | "SEARCH" | "INTELLIGENCE" | "TASKING" | "LAYERS" | "ANALYTICS" | "ADVANCED" | "REPORTS" | "SYSTEM" | "VIEWS";
+  readonly aoi?: readonly [number, number, number, number] | null;
+  readonly investigation_id?: string | null;
+}
+
 export interface RejectedCandidate {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly mmsi: string;
@@ -996,6 +1041,32 @@ export interface TrackPointOut {
   readonly length_unc_m: number;
 }
 
+export interface CameraSnapshot {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly position: CameraPosition;
+  readonly heading: number;
+  readonly pitch: number;
+  readonly roll: number;
+}
+
+export interface ContactChoice {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mmsi: string;
+  readonly observation_at?: string | null;
+}
+
+export interface LayerChoice {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly visible: boolean;
+  readonly opacity: number;
+}
+
+export interface TargetChoice {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly target_id: string;
+}
+
 export interface ScanConfigRecord {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly config_hash: string;
@@ -1127,6 +1198,13 @@ export interface NarrativeProvenance {
   readonly network_calls: number;
 }
 
+export interface CameraPosition {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
 export interface DebugCacheInputs {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly scene_item_id: string;
@@ -1193,6 +1271,8 @@ export type ContractRequestSchemaName =
   | 'InvestigationCreate'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'ViewCreate'
+  | 'ViewReplace'
   | 'WatchEntryCreate'
 ;
 
@@ -1210,6 +1290,10 @@ export type ContractSchemaName =
   | 'AnnotationOut'
   | 'WatchEntryOut'
   | 'ScanCatalogueResponse'
+  | 'ViewCreate'
+  | 'ViewReplace'
+  | 'SavedViewOut'
+  | 'SavedViewsOut'
   | 'AisAssociation'
   | 'VesselTarget'
   | 'AisOnlyTarget'
@@ -1263,6 +1347,7 @@ export type ContractSchemaName =
   | 'PatternOut'
   | 'DetectorCardOut'
   | 'ScanCatalogueEntry'
+  | 'Snapshot'
   | 'RejectedCandidate'
   | 'PolarizationEvidence'
   | 'WakeEvidence'
@@ -1287,6 +1372,10 @@ export type ContractSchemaName =
   | 'NarrativeDocument'
   | 'TrackGapOut'
   | 'TrackPointOut'
+  | 'CameraSnapshot'
+  | 'ContactChoice'
+  | 'LayerChoice'
+  | 'TargetChoice'
   | 'ScanConfigRecord'
   | 'ScanDebugBlock'
   | 'PredictedPosition'
@@ -1301,6 +1390,7 @@ export type ContractSchemaName =
   | 'ObservedPosition'
   | 'NarrativeModelIdentity'
   | 'NarrativeProvenance'
+  | 'CameraPosition'
   | 'DebugCacheInputs'
   | 'CfarSettings'
   | 'LandMaskProvenance'
@@ -1478,6 +1568,57 @@ export const WATCHENTRYOUT_FIELDS = [
  */
 export const SCANCATALOGUERESPONSE_FIELDS = [
   'scans',
+  'count',
+] as const;
+
+/**
+ * Property names of {@link ViewCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const VIEWCREATE_FIELDS = [
+  'title',
+  'snapshot',
+] as const;
+
+/**
+ * Property names of {@link ViewReplace} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const VIEWREPLACE_FIELDS = [
+  'title',
+  'snapshot',
+  'expected_revision',
+] as const;
+
+/**
+ * Property names of {@link SavedViewOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SAVEDVIEWOUT_FIELDS = [
+  'id',
+  'title',
+  'revision',
+  'created_at',
+  'updated_at',
+  'snapshot',
+  'status',
+  'missing_resources',
+] as const;
+
+/**
+ * Property names of {@link SavedViewsOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SAVEDVIEWSOUT_FIELDS = [
+  'views',
   'count',
 ] as const;
 
@@ -2376,6 +2517,27 @@ export const SCANCATALOGUEENTRY_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link Snapshot} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SNAPSHOT_FIELDS = [
+  'schema_version',
+  'camera',
+  'map_source_id',
+  'layers',
+  'scan_id',
+  'target',
+  'contact',
+  'playback_at',
+  'playback_speed',
+  'workspace',
+  'aoi',
+  'investigation_id',
+] as const;
+
+/**
  * Property names of {@link RejectedCandidate} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -2644,6 +2806,52 @@ export const TRACKPOINTOUT_FIELDS = [
 ] as const;
 
 /**
+ * Property names of {@link CameraSnapshot} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const CAMERASNAPSHOT_FIELDS = [
+  'position',
+  'heading',
+  'pitch',
+  'roll',
+] as const;
+
+/**
+ * Property names of {@link ContactChoice} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const CONTACTCHOICE_FIELDS = [
+  'mmsi',
+  'observation_at',
+] as const;
+
+/**
+ * Property names of {@link LayerChoice} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const LAYERCHOICE_FIELDS = [
+  'visible',
+  'opacity',
+] as const;
+
+/**
+ * Property names of {@link TargetChoice} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const TARGETCHOICE_FIELDS = [
+  'scan_id',
+  'target_id',
+] as const;
+
+/**
  * Property names of {@link ScanConfigRecord} as they appear on the wire.
  *
  * Generated. Runtime validation reads this instead of keeping its own list,
@@ -2842,6 +3050,18 @@ export const NARRATIVEMODELIDENTITY_FIELDS = [
 export const NARRATIVEPROVENANCE_FIELDS = [
   'writer',
   'network_calls',
+] as const;
+
+/**
+ * Property names of {@link CameraPosition} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const CAMERAPOSITION_FIELDS = [
+  'x',
+  'y',
+  'z',
 ] as const;
 
 /**

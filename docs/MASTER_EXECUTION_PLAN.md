@@ -71,3 +71,74 @@ georeferencing; filter tests measure retention/displacement/area/FP/SNR (no
 sub-resolution promises); AISStream required live provider; Gate split 0A/0B;
 git-safety honored (no repo existed; history preserved); advanced slots
 `NOT_AVAILABLE`-hidden; 3-mode E2E; verdict never pre-selected.
+
+---
+
+## Living product-completion extension — DF-X9.8 through DF-X20 (2026-10-10)
+
+The sections above remain the original **frozen CP0 plan** for audit history.
+This section is the **active execution contract** for the expanded local-first
+maritime-intelligence product. It reconciles rather than overwrites that plan.
+No historical `DEMO` gate overrides the real-data-only policy in README.
+
+**Takeover evidence:** `main` at `df165df3ed763ce512cd6e9b82100abfdc16ee8d`;
+clean tree at the start, 104 local commits ahead of `origin/main`, no remote push.
+Source history already contains H1 (`c9e5037`), H2/H3 (`65090d8`), H4
+(`0b4b535`), H5 (`e3bf4d0`), H6 (`eac7c62`) and subsequent H7 performance
+hardening through `df165df`. **Historical plans listing H1-H5 as PENDING are
+stale; their code and validation must be rechecked before closure.**
+
+### Status and verification rules
+
+Use exactly `[ ] NOT STARTED`, `[~] IN PROGRESS`, `[x] COMPLETE`,
+`[!] BLOCKED — EXTERNAL`, `[-] DEFERRED — JUSTIFIED`, or `[?] UNVERIFIED`.
+An implemented path is not `[x]` until its scientific invariants, persistence,
+API consumer, genuine-browser workflow where relevant and tests have evidence.
+Existing fixtures may verify deterministic software behavior; they cannot be
+presented as proof of operational imagery, AIS coverage or calibration.
+
+Every checkpoint below requires: scoped source paths, an implementation/change
+record, applicable unit + API/integration + persisted-restart tests, real-browser
+acceptance, scientific/provenance review, quantitative performance evidence
+where relevant, an artifact under `docs/`, and the local commit hash. Unavailable
+GPU, providers and licensed datasets are individually blocked while independent
+local work proceeds. The append-only `EXECUTION_LEDGER.md` records check results.
+
+### Dependency-oriented checkpoints
+
+| ID / state at takeover | Goal / dependencies | Primary implementation scope | Acceptance and evidence gate |
+|---|---|---|---|
+| **DF-X9.8-H1–H4** `[~] IN PROGRESS` | Remove fabricated coordinates, SAR resolution and missing-length scores; fix AIS authority/races | `backend/darkfleet/ais/delivery.py`, `pipeline.py`, `correlation/match.py`, `src/api/client.ts`, `src/contacts/ContactList.tsx` | Fresh null-vs-measured-zero, missing-data, score-decomposition and async ordering regressions; scan browser proof; record score differences and commit IDs |
+| **DF-X9.8-H5–H6** `[~] IN PROGRESS` | FOLLOW ownership, camera disposal, archive restart/concurrency | `src/globe/{aisCamera,engine}.ts`, `backend/darkfleet/ais/archive.py` | Programmatic settle must preserve FOLLOW, manual input releases; repeated attach/dispose; concurrent archive read/write + restart dedup; evidence in DF-X9.8 record |
+| **DF-X9.8-H7** `[~] IN PROGRESS` | GPU-backed 10K AIS contact operation; H1–H6 | `src/globe/aisRenderer.ts`, `src/contacts/ContactList.tsx`, browser harness | Real Chrome hardware renderer identified; staged 500/1K/2.5K/5K/10K frame p50/p95/FPS, label budget, picking and selection latency, responsiveness; `docs/DF_X9_8_H7_H8_EVIDENCE.md` |
+| **DF-X9.8-H8** `[?] UNVERIFIED` | Long-run leaks, source recovery, offline survival; H7 | `src/globe/{engine,MapSourceController}.ts`, temporal playback | Repeated load/play/follow/clear and 25 basemap-switch cycles, heap trend, timer/listener/primitive counts, recovery and viewport tests; H7/H8 evidence |
+| **DF-X9.8-H9** `[?] UNVERIFIED` | Final AIS scientific delta and release gate; H1–H8 | `backend/tests/ais_correctness_fixture.py`, `src/api`, all gates | 27-row before/after score audit; full 12-section browser E2E; pytest/ruff/mypy/vitest/tsc/build; explicit unresolved items; local commit |
+| **DF-X10-SAR** `[?] UNVERIFIED` | Genuine local SAR import, repeatable detector configuration, source georeferencing; H9 scientific gate | `backend/darkfleet/{providers,sar,pipeline,api}`, `src/{scenes,analytics,missions}` | Operator imports verified georeferenced SAR without cloud requirement; checksum, CRS, affine/pixel center, radiometry, mask and stage provenance; malformed/unsupported raster safely refused; browser import→detect→select |
+| **DF-X11-MULTIPASS** `[?] UNVERIFIED` | Side-by-side SAR, revisit, real multipass comparisons; X10 | `backend/darkfleet/{revisit,temporal}.py`, `api/advanced.py`, `src/intelligence/AdvancedWorkspace.tsx`, `src/analytics` | Independently identified scenes/time/CRS; synchronized viewport and target navigation; comparisons only over aligned measured data; real-scene acceptance and explicit unavailable state |
+| **DF-X12-AIS** `[?] UNVERIFIED` | Historical/imported and optional live AIS, gap-safe playback; H9 | `backend/darkfleet/ais`, `src/{ais,temporal,contacts,globe}` | Observation timestamps and nullable fields intact; gaps/predictions clearly separate; antimeridian/high-latitude tests; import→track→play/seek→pick in real browser; live provider only with real credentials |
+| **DF-X13-CORRELATION** `[?] UNVERIFIED` | Full explainable MATCHED / SAR_UNMATCHED / UNKNOWN analysis; X10/X12 | `backend/darkfleet/{correlation,ghost_vessel}.py`, `src/dossier` | Candidate rejection trace, uncertainty and coverage provenance; no unmatched→AIS-off conclusion; 27-case scientific comparison and dossier browser assertions |
+| **DF-X14-MARITIME** `[?] UNVERIFIED` | Trusted coastline, EEZ, high seas, optional ports/depth/anchorages; H9 | `backend/darkfleet/maritime`, `src/globe/{MapSourceController,maritimeGeometry}.ts`, `src/sensors` | Antimeridian 0–360 and geodesy, offline manifests/checksums, caching and lifecycle; optional unavailable states; real-browser source switching and attribution |
+| **DF-X15-SECONDARY** `[?] UNVERIFIED` | Scientifically bounded wake and polarization; X10/X13 | `backend/darkfleet/{polarization,sar/wake,validation/wake}`, `src/dossier/tabs` | Genuine VV stats, dual channels only when co-registered, no fabricated VH; wake stays EXPERIMENTAL — NOT CALIBRATED until independently validated positive/negative corpus, FPR/FNR and domains recorded |
+| **DF-X16-WORKBENCH** `[ ] NOT STARTED` | Durable geodesic annotations and measurement tools; X13 | `backend/darkfleet/api`, persistent investigation storage, `src/command`, `src/globe`, investigation UI | Point/line/polygon/AOI/range/bearing/distance/area editing, snapping, notes, provenance; WGS84 measurements; restart persistence; browser draw→edit→reopen |
+| **DF-X17-VIEWS** `[ ] NOT STARTED` | Named saved camera/layer/selection/playback/workspace views; X16 | Persistent backend view model + API; `src/state/store.ts`, UI workspace controls | Save/rename/update/restore/delete after server restart; missing scan/contact explicit; no credentials in URL/export; browser save/reload/restore |
+| **DF-X18-MISSIONS** `[ ] NOT STARTED` | Mission model, watchlists and evidence-based alerts; X13/X16 | Persistent backend investigations, `src/missions`, `src/timeline`, navigation | CRUD and mission-linked scan/target/observation evidence, bounded rules, alert rationale, no fake live alerts; restart test + browser flow |
+| **DF-X19-REPORTS** `[?] UNVERIFIED` | Reproducible professional reports/export; X13/X16–X18 | `backend/darkfleet/exports`, `src/reports` | Mission dossier PDF/JSON/GeoJSON/KML/PNG as applicable with SHA/provenance, timestamps, uncertainty, analyst annotations distinguished from source, offline regeneration and browser download |
+| **DF-X20-AI-MCP** `[ ] NOT STARTED` | Structured MCP and evidence-grounded optional AI; X13/X18/X19 | New bounded backend MCP server and analyst, documented contracts and discoverable UI | Read-only evidence tools, resource validation, no fabricated citations/measurements, deterministic no-model fallback, permission/timeout tests, local integration proof |
+| **DF-X21-RELEASE** `[ ] NOT STARTED` | Whole-product integration, resilience, documentation and shipment; X9.8–X20 | All supported services, launch scripts, README, tests, browser and performance harness | Real SAR→AIS→investigation→report workflow; offline and unavailable-provider tests; fresh backend+frontend gates, reproducible installation, performance and security evidence; final verdict derived from open blockers |
+
+The states above describe **verified closure at takeover**, not an assertion that
+every subsystem lacks implementation. An audited working feature may move directly
+to `[x]` with evidence; no completed component should be recreated merely because
+the overall checkpoint is unverified.
+
+### Immediate execution sequence
+
+1. Reverify H1–H6 fixes, test coverage, score deltas and browser behavior.
+2. Run H7/H8 with a real GPU browser; fix only measured bottlenecks/leaks.
+3. Complete parallel local investigation persistence work and reconcile API/TS
+   contracts; keep operator annotations separate from source evidence.
+4. Run H9 closure; then deliver SAR and local-first import, multipass, maritime
+   context, saved views, missions, alerts, reports and MCP by dependency.
+5. Update the machine-readable checkpoint ledger where needed, execute all
+   release gates and commit coherent verified work locally. Never infer a
+   production-ready verdict from code generation alone.

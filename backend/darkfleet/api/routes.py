@@ -82,6 +82,8 @@ from darkfleet.api.models import (
     ProbeSource,
     ProviderHealthEntry,
     ScanAccepted,
+    ScanCatalogueEntry,
+    ScanCatalogueResponse,
     ScanCreateRequest,
     ScanStateResponse,
     ScanTargetsResponse,
@@ -1158,6 +1160,44 @@ def create_scan(body: ScanCreateRequest, state: State) -> ScanAccepted:
         runtime_mode="REAL",
         synthetic=False,
     )
+
+
+@router.get("/scans", response_model=ScanCatalogueResponse)
+def list_completed_scans(
+    state: State,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ScanCatalogueResponse:
+    """Discover actual persisted acquisitions for comparison and restoration.
+
+    The list is bounded and contains only independently saved REAL records. An
+    unreadable or incorrectly labelled legacy document never becomes an
+    operator-visible observation. Source URLs/SAS tokens stay server-side.
+    """
+    scans: list[ScanCatalogueEntry] = []
+    for scan_id in reversed(state.store.list_ids()):
+        record = _safe_store_get(state.store, scan_id)
+        if not record or record.get("runtime_mode") != "REAL" or record.get("synthetic") is not False:
+            continue
+        raw_scene = record.get("scene")
+        scene = raw_scene if isinstance(raw_scene, dict) else {}
+        scans.append(
+            ScanCatalogueEntry(
+                scan_id=scan_id,
+                created_at=str(record["created_at"]) if record.get("created_at") else None,
+                scene_id=str(scene["item_id"]) if scene.get("item_id") else None,
+                acquisition_time=(
+                    str(scene["acquisition_time"]) if scene.get("acquisition_time") else None
+                ),
+                provider=str(scene["provider"]) if scene.get("provider") else None,
+                product=str(scene["product"]) if scene.get("product") else None,
+                polarization=(
+                    str(scene["polarization"]) if scene.get("polarization") else None
+                ),
+            )
+        )
+        if len(scans) >= limit:
+            break
+    return ScanCatalogueResponse(scans=scans, count=len(scans))
 
 
 def _job_events(job: ScanJob) -> list[StageEventOut]:

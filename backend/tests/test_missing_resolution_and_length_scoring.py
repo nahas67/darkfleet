@@ -73,6 +73,12 @@ def test_correlate_with_none_resolution_does_not_fabricate_dimensions() -> None:
     assert t["lenM"] is None
     assert t["widM"] is None
     assert t["lenUncM"] is None
+    # A strong AIS association has its own spatial/directional assessment; an
+    # unmatched observation must explicitly identify unavailable size evidence.
+    without_ais = correlate([comp], [], ACQ, resolution_m=None, scan_id="SCAN-002")
+    unmatched = without_ais["targets"][0]
+    assert "apparent length not established" in unmatched["assessment"]
+    assert "Nonem" not in unmatched["assessment"]
 
     # Size score in decomposition is None
     decomp = t["corr"].get("scoreDecomposition")

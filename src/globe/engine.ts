@@ -267,6 +267,23 @@ export class TacticalEngine {
     return this.#basemap?.status() ?? null;
   }
 
+  /** List installed map-source choices without leaking provider tokens or URLs. */
+  basemapSources(): ReadonlyArray<{ id: string; label: string; configured: boolean }> {
+    return this.#basemap?.controller.sources.map((source) => ({
+      id: source.id, label: source.label, configured: source.configured,
+    })) ?? [];
+  }
+
+  /** Apply one explicit operator choice; a source that cannot initialise stays unavailable. */
+  selectBasemapSource(id: string): MapSourceStatus | null {
+    const handle = this.#basemap;
+    if (!handle || !handle.controller.sources.some((source) => source.id === id)) return null;
+    const status = handle.controller.select(id);
+    this.#applyBasemapSource();
+    handle.syncCredit();
+    return status;
+  }
+
   /* ----------------------------------------------------------- lifecycle */
 
   /**

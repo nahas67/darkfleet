@@ -18,6 +18,7 @@ export type WorkspaceId =
   | 'ANALYTICS'
   | 'ADVANCED'
   | 'REPORTS'
+  | 'VIEWS'
   | 'SYSTEM';
 
 type Entry = {
@@ -39,6 +40,7 @@ export const RAIL: readonly Entry[] = [
   // real response for every state including failure.
   { id: 'ADVANCED', label: 'Advanced', glyph: '⌖' },
   { id: 'REPORTS', label: 'Reports', glyph: '⎙' },
+  { id: 'VIEWS', label: 'Views', glyph: '▣' },
   { id: 'SYSTEM', label: 'System', glyph: '⚙' },
 ];
 

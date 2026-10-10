@@ -146,7 +146,7 @@ class Candidate(TypedDict):
     spatial: float
     temporal: float
     heading: float
-    size: float
+    size: float | None
     radius: float
 
 
@@ -322,7 +322,7 @@ def correlate(
             # (spatial, temporal, heading) are renormalised to 1.0, treating missingness as neutral.
             hull_length = _hull_length_m(ob)
             if apparent_len is not None and hull_length is not None and hull_length > 0:
-                size_val: float | None = max(0.0, 1 - abs(apparent_len - hull_length) / max(hull_length, 50))
+                size_val = max(0.0, 1 - abs(apparent_len - hull_length) / max(hull_length, 50))
                 composite = w_sp * spatial + w_tm * temporal + w_hd * hdg + w_sz * size_val
             else:
                 size_val = None
@@ -390,6 +390,14 @@ def correlate(
         apparent_len = round(comp["major"] * valid_res) if valid_res is not None else None
         apparent_wid = round(comp["minor"] * valid_res) if valid_res is not None else None
         len_unc = max(10, round(apparent_len * 0.22)) if apparent_len is not None else None
+        # If pixel spacing is unavailable the operator-facing assessment must
+        # express missing size evidence explicitly. Interpolating None into the
+        # old template produced "~Nonem", obscuring a scientifically significant
+        # loss of sensor metadata in the very summary meant to explain it.
+        apparent_length_note = (
+            f"~{apparent_len}m" if apparent_len is not None
+            else "apparent length not established"
+        )
         sar_conf = _sar_confidence(comp)
         aspect = comp["major"] / max(1.0, comp["minor"])
         # No wake term. This used to be `... and not comp["wake"]`, which let an
@@ -448,14 +456,14 @@ def correlate(
         elif idx in weak_best:
             cls = "LOW_CONFIDENCE"
             assessment = (
-                f"Surface radar return (~{apparent_len}m) with a sub-threshold AIS "
+                f"Surface radar return ({apparent_length_note}) with a sub-threshold AIS "
                 f"candidate (score {weak_best[idx]:.2f}); association not established."
             )
             tags.append("SUB_THRESHOLD_CANDIDATE")
         else:
             cls = "SAR_UNMATCHED"
             assessment = (
-                f"Unmatched surface radar return (~{apparent_len}m). No sufficiently "
+                f"Unmatched surface radar return ({apparent_length_note}). No sufficiently "
                 f"confident AIS association in the available observations."
             )
             tags += ["SAR_UNMATCHED", "AIS_UNASSOCIATED"]

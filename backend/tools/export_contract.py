@@ -80,6 +80,12 @@ SCHEMAS: tuple[str, ...] = (
     "WatchEntryOut",
     # Completed-run catalogue for the analysis comparison workspace.
     "ScanCatalogueResponse",
+    # Durable operator workspace bookmarks: snapshot fields come from the API
+    # allowlist, with missing-resource and concurrency status authoritative.
+    "ViewCreate",
+    "ViewReplace",
+    "SavedViewOut",
+    "SavedViewsOut",
     "AisAssociation",
     "VesselTarget",
     "AisOnlyTarget",
