@@ -162,4 +162,3 @@ def test_contaminated_upstream_scene_identifier_is_not_echoed_in_unit_finding() 
     finding = evaluate_sar_watch("TEST_DOUBLE_ONLY", missing, "TEST-TARGET", 0)
     assert finding.status == "NOT_EVALUATED"
     assert finding.reason == "WATCHED_TARGET_NOT_UNIQUELY_PRESENT"
-
