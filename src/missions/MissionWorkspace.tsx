@@ -1,5 +1,5 @@
 /** Local-first mission controls and evidence-scoped historical alert rules. */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   acknowledgeMissionAlert, addMissionRule, createMission, deleteMission,
   evaluateMission, linkMissionScan, listMissions, parseMissionAOI,
@@ -38,20 +38,36 @@ export function MissionWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const loadGeneration = useRef(0);
 
+  const loadAll = async () => {
+    const generation = ++loadGeneration.current;
+    setLoading(true);
+    setError(null);
+    const [saved, investigations] = await Promise.allSettled([listMissions(), listInvestigations()]);
+    if (loadGeneration.current !== generation) return;
+    if (saved.status === 'fulfilled') {
+      setMissions(saved.value);
+      setSelectedId((current) => current && saved.value.some((item) => item.id === current)
+        ? current : saved.value[0]?.id ?? null);
+    } else {
+      setMissions([]);
+      setSelectedId(null);
+    }
+    // A watchlist lookup failure must not erase otherwise accessible missions.
+    // Conversely, never keep stale watch entries when their source is unavailable.
+    setCases(investigations.status === 'fulfilled' ? investigations.value : []);
+    const errors = [saved, investigations]
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => explain(result.reason));
+    setError(errors.length ? errors.join(' · ') : null);
+    setLoading(false);
+  };
   useEffect(() => {
-    let active = true;
-    void Promise.all([listMissions(), listInvestigations()])
-      .then(([saved, investigations]) => {
-        if (!active) return;
-        setMissions(saved);
-        setCases(investigations);
-        setSelectedId((current) => current && saved.some((item) => item.id === current)
-          ? current : saved[0]?.id ?? null);
-      })
-      .catch((cause: unknown) => { if (active) setError(explain(cause)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    void loadAll();
+    return () => { loadGeneration.current++; };
+    // Initial load only; reload is explicitly operator controlled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selected = missions.find((item) => item.id === selectedId) ?? null;
@@ -110,6 +126,10 @@ export function MissionWorkspace() {
   return (
     <section data-df-workspace="MISSIONS" className="h-full overflow-y-auto px-3 py-3">
       <h2 className="df-label text-xs">Missions &amp; evidence-grounded alerts</h2>
+      <button type="button" className="df-btn mt-2" data-df-mission-reload
+        disabled={loading || working} onClick={() => { void loadAll(); }}>
+        {loading ? 'Loading mission records…' : 'Reload saved missions and watchlists'}
+      </button>
       <p className="mt-2 text-[11px] text-ink-dim">
         Historical persisted REAL scans only. An operator-defined SAR confidence
         threshold is not an assessment of vessel identity or illicit activity.

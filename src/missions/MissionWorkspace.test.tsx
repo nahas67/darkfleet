@@ -14,6 +14,7 @@ describe('DF-X18 navigation and usable mission workspace', () => {
     expect(html).toContain('data-df-mission-create');
     expect(html).toContain('data-df-mission-aoi');
     expect(html).toContain('data-df-mission-select');
+    expect(html).toContain('data-df-mission-reload');
     expect(html).toContain('Historical persisted REAL scans only');
     expect(html).toContain('No automatic live monitoring');
   });

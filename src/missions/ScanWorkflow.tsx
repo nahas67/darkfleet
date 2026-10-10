@@ -9,19 +9,20 @@
  * not chosen and not notice.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { loadScenes, startScan } from '../api/client';
 import { engine } from '../globe/engine';
 import { store, toBBox, useStore, type BBox } from '../state/store';
 import { fmt, fmtInstant, NOT_ESTABLISHED } from '../design/format';
 
-function parseBbox(text: string): BBox | null {
+export function parseBbox(text: string): BBox | null {
   const parts = text.split(',').map((p) => Number(p.trim()));
   if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
   const [minLon, minLat, maxLon, maxLat] = parts;
   if (minLon >= maxLon || minLat >= maxLat) return null;
-  if (Math.abs(minLat) > 90 || Math.abs(minLon) > 180) return null;
+  if (Math.abs(minLat) > 90 || Math.abs(maxLat) > 90 ||
+      Math.abs(minLon) > 180 || Math.abs(maxLon) > 180) return null;
   return [minLon, minLat, maxLon, maxLat];
 }
 
@@ -34,22 +35,37 @@ export function ScanWorkflow() {
   const state = useStore();
   // Store-backed: survives remount when the workspace changes.
   const text = state.aoiText;
-  const setText = (value: string) => store.set({ aoiText: value });
+  const setText = (value: string) => {
+    setSceneId('');
+    store.set({ aoiText: value, scenes: [] });
+  };
   const [sceneId, setSceneId] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const catalogueQueue = useRef<Promise<void>>(Promise.resolve());
+  const catalogueGeneration = useRef(0);
 
 
   const parsed = parseBbox(text);
 
-  // Scene search is spatial: the backend refuses an unbounded catalogue query,
-  // so it re-runs as the AOI becomes valid. Keyed on validity rather than on the
-  // parsed value so typing a fourth digit does not fire a request per keystroke.
-  const aoiValid = parsed !== null;
+  // Debounce typing and serialize requests: changing one valid AOI to another
+  // must fetch a fresh catalogue, and a slower older fetch must not win last.
+  // A queued request is discarded when its typed AOI has already changed.
   useEffect(() => {
-    void loadScenes(aoiValid ? parsed : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aoiValid]);
+    const next = parseBbox(text);
+    const generation = ++catalogueGeneration.current;
+    const refresh = () => {
+      catalogueQueue.current = catalogueQueue.current.catch(() => {}).then(() => {
+        if (catalogueGeneration.current === generation) return loadScenes(next);
+      });
+    };
+    if (!next) refresh();
+    else {
+      const timer = setTimeout(refresh, 300);
+      return () => { clearTimeout(timer); catalogueGeneration.current++; };
+    }
+    return () => { catalogueGeneration.current++; };
+  }, [text]);
 
   /**
    * The run gate.
@@ -108,7 +124,7 @@ export function ScanWorkflow() {
             {text.length === 0
               ? 'No default. An analysis runs only over an area you choose.'
               : parsed === null
-                ? 'Enter four finite numbers with min < max on both axes.'
+                ? 'Enter four WGS84 numbers: longitude −180…180, latitude −90…90, min below max.'
                 : `${(parsed[2] - parsed[0]).toFixed(4)}° lon × ${(parsed[3] - parsed[1]).toFixed(4)}° lat`}
           </p>
         </div>
@@ -121,6 +137,7 @@ export function ScanWorkflow() {
             id="df-scan-scene"
             className="df-input w-full"
             value={sceneId}
+            disabled={!parsed || state.scenesLoading}
             onChange={(event) => setSceneId(event.target.value)}
           >
             <option value="">Newest acquisition covering the AOI</option>
@@ -130,6 +147,7 @@ export function ScanWorkflow() {
               </option>
             ))}
           </select>
+          {state.scenesLoading ? <p role="status" className="df-note">Searching acquisitions for this area…</p> : null}
           {state.scenes.length > 0 ? (
             <ul className="df-scroll mt-2 max-h-40 space-y-1 overflow-y-auto">
               {state.scenes.slice(0, 8).map((scene) => (
@@ -146,6 +164,7 @@ export function ScanWorkflow() {
                       const bbox = toBBox(scene.bbox);
                       if (bbox) {
                         useSceneExtent(bbox);
+                        setSceneId(scene.id);
                         engine.flyToBbox(bbox);
                       }
                     }}

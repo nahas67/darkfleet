@@ -334,6 +334,7 @@ export function LocalSarImportPanel() {
   const [imports, setImports] = useState<LocalSarImport[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<LocalSarImport | null>(null);
+  const [detailRefresh, setDetailRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -381,10 +382,13 @@ export function LocalSarImportPanel() {
       .catch((cause: unknown) => { if (!controller.signal.aborted) setDetailError(explainLocalSarError(cause)); })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
-  }, [selectedId]);
+  }, [selectedId, detailRefresh]);
 
   const refresh = () => {
     reloadRequest.current?.abort();
+    // Revalidate the selected snapshot as well as the catalogue. The same
+    // import ID may now have changed source/snapshot integrity on disk.
+    setDetailRefresh((version) => version + 1);
     const controller = new AbortController();
     reloadRequest.current = controller;
     setLoading(true); setError(null);

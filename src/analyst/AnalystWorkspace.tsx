@@ -229,6 +229,9 @@ export function AnalystWorkspace() {
     generation.current++;
     setAnalysis(null);
     setError(null);
+    // A changed case, question or target invalidates the in-flight answer.
+    // Its completion is ignored by generation, so release the busy state too.
+    setBusy(false);
   };
   const reload = () => {
     resetSelection();

@@ -156,6 +156,9 @@ function ImagePane({ scene, title }: { scene: ImageryScene; title: string }) {
   const [view, setView] = useState<View>(INITIAL_VIEW);
   const [imageFailed, setImageFailed] = useState(false);
   const drag = useRef<{ x: number; y: number } | null>(null);
+  // Reloading the same recorded scan must permit another attempt after a
+  // transient image-fetch error; the pane key can remain the same scan ID.
+  useEffect(() => { setImageFailed(false); }, [scene]);
   const ready = scene.status === 'READY';
   const changeZoom = (factor: number) => setView((v) => ({
     ...v, zoom: Math.min(8, Math.max(1, +(v.zoom * factor).toFixed(3))),

@@ -70,6 +70,15 @@ describe('DF-X10/X11 scientific scene comparison contracts', () => {
     expect(() => readSceneComparison({
       ...measured, metrics: { ...measured.metrics, valid_pair_pixels: 10 },
     })).toThrow(/Impossible overlap counts/);
+    expect(() => readSceneComparison({
+      ...measured, metrics: { ...measured.metrics, valid_pair_fraction: 0.1 },
+    })).toThrow(/measurement fractions/);
+    expect(() => readSceneComparison({
+      ...measured, metrics: { ...measured.metrics, equal_pixels: 5 },
+    })).toThrow(/measurement fractions/);
+    expect(() => readSceneComparison({
+      ...measured, metrics: { ...measured.metrics, overlap_shape: [9, 9] },
+    })).toThrow(/Impossible overlap counts/);
     expect(() => readSceneCandidates({
       ...candidates, scenes: [{ ...candidates.scenes[0], available_normalized_raster: 'yes' }],
     })).toThrow(/available_normalized_raster/);

@@ -100,8 +100,8 @@ function identity(value: unknown): SceneIdentity {
 }
 function metrics(value: unknown): DifferenceMetrics {
   const v = object(value, 'DifferenceMetrics');
-  shape(v.overlap_shape, 'DifferenceMetrics.overlap_shape', 2);
-  shape(v.offset_b_in_a_pixels, 'DifferenceMetrics.offset_b_in_a_pixels', 2);
+  const overlapShape = shape(v.overlap_shape, 'DifferenceMetrics.overlap_shape', 2);
+  const offsets = shape(v.offset_b_in_a_pixels, 'DifferenceMetrics.offset_b_in_a_pixels', 2);
   for (const key of [
     'overlap_pixels', 'valid_pair_pixels', 'valid_pair_fraction',
     'mean_b_minus_a_db', 'mean_absolute_difference_db',
@@ -112,11 +112,18 @@ function metrics(value: unknown): DifferenceMetrics {
   if (v.metric !== 'SAME_PIXEL_RTC_GAMMA0_DB_DIFFERENCE') {
     throw new ContractViolation('DifferenceMetrics.metric', 'Unrecognized measurement authority.');
   }
-  if (num(v.overlap_pixels, 'DifferenceMetrics.overlap_pixels') <= 0 ||
-      num(v.valid_pair_pixels, 'DifferenceMetrics.valid_pair_pixels') <= 0 ||
-      num(v.valid_pair_pixels, 'DifferenceMetrics.valid_pair_pixels') >
-      num(v.overlap_pixels, 'DifferenceMetrics.overlap_pixels')) {
-    throw new ContractViolation('DifferenceMetrics.valid_pair_pixels', 'Impossible overlap counts.');
+  const overlap = v.overlap_pixels as number;
+  const valid = v.valid_pair_pixels as number;
+  const fraction = v.valid_pair_fraction as number;
+  const categories = [v.brighter_b_pixels, v.darker_b_pixels, v.equal_pixels] as number[];
+  if (overlapShape.some((n) => !Number.isSafeInteger(n) || n <= 0) ||
+      offsets.some((n) => !Number.isSafeInteger(n)) ||
+      !Number.isSafeInteger(overlap) || overlap !== overlapShape[0] * overlapShape[1] ||
+      !Number.isSafeInteger(valid) || valid <= 0 || valid > overlap ||
+      fraction < 0 || fraction > 1 || Math.abs(fraction - valid / overlap) > 1e-10 ||
+      categories.some((n) => !Number.isSafeInteger(n) || n < 0) ||
+      categories.reduce((sum, n) => sum + n, 0) !== valid) {
+    throw new ContractViolation('DifferenceMetrics.valid_pair_pixels', 'Impossible overlap counts or measurement fractions.');
   }
   return v as unknown as DifferenceMetrics;
 }
