@@ -18,9 +18,11 @@ import { describe, expect, it } from 'vitest';
 import type { RenderableContact } from './aisRenderer';
 import {
   decideContactGlyph,
+  isContactAboveHorizon,
   selectGlyph,
   type GlyphDecision,
 } from './aisRenderer';
+import { Cartesian3 } from 'cesium';
 import { cameraFrameFromViewer, glyphScreenRotation, localFrameDeg } from './glyphGeometry';
 import {
   MAX_INTERPOLATION_INTERVAL_S,
@@ -107,6 +109,15 @@ function contact(
 /* ================================================================================================
  * COLLECTION OWNERSHIP
  * ============================================================================================== */
+
+describe('AIS label horizon visibility', () => {
+  it('shows the near hemisphere and rejects the antipodal vessel even if projected pixels overlap', () => {
+    const camera = Cartesian3.fromDegrees(0, 0, 1_000_000);
+    expect(isContactAboveHorizon(Cartesian3.fromDegrees(0, 0), camera)).toBe(true);
+    expect(isContactAboveHorizon(Cartesian3.fromDegrees(180, 0), camera)).toBe(false);
+    expect(isContactAboveHorizon(Cartesian3.fromDegrees(90, 0), camera)).toBe(false);
+  });
+});
 
 describe('collection ownership', () => {
   it('the renderer declares five separate collections, one per AIS layer concern', () => {

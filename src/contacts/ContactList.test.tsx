@@ -12,9 +12,21 @@ import { describe, expect, it } from 'vitest';
 
 import { resetStore, store } from '../state/store';
 import type { AisContact, SarTarget } from '../state/store';
-import { ContactList } from './ContactList';
+import { ContactList, sortContactRows, type Row } from './ContactList';
 
 describe('DF-X9.8-H4: ContactList deduplication and classification authority', () => {
+  it('sorts missing distance and AIS-only confidence after real measurements in both directions', () => {
+    const rows: Row[] = [
+      { kind: 'ais', key: 'ais:1', id: '1', mmsi: '1', classification: 'AIS_ONLY', lat: 0, lon: 0, confidence: 0, distance: null },
+      { kind: 'sar', key: 'sar:2', id: '2', mmsi: null, classification: 'SAR_UNMATCHED', lat: 0, lon: 0, confidence: 0.9, distance: 200 },
+      { kind: 'sar', key: 'sar:3', id: '3', mmsi: null, classification: 'SAR_UNMATCHED', lat: 0, lon: 0, confidence: 0.2, distance: 20 },
+    ];
+    expect(sortContactRows(rows, { key: 'distance', asc: true }).map((r) => r.id)).toEqual(['3', '2', '1']);
+    expect(sortContactRows(rows, { key: 'distance', asc: false }).map((r) => r.id)).toEqual(['2', '3', '1']);
+    expect(sortContactRows(rows, { key: 'confidence', asc: true }).map((r) => r.id)).toEqual(['3', '2', '1']);
+    expect(sortContactRows(rows, { key: 'confidence', asc: false }).map((r) => r.id)).toEqual(['2', '3', '1']);
+  });
+
   it('deduplicates matched AIS vessels so they never appear as AIS_ONLY', () => {
     resetStore();
 

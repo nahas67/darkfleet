@@ -43,9 +43,24 @@ const KIND_COLOR: Readonly<Record<Event['kind'], string>> = {
   NOTE: 'var(--df-text-dim)',
 };
 
+/** Timestamp text can carry different UTC offsets; lexical ordering is not chronological. */
+export function chronologicalEvents<T extends { at: string }>(events: readonly T[]): T[] {
+  return events
+    .filter((event) => Number.isFinite(Date.parse(event.at)))
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.at.localeCompare(b.at));
+}
+
+/** Keep an inspected instant attached to its timestamp when the event list changes. */
+export function missionInstantIndex(instants: readonly string[], selectedAt: string | null): number {
+  if (instants.length === 0) return 0;
+  if (selectedAt === null) return instants.length - 1;
+  const index = instants.indexOf(selectedAt);
+  return index >= 0 ? index : instants.length - 1;
+}
+
 export function MissionTimeline() {
   const state = useStore();
-  const [scrub, setScrub] = useState<number | null>(null);
+  const [scrub, setScrub] = useState<string | null>(null);
 
   const events = useMemo<Event[]>(() => {
     const out: Event[] = [];
@@ -120,13 +135,12 @@ export function MissionTimeline() {
         mmsi: fix.mmsi,
       });
     }
-    return out
-      .filter((event) => event.at !== '')
-      .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    return chronologicalEvents(out);
   }, [state.scanStageHistory, state.targets, state.track, state.scene]);
 
   const instants = useMemo(
-    () => Array.from(new Set(events.map((e) => e.at))).sort(),
+    () => chronologicalEvents(Array.from(new Set(events.map((event) => event.at))).map((at) => ({ at })))
+      .map((item) => item.at),
     [events],
   );
 
@@ -145,7 +159,7 @@ export function MissionTimeline() {
     );
   }
 
-  const currentIndex = scrub ?? instants.length - 1;
+  const currentIndex = missionInstantIndex(instants, scrub);
   const acquisition = instants.find((at) => events.some((e) => e.at === at && e.kind === 'SAR_ACQUISITION'));
 
   return (
@@ -170,7 +184,7 @@ export function MissionTimeline() {
             aria-label="Scrub mission timeline"
             className="flex-1 accent-[var(--df-cyan)]"
             data-df-timeline-scrub
-            onChange={(event) => setScrub(Number(event.target.value))}
+            onChange={(event) => setScrub(instants[Number(event.target.value)] ?? null)}
           />
         ) : (
           <p className="flex-1 text-[11px] text-ink-dim">
@@ -202,6 +216,7 @@ export function MissionTimeline() {
             title={`${event.label} — ${event.detail}`}
             data-df-timeline-event={event.kind}
             onClick={() => {
+              setScrub(event.at);
               /*
                * AN AIS EVENT SYNCHRONISES THE PLAYBACK AUTHORITY (DF-X9.4H sections 21-24).
                *

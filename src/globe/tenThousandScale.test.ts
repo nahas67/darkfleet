@@ -64,7 +64,7 @@ const FRAME = (() => {
 })();
 
 describe('DF-X9.7: 10,000 AIS performance and scaling', () => {
-  it('arbitrates 10,000 claims strictly within the 120-label budget in < 10 ms', () => {
+  it('arbitrates 10,000 claims within the 120-label budget and 100 ms CPU guard', () => {
     const fleet = makeFleet(10000);
     const ref = at(8);
     const states = fleet.map((rows) => displayStateOf(rows, ref));
@@ -106,7 +106,7 @@ describe('DF-X9.7: 10,000 AIS performance and scaling', () => {
     expect(selectedClaim?.priority).toBe('SELECTED_AIS');
   });
 
-  it('selection latency across 10,000 contacts is sub-millisecond and leaves SAR target intact', () => {
+  it('selection latency stays within the 5 ms CPU guard and leaves SAR target intact', () => {
     resetStore();
     store.select({ kind: 'target', targetId: 'DF-001', scanId: 'DF-9004-GHOST' });
 

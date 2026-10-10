@@ -18,7 +18,7 @@ import { classificationColor } from '../design/tokens';
 import { fmt, fmtConfidence, fmtLatLon, NOT_ESTABLISHED } from '../design/format';
 
 type SortKey = 'id' | 'classification' | 'confidence' | 'distance';
-type Row = {
+export type Row = {
   kind: 'sar' | 'ais';
   key: string;
   id: string;
@@ -91,7 +91,7 @@ function buildRows(state: ReturnType<typeof useStore>): Row[] {
   return [...sar, ...ais];
 }
 
-/** Absent values sort last in BOTH directions -- an unknown is not "the smallest". */
+/** Compare known values. Null placement is independent of direction in sortContactRows. */
 function compare(a: Row, b: Row, key: SortKey): number {
   switch (key) {
     case 'id':
@@ -99,7 +99,7 @@ function compare(a: Row, b: Row, key: SortKey): number {
     case 'classification':
       return a.classification < b.classification ? -1 : a.classification > b.classification ? 1 : 0;
     case 'confidence':
-      return b.confidence - a.confidence;
+      return a.confidence - b.confidence;
     case 'distance': {
       if (a.distance === null && b.distance === null) return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       if (a.distance === null) return 1;
@@ -107,6 +107,20 @@ function compare(a: Row, b: Row, key: SortKey): number {
       return a.distance - b.distance;
     }
   }
+}
+
+/** Place missing measurements last in either direction; zero remains a known SAR measurement. */
+export function sortContactRows(rows: readonly Row[], sort: { key: SortKey; asc: boolean }): Row[] {
+  return [...rows].sort((a, b) => {
+    const missing = (row: Row): boolean =>
+      sort.key === 'distance' ? row.distance === null :
+        sort.key === 'confidence' && row.kind === 'ais';
+    const aMissing = missing(a);
+    const bMissing = missing(b);
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    const order = compare(a, b, sort.key);
+    return sort.asc ? order : -order;
+  });
 }
 
 const MAX_RENDERED_ROWS = 150;
@@ -144,8 +158,7 @@ export function ContactList() {
           row.classification.toLowerCase().includes(needle),
       );
     }
-    const sorted = [...list].sort((a, b) => compare(a, b, sort.key));
-    return sort.asc ? sorted : sorted.reverse();
+    return sortContactRows(list, sort);
   }, [rows, query, activeFilters, sort]);
 
   const selectedSarId =

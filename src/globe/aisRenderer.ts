@@ -37,6 +37,7 @@ import {
   Cartesian3,
   Cartographic,
   Color,
+  Ellipsoid,
   Material,
   Math as CesiumMath,
   HorizontalOrigin,
@@ -74,6 +75,14 @@ import {
   aisTrackTag,
 } from './aisPick';
 import { buildTrack, displayRunsFor } from '../temporal/trackBuilder';
+
+/** Globe occlusion guard shared by label projection. A screen pixel alone cannot prove visibility. */
+export function isContactAboveHorizon(point: Cartesian3, camera: Cartesian3): boolean {
+  const normal = Ellipsoid.WGS84.geodeticSurfaceNormal(point);
+  if (!normal) return false;
+  const toCamera = Cartesian3.subtract(camera, point, new Cartesian3());
+  return Cartesian3.dot(normal, toCamera) > 0;
+}
 
 /* ============================================================================================== *
  * VISUAL VOCABULARY
@@ -773,9 +782,11 @@ export class AisContactRenderer {
     const scene = this.#viewer.scene;
     const window = this.#viewer.canvas;
     if (!window || window.clientWidth === 0 || window.clientHeight === 0) return null;
-    const point = this.#viewer.scene.cartesianToCanvasCoordinates(
-      Cartesian3.fromDegrees(lon, lat),
-    );
+    const cartesian = Cartesian3.fromDegrees(lon, lat);
+    // Canvas projection can return an in-bounds pixel for a far-side contact.
+    // The globe hides its marker, so its text must not appear over a near-side vessel.
+    if (!isContactAboveHorizon(cartesian, this.#viewer.camera.positionWC)) return null;
+    const point = scene.cartesianToCanvasCoordinates(cartesian);
     if (!point) return null;
     if (point.x < 0 || point.y < 0) return null;
     if (point.x > window.clientWidth || point.y > window.clientHeight) return null;
