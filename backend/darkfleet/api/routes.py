@@ -105,7 +105,13 @@ from darkfleet.geolocation import (
     transform_wgs84,
 )
 from darkfleet.jobs.models import ScanStage, is_terminal
-from darkfleet.jobs.runner import ScanJob, ScanRunner, StageEvent, redact_stage_detail
+from darkfleet.jobs.runner import (
+    JobNotOwnedError,
+    ScanJob,
+    ScanRunner,
+    StageEvent,
+    redact_stage_detail,
+)
 from darkfleet.narrative import summarise
 from darkfleet.pipeline import run_scan
 from darkfleet.providers import ProviderStatus, RealDataUnavailableError
@@ -1304,6 +1310,19 @@ def scan_events(
     """
     try:
         channel = state.runner.subscribe(scan_id)
+    except JobNotOwnedError as exc:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            error="SCAN_STREAM_UNAVAILABLE",
+            status_value=exc.reason,
+            message=(
+                "This restored scan has no worker attached to this API instance; "
+                "no live stage stream can be replayed. Prior history remains "
+                f"available at GET /api/scans/{scan_id}."
+            ),
+            scan_id=scan_id,
+            detail={"ownership": exc.reason},
+        ) from None
     except KeyError:
         raise api_error(
             status.HTTP_404_NOT_FOUND,

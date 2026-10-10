@@ -22,6 +22,9 @@ Rules this module enforces:
   redacted before logging, persistence and subscriber delivery;
 * when a state directory is configured, every transition is written to disk so
   a fresh ``ScanRunner`` over the same directory sees prior jobs (OPS-013).
+* in-progress durable jobs hold an OS-level file lock. On restart, only a job
+  with a released owner lock is classified as interrupted; an active owner or
+  legacy job without ownership evidence is not overwritten.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, NamedTuple
+from typing import Any, BinaryIO, Final, NamedTuple
 
 from darkfleet.jobs.models import (
     STAGE_TAGS,
@@ -49,6 +52,7 @@ from darkfleet.jobs.models import (
 )
 
 __all__ = [
+    "JobNotOwnedError",
     "ScanJob",
     "ScanRunner",
     "ScanWork",
@@ -115,6 +119,14 @@ class StageEvent(NamedTuple):
         return is_terminal(self.stage)
 
 
+class JobNotOwnedError(RuntimeError):
+    """A restored in-flight job has no worker or event channel on this runner."""
+
+    def __init__(self, scan_id: str, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"{scan_id}: {reason}; no local worker or live event stream")
+
+
 @dataclass(slots=True)
 class ScanJob:
     """One scan's authoritative state, history and outcome."""
@@ -151,6 +163,8 @@ class ScanRunner:
         self._order: list[str] = []
         self._subscribers: dict[str, list[queue.Queue[StageEvent]]] = {}
         self._done: dict[str, threading.Event] = {}
+        self._owner_locks: dict[str, BinaryIO] = {}
+        self._unowned: dict[str, str] = {}
         self._next_id = 1
         if state_dir is None:
             self._state_dir: Path | None = None
@@ -184,6 +198,8 @@ class ScanRunner:
             job = self._jobs.get(scan_id)
             if job is None:
                 raise KeyError(f"unknown scan {scan_id!r}")
+            if reason := self._unowned.get(scan_id):
+                raise JobNotOwnedError(scan_id, reason)
             channel: queue.Queue[StageEvent] = queue.Queue()
             for event in job.history:
                 channel.put(event)
@@ -194,8 +210,11 @@ class ScanRunner:
         """Block until the job reaches a terminal state. True if it did."""
         with self._lock:
             done = self._done.get(scan_id)
+            unowned = scan_id in self._unowned
         if done is None:
             raise KeyError(f"unknown scan {scan_id!r}")
+        if unowned:
+            return False
         return done.wait(timeout)
 
     # ---------------------------------------------------------------- control
@@ -216,6 +235,11 @@ class ScanRunner:
         mode = RuntimeMode(runtime_mode)
         with self._lock:
             scan_id = self._allocate_id()
+            if not self._try_acquire_owner_lock(scan_id):
+                raise RuntimeError(
+                    f"Job {scan_id} has an active/unavailable state-directory owner; "
+                    "refusing to overwrite its durable state."
+                )
             job = ScanJob(
                 scan_id=scan_id,
                 runtime_mode=mode,
@@ -233,7 +257,13 @@ class ScanRunner:
             name=f"darkfleet-{scan_id}",
             daemon=True,
         )
-        thread.start()
+        try:
+            thread.start()
+        except Exception as exc:
+            # A rejected thread start must not leave a permanently QUEUED job
+            # holding the owner lock with no worker and no terminal event.
+            self._record_failure(scan_id, exc, illegal=False)
+            raise
         return created
 
     # ------------------------------------------------------------------ worker
@@ -321,6 +351,58 @@ class ScanRunner:
             done = self._done.get(scan_id)
         if done is not None:
             done.set()
+        self._release_owner_lock(scan_id)
+
+    def _owner_lock_path(self, scan_id: str) -> Path | None:
+        if self._state_dir is None:
+            return None
+        return self._state_dir / "jobs" / f"{scan_id}.lock"
+
+    def _try_acquire_owner_lock(self, scan_id: str) -> bool:
+        """Use a kernel-held byte lock to distinguish live writers from orphans.
+
+        Keep the lock file across restart; only the OS lock (released when a
+        process exits) determines whether the previous writer is still alive.
+        """
+        path = self._owner_lock_path(scan_id)
+        if path is None:
+            return True
+        try:
+            handle = path.open("a+b")
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            if "handle" in locals():
+                handle.close()
+            return False
+        self._owner_locks[scan_id] = handle
+        return True
+
+    def _release_owner_lock(self, scan_id: str) -> None:
+        handle = self._owner_locks.pop(scan_id, None)
+        if handle is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            logger.warning("SCAN   %s could not release state lock: %s", scan_id, exc)
+        finally:
+            handle.close()
 
     def _require(self, scan_id: str) -> ScanJob:
         job = self._jobs.get(scan_id)
@@ -371,6 +453,33 @@ class ScanRunner:
             self._done[job.scan_id] = threading.Event()
             if is_terminal(job.stage):
                 self._done[job.scan_id].set()
+            else:
+                path = self._owner_lock_path(job.scan_id)
+                if path is None or not path.is_file():
+                    # Legacy records provide no evidence of previous ownership.
+                    # Keep their last measured stage, but warn API consumers.
+                    job.error = (
+                        "OWNERSHIP_UNVERIFIED: no local worker is attached to "
+                        "this restored job and no prior owner lock was recorded."
+                    )
+                    self._unowned[job.scan_id] = "OWNERSHIP_UNVERIFIED"
+                    logger.warning("SCAN   %s restored without ownership proof", job.scan_id)
+                elif self._try_acquire_owner_lock(job.scan_id):
+                    self._record_failure(
+                        job.scan_id,
+                        InterruptedError(
+                            "job worker interrupted before completion on restart; "
+                            "execution was not resumed"
+                        ),
+                        illegal=False,
+                    )
+                else:
+                    job.error = (
+                        "ACTIVE_ELSEWHERE: no local worker is attached; an external "
+                        "process still owns this job's durable state."
+                    )
+                    self._unowned[job.scan_id] = "ACTIVE_ELSEWHERE"
+                    logger.warning("SCAN   %s is owned by another active runner", job.scan_id)
             try:
                 self._next_id = max(self._next_id, int(job.scan_id.removeprefix(_ID_PREFIX)) + 1)
             except ValueError:  # pragma: no cover - non-numeric id on disk
