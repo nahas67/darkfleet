@@ -95,14 +95,16 @@ def test_report_whitelists_source_metadata_and_refuses_unverified_history(tmp_pa
         },
         "provenance": {"processing_version": "3.0.0"},
         "targets": [{
-            "id": "DF-123", "classification": "SAR_UNMATCHED",
+            # Real pipeline persistence writes `cls`, unlike the API wire
+            # projection's `classification` field.
+            "id": "DF-123", "cls": "SAR_UNMATCHED",
             "lat": 1.2, "lon": 103.8,
             "lenM": None, "lenUncM": None, "sarConf": 0.72,
             "assessment": "No sufficient AIS candidate in persisted analysis",
             "asset_href": "CANARY-PRIVATE",
             "corr": {"mmsi": None, "scoreDecomposition": {"sizeScore": None}},
         }, {
-            "id": "AIS-ONLY-000000001", "classification": "AIS_ONLY",
+            "id": "AIS-ONLY-000000001", "cls": "AIS_ONLY",
             "lat": 1.3, "lon": 103.9,
         }],
     }))
@@ -117,6 +119,7 @@ def test_report_whitelists_source_metadata_and_refuses_unverified_history(tmp_pa
         assert doc["sensor_evidence"]["metadata"]["item_id"] == "sentinel-scene-1"
         assert doc["sensor_evidence"]["targets"][0]["lenM"] is None
         assert doc["sensor_evidence"]["targets"][0]["classification"] == "SAR_UNMATCHED"
+        assert doc["sensor_evidence"]["targets"][1]["classification"] == "AIS_ONLY"
         assert doc["sensor_evidence"]["sar_target_count"] == 1
         assert doc["sensor_evidence"]["ais_only_count"] == 1
         raw = json.dumps(doc)

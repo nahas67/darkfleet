@@ -115,7 +115,14 @@ def _scan_material(record: dict[str, Any] | None, scan_id: str | None) -> dict[s
     raw_targets = record.get("targets")
     raw_targets = raw_targets if isinstance(raw_targets, list) else []
     classified = [target for target in raw_targets if isinstance(target, dict)]
-    ais_only_in_targets = sum(1 for target in classified if target.get("classification") == "AIS_ONLY")
+    # Persisted pipeline rows use `cls`; the API-only projection uses
+    # `classification`. Reports read the former directly from RunStore and must
+    # normalize it rather than silently omit every classification or count an
+    # AIS_ONLY row as a SAR detection.
+    def classification_of(target: dict[str, Any]) -> Any:
+        return target.get("classification", target.get("cls"))
+
+    ais_only_in_targets = sum(1 for target in classified if classification_of(target) == "AIS_ONLY")
     separate_ais = record.get("ais_only") or record.get("aisOnly")
     separate_ais_count = len(separate_ais) if isinstance(separate_ais, list) else 0
     targets = []
@@ -123,6 +130,8 @@ def _scan_material(record: dict[str, Any] | None, scan_id: str | None) -> dict[s
         if not isinstance(target, dict):
             continue
         item = _select(target, _TARGET_FIELDS)
+        if "classification" not in item and "cls" in target:
+            item["classification"] = _redacted_scalar(target["cls"])
         corr = target.get("corr")
         if isinstance(corr, dict):
             item["correlation"] = {
