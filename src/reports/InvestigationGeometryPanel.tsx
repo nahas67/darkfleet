@@ -7,6 +7,7 @@ import {
 } from '../api/investigationGeometry';
 import { explain } from '../api/errors';
 import { fmtInstant } from '../design/format';
+import { engine } from '../globe/engine';
 
 const EMPTY = { label: '', notes: '', vertices: '', radius: '1000', kind: 'point' as GeometryKind };
 const show = (value: number | null) => value === null ? '—' : value.toLocaleString(undefined, {
@@ -21,12 +22,58 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [drawing, setDrawing] = useState(false);
+
+  // A case owns its overlay. Change of case or departure from the notebook
+  // removes annotations from the globe instead of leaving another analyst's
+  // hand-drawn marks visible as if they belonged to the next investigation.
+  useEffect(() => {
+    engine.showOperatorGeometries(items);
+  }, [items]);
+
+  useEffect(() => () => engine.clearOperatorGeometries(), [props.caseId]);
+
+  // Preview is display-only. Only the server validates vertices and computes
+  // WGS84 geodesic measurements on save, and a half-typed vertex is not drawn.
+  useEffect(() => {
+    try {
+      if (!draft.vertices.trim()) {
+        engine.showOperatorDraft(null);
+        return;
+      }
+      const vertices = parseLonLatLines(draft.vertices);
+      const radius = Number(draft.radius);
+      engine.showOperatorDraft({
+        kind: draft.kind,
+        coordinates: vertices,
+        radius_m: draft.kind === 'range_ring' && Number.isFinite(radius) ? radius : null,
+      });
+    } catch {
+      engine.showOperatorDraft(null);
+    }
+  }, [draft]);
+
+  useEffect(() => {
+    if (!drawing) return;
+    const disarm = engine.armOperatorDrawing(([lon, lat]) => {
+      setDraft((prior) => {
+        const nextPoint = `${lon.toFixed(7)}, ${lat.toFixed(7)}`;
+        if (prior.kind === 'point' || prior.kind === 'range_ring') {
+          return { ...prior, vertices: nextPoint };
+        }
+        const lines = prior.vertices.trim();
+        return { ...prior, vertices: lines ? `${lines}\n${nextPoint}` : nextPoint };
+      });
+    });
+    return () => disarm();
+  }, [drawing, props.caseId]);
 
   useEffect(() => {
     let active = true;
     setItems([]);
     setDraft(EMPTY);
     setEditingId(null);
+    setDrawing(false);
     setPendingDelete(null);
     setLoading(true);
     setError(null);
@@ -44,6 +91,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       .finally(() => setBusy(false));
   };
   const reset = () => {
+    setDrawing(false);
     setEditingId(null);
     setPendingDelete(null);
     setDraft(EMPTY);
@@ -71,6 +119,7 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
     reset();
   });
   const edit = (item: GeoAnnotation) => {
+    setDrawing(false);
     setEditingId(item.id);
     setPendingDelete(null);
     setError(null);
@@ -95,7 +144,8 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
       <p className="text-[11px] text-ink-dim">
         Operator-added geometry — NOT SAR/AIS sensor evidence.
         {' '}{props.scanId ? `Case linked to persisted scan ${props.scanId}.` : 'Unlinked case geometry.'}
-        {' '}Enter coordinates manually as longitude, latitude (degrees); no screen-pixel measurements.
+        {' '}Draw by clicking the globe, or enter WGS84 longitude, latitude manually.
+        Measurements are calculated from Earth coordinates on the backend, never screen pixels.
       </p>
       <label htmlFor="df-geo-kind" className="df-label text-[10px]">Shape type</label>
       <select id="df-geo-kind" data-df-geo-kind className="df-input w-full"
@@ -126,6 +176,28 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
             'At least 3 vertices; closure is automatic.'}
         {' '}Coordinates may cross the ±180° antimeridian.
       </p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Draw geometry on globe">
+        <button type="button" className="df-btn" data-df-geo-draw-toggle
+          disabled={engine.viewer === null || busy}
+          aria-pressed={drawing}
+          onClick={() => setDrawing((value) => !value)}>
+          {drawing ? 'Stop globe drawing' : 'Draw by globe clicks'}
+        </button>
+        <button type="button" className="df-btn" data-df-geo-undo-point
+          disabled={busy || !draft.vertices.trim()}
+          onClick={() => setDraft((prior) => ({
+            ...prior,
+            vertices: prior.vertices.trim().split('\n').slice(0, -1).join('\n'),
+          }))}>Undo vertex</button>
+        <button type="button" className="df-btn" data-df-geo-clear-points
+          disabled={busy || !draft.vertices.trim()}
+          onClick={() => setDraft((prior) => ({ ...prior, vertices: '' }))}>Clear vertices</button>
+      </div>
+      {drawing ? <p className="text-[10px] text-ink" data-df-geo-drawing-status role="status">
+        Globe drawing armed · click ocean or land to add a WGS84 vertex. For a point
+        or range ring, each click replaces the centre. Stop drawing before selecting
+        another SAR or AIS contact.
+      </p> : null}
       {draft.kind === 'range_ring' ? <>
         <label htmlFor="df-geo-radius" className="df-label text-[10px]">Geodesic radius (metres)</label>
         <input id="df-geo-radius" data-df-geo-radius className="df-input w-full"
@@ -169,6 +241,11 @@ export function InvestigationGeometryPanel(props: { caseId: string; scanId: stri
           <p className="text-[10px] text-ink-dim">{item.measurements.method}</p>
           <button type="button" className="df-btn" disabled={busy}
             data-df-geo-edit onClick={() => edit(item)}>Edit</button>
+          <button type="button" className="df-btn ml-2" disabled={busy}
+            data-df-geo-frame onClick={() => {
+              const point = item.geometry.coordinates[0];
+              if (point) engine.flyTo(point[1], point[0], 125_000);
+            }}>Frame on globe</button>
           {pendingDelete === item.id ? <>
             <button type="button" className="df-btn ml-2" disabled={busy}
               data-df-geo-confirm-delete onClick={() => remove(item.id)}>Confirm remove</button>

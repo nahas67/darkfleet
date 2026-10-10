@@ -38,13 +38,16 @@ NO_DATA_RGB = (26, 26, 74)
 
 def _mono_rgb(db: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """Backscatter -> greyscale RGB; excluded pixels in the NO_DATA colour."""
+    valid = np.asarray(valid, dtype=bool) & np.isfinite(db)
     finite = db[valid]
     if finite.size == 0:
         return np.full((*db.shape, 3), NO_DATA_RGB, dtype=np.uint8)
     lo = float(np.percentile(finite, 2))
     hi = float(np.percentile(finite, 98))
     span = max(hi - lo, 1e-6)
-    norm = np.clip((db - lo) / span, 0.0, 1.0)
+    # Excluded source pixels can be NaN or infinities independently of the
+    # supplied mask; keep them visibly absent without a float->uint cast.
+    norm = np.clip((np.where(valid, db, lo) - lo) / span, 0.0, 1.0)
     grey = (norm * 255.0).astype(np.uint8)
     rgb = np.stack([grey, grey, grey], axis=-1)
     rgb[~valid] = NO_DATA_RGB
@@ -77,7 +80,16 @@ def render_png(
     """PNG evidence snapshot: raster + detection boxes + provenance caption."""
     from PIL import Image, ImageDraw
 
-    rgb = _detection_overlay(_mono_rgb(np.asarray(db, dtype=np.float64), valid), centroids)
+    db = np.asarray(db, dtype=np.float64)
+    measured_mask = np.asarray(valid, dtype=bool) & np.isfinite(db)
+    height, width = db.shape
+    # Do not show a claimed detection on a pixel with no measured backscatter.
+    real_centroids = [
+        (cy, cx) for cy, cx in centroids
+        if 0 <= round(cy) < height and 0 <= round(cx) < width
+        and measured_mask[round(cy), round(cx)]
+    ]
+    rgb = _detection_overlay(_mono_rgb(db, measured_mask), real_centroids)
     img = Image.fromarray(rgb, mode="RGB")
 
     caption_h = 156
@@ -88,7 +100,7 @@ def render_png(
     sar = provenance.get("sar", {})
     mode_tag = REAL_TAG
     accent = _ACCENT
-    valid_frac = float(valid.mean()) if valid.size else 0.0
+    valid_frac = float(measured_mask.mean()) if measured_mask.size else 0.0
     y = img.height + 10
     draw.text((12, y), f"{title}", fill=(240, 247, 250))
     y += 18
@@ -112,7 +124,7 @@ def render_png(
     # The valid fraction is stated because an excluded area must never be read
     # as an observed absence of returns.
     draw.rectangle((12, y + 2, 26, y + 12), fill=NO_DATA_RGB, outline=(70, 90, 110))
-    measured = np.asarray(db[valid], dtype=np.float64)
+    measured = np.asarray(db[measured_mask], dtype=np.float64)
     measured = measured[np.isfinite(measured)]
     stretch_note = (
         f"stretch {float(np.percentile(measured, 2)):.1f}.."

@@ -49,6 +49,7 @@ import {
 import { displayStateOf } from '../ais/displayState';
 import type { AisDiagnostics, AisRenderFailure } from '../diagnostics/aisDiagnostics';
 import type { AisObservationOut } from '../api/contract';
+import type { GeometryInput, GeometryOut } from '../api/contract';
 import type { MapSourceStatus } from './MapSourceController';
 import { classificationColor } from '../design/tokens';
 import { decodeAisPick } from './aisPick';
@@ -142,6 +143,10 @@ export class TacticalEngine {
   #coastlineEntities: Array<unknown> = [];
   #eezEntities: Array<unknown> = [];
   #highSeasEntities: Array<unknown> = [];
+  /** Operator annotations are independent of all observed sensor geometry. */
+  #operatorGeometryEntities: Array<unknown> = [];
+  #operatorDraftEntities: Array<unknown> = [];
+  #operatorPick: ((point: readonly [number, number]) => void) | null = null;
   /**
    * Attribution for the maritime credit slot, written whenever maritime geometry is set.
    *
@@ -308,6 +313,9 @@ export class TacticalEngine {
     this.#coastlineEntities = [];
     this.#eezEntities = [];
     this.#highSeasEntities = [];
+    this.#operatorPick = null;
+    this.#operatorGeometryEntities = [];
+    this.#operatorDraftEntities = [];
     this.#maritimeCredit = '';
     this.#basemap?.syncMaritimeCredit('');
     this.#rasterProvider = null;
@@ -993,6 +1001,19 @@ export class TacticalEngine {
     if (!handler || !viewer) return;
 
     handler.setInputAction((movement: { position: Cartesian2 }) => {
+      if (this.#operatorPick) {
+        // An explicitly armed analyst drawing owns clicks until disarmed.
+        // Camera ellipsoid intersections are real WGS84 coordinates; an off-
+        // globe click contributes nothing. Picking cannot fabricate (0, 0).
+        const hit = viewer.camera.pickEllipsoid(movement.position, Ellipsoid.WGS84);
+        if (!hit) return;
+        const geographic = Cartographic.fromCartesian(hit);
+        const lon = CesiumMath.toDegrees(geographic.longitude);
+        const lat = CesiumMath.toDegrees(geographic.latitude);
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+        this.#operatorPick([lon, lat]);
+        return;
+      }
       const picked = viewer.scene.pick(movement.position);
       const decoded = decodeAisPick(
         picked,
@@ -1041,15 +1062,11 @@ export class TacticalEngine {
         const handle = id ? this.#targetEntities.get(id)?.handle : undefined;
         this.#callbacks.onPick?.(handle ?? null);
       }
-    }, ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Cursor coordinate telemetry. The globe is the primary surface, so the
-    // operator should always be able to read where the pointer is.
-    const handler2 = handler;
-    handler2.setInputAction((movement: { endPosition: Cartesian2 }) => {
-      const viewer2 = this.#viewer;
-      if (!viewer2) return;
-      const cartesian = viewer2.camera.pickEllipsoid(
+      // Cesium stores one action per event type. A second MOUSE_MOVE action
+      // silently overwrote this hover handler, leaving target hover inert even
+      // though coordinate HUD updates worked. One owner dispatches both.
+      const cartesian = viewer.camera.pickEllipsoid(
         movement.endPosition,
         Ellipsoid.WGS84,
         new Cartesian3(),
@@ -1061,6 +1078,78 @@ export class TacticalEngine {
         CesiumMath.toDegrees(carto.longitude),
       );
     }, ScreenSpaceEventType.MOUSE_MOVE);
+  }
+
+  /** Give an operator-only drawing session priority over target/contact picking. */
+  armOperatorDrawing(onPoint: (point: readonly [number, number]) => void): () => void {
+    this.#operatorPick = onPoint;
+    return () => {
+      if (this.#operatorPick === onPoint) this.#operatorPick = null;
+    };
+  }
+
+  /** Visible operator annotations. The backend retains geodesic measurement authority. */
+  showOperatorGeometries(entries: readonly GeometryOut[]): void {
+    this.#removeEntities(this.#operatorGeometryEntities);
+    for (const item of entries) this.#drawOperatorGeometry(item.geometry, this.#operatorGeometryEntities,
+      `operator-annotation:${item.id}`, false);
+  }
+
+  /** Temporary drawing aid; never written as actual sensor evidence. */
+  showOperatorDraft(geometry: GeometryInput | null): void {
+    this.#removeEntities(this.#operatorDraftEntities);
+    if (geometry) this.#drawOperatorGeometry(geometry, this.#operatorDraftEntities, 'operator-draft', true);
+  }
+
+  clearOperatorGeometries(): void {
+    this.#operatorPick = null;
+    this.#removeEntities(this.#operatorDraftEntities);
+    this.#removeEntities(this.#operatorGeometryEntities);
+  }
+
+  #drawOperatorGeometry(geometry: GeometryInput, owners: Array<unknown>,
+    label: string, draft: boolean): void {
+    const viewer = this.#viewer;
+    if (!viewer) return;
+    const vertices = geometry.coordinates.map((coord) => this.#point(coord[0], coord[1]));
+    if (vertices.some((v) => v === null)) return;
+    const points = vertices.filter((v): v is Cartesian3 => v !== null);
+    const colour = Color.fromCssColorString(draft ? '#F4C867' : '#CE9AF2');
+    const first = points[0];
+    if (!first) return;
+    if (geometry.kind === 'point') {
+      if (points.length !== 1) return;
+      owners.push(viewer.entities.add({ name: label,
+        position: first,
+        point: { pixelSize: 9, color: colour, outlineColor: Color.BLACK, outlineWidth: 2 },
+      }));
+    } else if (geometry.kind === 'range_ring') {
+      const radius = geometry.radius_m;
+      if (points.length !== 1 || radius === null || radius === undefined ||
+          !Number.isFinite(radius) || radius < 1 || radius > 2_000_000) return;
+      owners.push(viewer.entities.add({ name: label, position: first,
+        ellipse: {
+          semiMajorAxis: radius, semiMinorAxis: radius,
+          material: colour.withAlpha(draft ? 0.10 : 0.07),
+          outline: true, outlineColor: colour, height: 0,
+        },
+      }));
+      owners.push(viewer.entities.add({ name: `${label}:centre`, position: first,
+        point: { pixelSize: 6, color: colour },
+      }));
+    } else if (geometry.kind === 'polyline' && points.length >= 2) {
+      owners.push(viewer.entities.add({ name: label,
+        polyline: { positions: points, width: draft ? 2 : 3, material: colour, clampToGround: true },
+      }));
+    } else if (geometry.kind === 'polygon' && points.length >= 3) {
+      owners.push(viewer.entities.add({ name: label,
+        polygon: {
+          hierarchy: points,
+          material: colour.withAlpha(draft ? 0.13 : 0.09),
+          outline: true, outlineColor: colour, height: 0,
+        },
+      }));
+    }
   }
 
   /* -------------------------------------------------------------- camera */

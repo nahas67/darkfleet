@@ -195,6 +195,23 @@ def test_missing_sensor_resolution_remains_explicit_in_exported_pdf() -> None:
     assert b"None / None dB" not in pdf
 
 
+def test_invalid_measured_pixel_is_excluded_even_when_source_mask_claims_valid() -> None:
+    db = np.array([[-20.0, np.nan], [np.inf, -5.0]], dtype=np.float64)
+    source_mask = np.ones((2, 2), dtype=bool)
+    rgb = _mono_rgb(db, source_mask)
+    from darkfleet.exports.render import NO_DATA_RGB
+
+    assert np.array_equal(rgb[0, 1], np.array(NO_DATA_RGB, dtype=np.uint8))
+    assert np.array_equal(rgb[1, 0], np.array(NO_DATA_RGB, dtype=np.uint8))
+    assert all(int(v) == int(rgb[0, 0][0]) for v in rgb[0, 0])
+    assert all(int(v) == int(rgb[1, 1][0]) for v in rgb[1, 1])
+    png = render_png(
+        scan_id="DF-INVALID", db=db, valid=source_mask,
+        centroids=[(0, 1), (1, 0)], provenance=PROV, title="Missing pixels",
+    )
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_no_data_colour_is_outside_the_greyscale_data_ramp() -> None:
     """Excluded pixels must be distinguishable from a valid low-backscatter pixel.
 

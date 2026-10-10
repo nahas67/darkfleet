@@ -211,6 +211,33 @@ export function InvestigationNotebook() {
         <InvestigationGeometryPanel key={selected.id} caseId={selected.id}
           scanId={selected.scan_id} />
 
+        <section className="border-t border-structural pt-3 space-y-2"
+          aria-label="Reproducible investigation exports" data-df-case-reports>
+          <h3 className="df-label text-[10px]">Investigation evidence report</h3>
+          <p className="text-[11px] text-ink-dim">
+            Export the persisted source reference, recorded SAR target evidence,
+            watchlist, operator notes and WGS84 measurements. The JSON contains a
+            canonical SHA-256 digest. The PDF labels missing sources and separates
+            your annotations from satellite/AIS observations.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a className="df-btn" data-df-case-report-json
+              href={`/api/investigation-reports/${encodeURIComponent(selected.id)}/json`}
+              download={`darkfleet-${selected.id}-evidence.json`}>
+              DOWNLOAD VERIFIED JSON
+            </a>
+            <a className="df-btn" data-df-case-report-pdf
+              href={`/api/investigation-reports/${encodeURIComponent(selected.id)}/pdf`}
+              download={`darkfleet-${selected.id}-evidence.pdf`}>
+              DOWNLOAD REPORT PDF
+            </a>
+          </div>
+          <p className="text-[10px] text-ink-dim">
+            An unlinked or missing scan is explicitly unavailable in the report;
+            operator annotations are preserved without invented sensor evidence.
+          </p>
+        </section>
+
         <div className="border-t border-structural pt-2">
           {confirmDelete ? <div className="space-y-2">
             <p className="text-[11px] text-ink-dim">

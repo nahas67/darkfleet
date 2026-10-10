@@ -31,6 +31,7 @@ import {
   type Loadable,
 } from '../api/advanced';
 import { NOT_ESTABLISHED } from '../design/format';
+import { SceneComparisonWorkbench } from '../advanced/SceneComparisonWorkbench';
 import type {
   DetectorsOut,
   PatternOut,
@@ -40,11 +41,12 @@ import type {
   TracksOut,
 } from '../api/contract';
 
-type Tab = 'REVISIT' | 'MULTIPASS' | 'PATTERNS' | 'DETECTOR';
+type Tab = 'REVISIT' | 'MULTIPASS' | 'COMPARE' | 'PATTERNS' | 'DETECTOR';
 
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
   ['REVISIT', 'Revisit'],
   ['MULTIPASS', 'Multipass'],
+  ['COMPARE', 'SAR compare'],
   ['PATTERNS', 'Patterns'],
   ['DETECTOR', 'Detector'],
 ];
@@ -152,6 +154,7 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
           />
         ) : null}
         {tab === 'MULTIPASS' ? <MultipassPanel state={tracks} /> : null}
+        {tab === 'COMPARE' ? <SceneComparisonWorkbench /> : null}
         {tab === 'PATTERNS' ? <PatternsPanel state={patterns} /> : null}
         {tab === 'DETECTOR' ? <DetectorPanel state={detectors} /> : null}
       </div>

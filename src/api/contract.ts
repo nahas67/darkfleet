@@ -212,6 +212,142 @@ export interface Measurements {
   readonly radius_nm?: number | null;
 }
 
+export interface MissionOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly title: string;
+  readonly aoi: readonly [number, number, number, number];
+  readonly status: "PLANNED" | "ACTIVE" | "PAUSED" | "CLOSED";
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly scan_ids: string[];
+  readonly rules: MissionRuleOut[];
+  readonly alerts: MissionAlertOut[];
+  readonly evaluations: MissionEvaluationOut[];
+}
+
+export interface InvestigationReportOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly schema_version: 1;
+  readonly kind: "DARKFLEET_INVESTIGATION_EVIDENCE";
+  readonly investigation: Record<string, string | null>;
+  readonly source_status: "PERSISTED_REAL" | "NO_SCAN_LINKED" | "SOURCE_MISSING" | "SOURCE_UNVERIFIED";
+  readonly sensor_evidence: Record<string, unknown>;
+  readonly operator_material: Record<string, unknown>;
+  readonly scientific_limits: string[];
+  readonly warnings: string[];
+  readonly content_sha256: string;
+  readonly hash_algorithm: string;
+}
+
+export interface SceneCandidatesOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scenes: SceneCandidateOut[];
+  readonly total_real_scans: number;
+  readonly note?: string;
+}
+
+export interface SceneComparisonOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly status: "MEASURED" | "NOT_COMPARABLE";
+  readonly reason: string;
+  readonly first: SceneIdentity;
+  readonly second: SceneIdentity;
+  readonly metrics: ComparisonMetrics | null;
+  readonly acquisition_interval_hours: number | null;
+  readonly caveat?: string;
+}
+
+export interface SceneCompareRequest {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly first_scan_id: string;
+  readonly second_scan_id: string;
+}
+
+export interface MissionListOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly missions: MissionOut[];
+}
+
+export interface MissionBody {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+  readonly aoi: readonly [number, number, number, number];
+  readonly status?: "PLANNED" | "ACTIVE" | "PAUSED" | "CLOSED";
+}
+
+export interface MissionReplace {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly title: string;
+  readonly aoi: readonly [number, number, number, number];
+  readonly status?: "PLANNED" | "ACTIVE" | "PAUSED" | "CLOSED";
+}
+
+export interface MissionScanLink {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+}
+
+export interface WatchRuleCreate {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly investigation_id: string;
+  readonly target_id: string;
+  readonly minimum_sar_confidence: number;
+}
+
+export interface MissionRuleOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly mission_id: string;
+  readonly investigation_id: string;
+  readonly scan_id: string;
+  readonly target_id: string;
+  readonly kind?: "WATCHED_TARGET_SAR_CONFIDENCE";
+  readonly minimum_sar_confidence: number;
+  readonly created_at: string;
+}
+
+export interface MissionAlertOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly id: string;
+  readonly mission_id: string;
+  readonly rule_id: string;
+  readonly scan_id: string;
+  readonly target_id: string;
+  readonly minimum_sar_confidence: number;
+  readonly sar_confidence: number;
+  readonly classification: string | null;
+  readonly rationale: string;
+  readonly evidence: Record<string, unknown>;
+  readonly evidence_fingerprint: string;
+  readonly status: "OPEN" | "ACKNOWLEDGED";
+  readonly created_at: string;
+  readonly acknowledged_at: string | null;
+  readonly provenance?: "PERSISTED_REAL_SAR_OPERATOR_THRESHOLD";
+}
+
+export interface MissionEvaluationOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mission_id: string;
+  readonly rule_id: string;
+  readonly scan_id: string;
+  readonly target_id: string;
+  readonly status: "TRIGGERED" | "BELOW_THRESHOLD" | "NOT_EVALUATED";
+  readonly reason: string;
+  readonly evaluated_at: string;
+  readonly evidence_fingerprint: string | null;
+}
+
+export interface EvaluationRunOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly mission_id: string;
+  readonly evaluations: MissionEvaluationOut[];
+  readonly alerts_created: number;
+  readonly existing_alerts: number;
+  readonly not_evaluated: number;
+  readonly note?: string;
+}
+
 export interface AisAssociation {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly matched: boolean;
@@ -874,6 +1010,50 @@ export interface Snapshot {
   readonly investigation_id?: string | null;
 }
 
+export interface SceneCandidateOut {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly item_id: string | null;
+  readonly acquisition_time: string | null;
+  readonly product: string | null;
+  readonly polarization: string | null;
+  readonly available_normalized_raster: boolean;
+  readonly georeference_present: boolean;
+}
+
+export interface ComparisonMetrics {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly overlap_shape: number[];
+  readonly offset_b_in_a_pixels: number[];
+  readonly overlap_pixels: number;
+  readonly valid_pair_pixels: number;
+  readonly valid_pair_fraction: number;
+  readonly mean_b_minus_a_db: number;
+  readonly mean_absolute_difference_db: number;
+  readonly root_mean_square_difference_db: number;
+  readonly median_b_minus_a_db: number;
+  readonly p05_b_minus_a_db: number;
+  readonly p95_b_minus_a_db: number;
+  readonly brighter_b_pixels: number;
+  readonly darker_b_pixels: number;
+  readonly equal_pixels: number;
+  readonly metric?: "SAME_PIXEL_RTC_GAMMA0_DB_DIFFERENCE";
+}
+
+export interface SceneIdentity {
+  /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
+  readonly scan_id: string;
+  readonly item_id: string | null;
+  readonly acquisition_time: string | null;
+  readonly product: string | null;
+  readonly polarization: string | null;
+  readonly crs: string | null;
+  readonly window_transform: number[] | null;
+  readonly raster_shape: number[] | null;
+  readonly processing_version: string | null;
+  readonly source?: "PERSISTED_REAL_SCAN_CALIBRATED_CACHE";
+}
+
 export interface RejectedCandidate {
   /** Rejects unknown keys at runtime: this schema is additionalProperties:false. */
   readonly mmsi: string;
@@ -1321,11 +1501,16 @@ export type ContractRequestSchemaName =
   | 'AnnotationCreate'
   | 'GeometryCreate'
   | 'InvestigationCreate'
+  | 'MissionBody'
+  | 'MissionReplace'
+  | 'MissionScanLink'
   | 'ProbeRequest'
   | 'ScanCreateRequest'
+  | 'SceneCompareRequest'
   | 'ViewCreate'
   | 'ViewReplace'
   | 'WatchEntryCreate'
+  | 'WatchRuleCreate'
 ;
 
 /** Schemas emitted into this file. */
@@ -1351,6 +1536,20 @@ export type ContractSchemaName =
   | 'GeometryListOut'
   | 'GeometryInput'
   | 'Measurements'
+  | 'MissionOut'
+  | 'InvestigationReportOut'
+  | 'SceneCandidatesOut'
+  | 'SceneComparisonOut'
+  | 'SceneCompareRequest'
+  | 'MissionListOut'
+  | 'MissionBody'
+  | 'MissionReplace'
+  | 'MissionScanLink'
+  | 'WatchRuleCreate'
+  | 'MissionRuleOut'
+  | 'MissionAlertOut'
+  | 'MissionEvaluationOut'
+  | 'EvaluationRunOut'
   | 'AisAssociation'
   | 'VesselTarget'
   | 'AisOnlyTarget'
@@ -1405,6 +1604,9 @@ export type ContractSchemaName =
   | 'DetectorCardOut'
   | 'ScanCatalogueEntry'
   | 'Snapshot'
+  | 'SceneCandidateOut'
+  | 'ComparisonMetrics'
+  | 'SceneIdentity'
   | 'RejectedCandidate'
   | 'PolarizationEvidence'
   | 'WakeEvidence'
@@ -1753,6 +1955,212 @@ export const MEASUREMENTS_FIELDS = [
   'radius_m',
   'radius_km',
   'radius_nm',
+] as const;
+
+/**
+ * Property names of {@link MissionOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONOUT_FIELDS = [
+  'id',
+  'title',
+  'aoi',
+  'status',
+  'created_at',
+  'updated_at',
+  'scan_ids',
+  'rules',
+  'alerts',
+  'evaluations',
+] as const;
+
+/**
+ * Property names of {@link InvestigationReportOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const INVESTIGATIONREPORTOUT_FIELDS = [
+  'schema_version',
+  'kind',
+  'investigation',
+  'source_status',
+  'sensor_evidence',
+  'operator_material',
+  'scientific_limits',
+  'warnings',
+  'content_sha256',
+  'hash_algorithm',
+] as const;
+
+/**
+ * Property names of {@link SceneCandidatesOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENECANDIDATESOUT_FIELDS = [
+  'scenes',
+  'total_real_scans',
+  'note',
+] as const;
+
+/**
+ * Property names of {@link SceneComparisonOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENECOMPARISONOUT_FIELDS = [
+  'status',
+  'reason',
+  'first',
+  'second',
+  'metrics',
+  'acquisition_interval_hours',
+  'caveat',
+] as const;
+
+/**
+ * Property names of {@link SceneCompareRequest} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENECOMPAREREQUEST_FIELDS = [
+  'first_scan_id',
+  'second_scan_id',
+] as const;
+
+/**
+ * Property names of {@link MissionListOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONLISTOUT_FIELDS = [
+  'missions',
+] as const;
+
+/**
+ * Property names of {@link MissionBody} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONBODY_FIELDS = [
+  'title',
+  'aoi',
+  'status',
+] as const;
+
+/**
+ * Property names of {@link MissionReplace} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONREPLACE_FIELDS = [
+  'title',
+  'aoi',
+  'status',
+] as const;
+
+/**
+ * Property names of {@link MissionScanLink} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONSCANLINK_FIELDS = [
+  'scan_id',
+] as const;
+
+/**
+ * Property names of {@link WatchRuleCreate} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const WATCHRULECREATE_FIELDS = [
+  'investigation_id',
+  'target_id',
+  'minimum_sar_confidence',
+] as const;
+
+/**
+ * Property names of {@link MissionRuleOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONRULEOUT_FIELDS = [
+  'id',
+  'mission_id',
+  'investigation_id',
+  'scan_id',
+  'target_id',
+  'kind',
+  'minimum_sar_confidence',
+  'created_at',
+] as const;
+
+/**
+ * Property names of {@link MissionAlertOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONALERTOUT_FIELDS = [
+  'id',
+  'mission_id',
+  'rule_id',
+  'scan_id',
+  'target_id',
+  'minimum_sar_confidence',
+  'sar_confidence',
+  'classification',
+  'rationale',
+  'evidence',
+  'evidence_fingerprint',
+  'status',
+  'created_at',
+  'acknowledged_at',
+  'provenance',
+] as const;
+
+/**
+ * Property names of {@link MissionEvaluationOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const MISSIONEVALUATIONOUT_FIELDS = [
+  'mission_id',
+  'rule_id',
+  'scan_id',
+  'target_id',
+  'status',
+  'reason',
+  'evaluated_at',
+  'evidence_fingerprint',
+] as const;
+
+/**
+ * Property names of {@link EvaluationRunOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const EVALUATIONRUNOUT_FIELDS = [
+  'mission_id',
+  'evaluations',
+  'alerts_created',
+  'existing_alerts',
+  'not_evaluated',
+  'note',
 ] as const;
 
 /**
@@ -2668,6 +3076,65 @@ export const SNAPSHOT_FIELDS = [
   'workspace',
   'aoi',
   'investigation_id',
+] as const;
+
+/**
+ * Property names of {@link SceneCandidateOut} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENECANDIDATEOUT_FIELDS = [
+  'scan_id',
+  'item_id',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'available_normalized_raster',
+  'georeference_present',
+] as const;
+
+/**
+ * Property names of {@link ComparisonMetrics} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const COMPARISONMETRICS_FIELDS = [
+  'overlap_shape',
+  'offset_b_in_a_pixels',
+  'overlap_pixels',
+  'valid_pair_pixels',
+  'valid_pair_fraction',
+  'mean_b_minus_a_db',
+  'mean_absolute_difference_db',
+  'root_mean_square_difference_db',
+  'median_b_minus_a_db',
+  'p05_b_minus_a_db',
+  'p95_b_minus_a_db',
+  'brighter_b_pixels',
+  'darker_b_pixels',
+  'equal_pixels',
+  'metric',
+] as const;
+
+/**
+ * Property names of {@link SceneIdentity} as they appear on the wire.
+ *
+ * Generated. Runtime validation reads this instead of keeping its own list,
+ * so the permitted keys cannot drift from the contract they enforce.
+ */
+export const SCENEIDENTITY_FIELDS = [
+  'scan_id',
+  'item_id',
+  'acquisition_time',
+  'product',
+  'polarization',
+  'crs',
+  'window_transform',
+  'raster_shape',
+  'processing_version',
+  'source',
 ] as const;
 
 /**
