@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +15,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from rasterio.transform import Affine, from_origin
 
+from darkfleet import local_sar_import as sar_import
 from darkfleet.api.app import create_app
 from darkfleet.config.settings import Settings
 from darkfleet.local_sar_import import MAX_FILE_BYTES, MAX_PIXELS, import_local_geotiff
@@ -215,6 +218,65 @@ def test_source_changed_snapshot_integrity_and_calibration_declared_only(tmp_pat
         assert client.get(doc["image_url"]).status_code == 409
         assert client.get(f"/api/sar/local/imports/{doc['import_id']}").json()[
             "snapshot_integrity"] == "CHANGED"
+
+
+@pytest.mark.parametrize(("race_point", "error_number", "expected_http", "expected_code"), [
+    ("open", errno.ENOENT, 404, "SOURCE_NOT_FOUND"),
+    ("stat", errno.ENOENT, 404, "SOURCE_NOT_FOUND"),
+    ("open", errno.EACCES, 409, "SOURCE_UNAVAILABLE"),
+])
+def test_source_disappears_or_becomes_unavailable_between_validation_and_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    race_point: str, error_number: int, expected_http: int, expected_code: str,
+):
+    source = tiff(tmp_path)
+    source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    with TestClient(app_for(tmp_path)) as client:
+        first = client.post("/api/sar/local/import", json=request())
+        assert first.status_code == 201, first.text
+        original = first.json()
+        import_id = original["import_id"]
+        receipt_path = tmp_path / "local-sar-imports" / f"{import_id}.json"
+        receipt_bytes = receipt_path.read_bytes()
+        attempts: list[Path] = []
+        original_open = os.open
+        original_stat = sar_import._source_stat
+
+        def raced_open(path: str | bytes | os.PathLike, flags: int, *args: object,
+                       **kwargs: object) -> int:
+            if Path(path) == source:
+                attempts.append(source)
+                raise OSError(error_number, "source changed after validation", str(source))
+            return original_open(path, flags, *args, **kwargs)
+
+        def raced_stat(path: Path) -> os.stat_result:
+            if path == source:
+                attempts.append(source)
+                raise FileNotFoundError(errno.ENOENT, "source disappeared", str(source))
+            return original_stat(path)
+
+        with monkeypatch.context() as patch:
+            if race_point == "open":
+                patch.setattr(sar_import.os, "open", raced_open)
+            else:
+                patch.setattr(sar_import, "_source_stat", raced_stat)
+            response = client.post("/api/sar/local/import", json=request())
+
+        assert attempts == [source]  # Fail exactly after the earlier safe-path validation.
+        assert response.status_code == expected_http, response.text
+        assert response.json()["status"] == expected_code
+        assert response.json()["error"] == "LOCAL_SAR_IMPORT_ERROR"
+        assert str(tmp_path) not in response.text
+        assert source.exists()  # Deterministic injected race does not mutate operator data.
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == source_sha
+        assert receipt_path.read_bytes() == receipt_bytes
+        assert len(list(receipt_path.parent.glob("*.json"))) == 1
+        assert not list(receipt_path.parent.glob(".ingest-*.tif"))
+        detail = client.get(f"/api/sar/local/imports/{import_id}")
+        assert detail.status_code == 200
+        assert detail.json()["source_integrity"] == "VERIFIED"
+        assert detail.json()["snapshot_integrity"] == "VERIFIED"
+        assert detail.json()["status"] == "IMPORTED_NOT_ANALYZED"
 
 
 def test_invalid_declarations_and_missing_import(tmp_path: Path):

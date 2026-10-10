@@ -125,9 +125,16 @@ def _same_file(a: os.stat_result, b: os.stat_result) -> bool:
 
 def _copy_verified_source(source: Path, archive: Path) -> tuple[Path, str]:
     """Use a non-following source descriptor, enforce length while copying."""
-    before = _source_stat(source)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(source, flags)
+    try:
+        before = _source_stat(source)
+        fd = os.open(source, flags)
+    except FileNotFoundError:
+        # The validated inbox entry may disappear before stat/open; never leak
+        # the operating system's absolute path or turn this race into HTTP 500.
+        raise LocalSarError("SOURCE_NOT_FOUND", 404) from None
+    except OSError:
+        raise LocalSarError("SOURCE_UNAVAILABLE", 409) from None
     tmp_path: Path | None = None
     try:
         if not _same_file(before, os.fstat(fd)):
