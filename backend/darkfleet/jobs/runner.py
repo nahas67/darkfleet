@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -63,6 +64,23 @@ ScanWork = Callable[[], Iterator[tuple[ScanStage, str]]]
 _STATE_DIR_ENV: Final[str] = "DARKFLEET_STATE_DIR"
 _ID_WIDTH: Final[int] = 4
 _ID_PREFIX: Final[str] = "DF-"
+_AUTH_VALUE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)\b(bearer|basic)(\s+)([^\s,;&\"']+)"
+)
+_SECRET_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)\b([a-z0-9_-]*(?:sig|signature|sas|token|key|secret|"
+    r"password|passwd|credential|authorization))"
+    r"[\"']?\s*[=:]\s*[\"']?([^\s,;&\"'}]+)"
+)
+
+
+def _safe_failure_text(detail: object) -> str:
+    """Retain the diagnostic while excluding access credentials from durable job state."""
+    value = str(detail)
+    value = _AUTH_VALUE_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}<redacted>", value)
+    return _SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group(1)}=<redacted>", value
+    )
 
 
 class StageEvent(NamedTuple):
@@ -214,7 +232,7 @@ class ScanRunner:
         except IllegalTransitionError as exc:
             if self._record_failure(scan_id, exc, illegal=True):
                 return
-            logger.error("SCAN   %s rejected transition: %s", scan_id, exc)
+            logger.error("SCAN   %s rejected transition: %s", scan_id, _safe_failure_text(exc))
         except Exception as exc:  # noqa: BLE001 - job outcome, not runner crash
             self._record_failure(scan_id, exc, illegal=False)
         else:
@@ -242,8 +260,11 @@ class ScanRunner:
             where = failed_at.value if failed_at else job.stage.value
             job.stage = ScanStage.FAILED
             job.failed_at = failed_at
-            job.error = f"{type(exc).__name__}: {exc}"
-            detail = f"{where} rejected: {exc}" if illegal else f"{where} aborted: {exc}"
+            safe_cause = _safe_failure_text(exc)
+            job.error = f"{type(exc).__name__}: {safe_cause}"
+            detail = (
+                f"{where} rejected: {safe_cause}" if illegal else f"{where} aborted: {safe_cause}"
+            )
             self._append(job, StageEvent(ScanStage.FAILED, _utcnow(), detail))
             line = self._line(job, detail)
         logger.error("%s", line)

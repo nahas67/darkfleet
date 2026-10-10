@@ -235,14 +235,38 @@ _CORRELATION_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
 
 #: Query keys whose values must never reach a response or a log line.
 _SECRET_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?i)\b((?:sas|token|key|secret|password|passwd|credential|authorization)[a-z_]*)"
+    r"(?i)\b((?:x[-_]amz[-_](?:security[-_]token|signature|credential)|"
+    r"x[-_]goog[-_](?:signature|credential)|api[-_]?key|sig|signature|"
+    r"sas|token|key|secret|password|passwd|credential|authorization)[a-z_]*)"
     r"\s*[=:]\s*([^\s,;&\"']+)"
+)
+_SECRET_DETAIL_KEY_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)(?:signature|token|secret|password|passwd|credential|"
+    r"authorization|api[-_]?key|(?:^|[-_])(?:sig|sas)(?:$|[-_]))"
 )
 
 
 def redact(text: str) -> str:
     """Blank out anything shaped like ``key=value`` credentials."""
     return _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", str(text))
+
+
+def redact_details(value: Any) -> Any:
+    """Scrub credentials recursively while preserving nonsensitive metadata types."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "<redacted>"
+                if _SECRET_DETAIL_KEY_RE.search(str(key))
+                else redact_details(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact_details(item) for item in value]
+    return value
 
 
 _SSE_MEDIA_TYPE = "text/event-stream"
@@ -359,10 +383,10 @@ def api_error(
             error=error,
             status=status_value,
             message=redact(message),
-            provider=provider,
+            provider=redact(provider) if provider else None,
             scan_id=scan_id,
-            detail=dict(detail or {}),
-            suggestions=list(suggestions or []),
+            detail=redact_details(dict(detail or {})),
+            suggestions=[redact(text) for text in (suggestions or [])],
         ).model_dump(),
     )
 
@@ -376,7 +400,7 @@ def _unavailable(exc: RealDataUnavailableError, provider: str) -> HTTPException:
         status_value=status_value.value,
         message=str(exc),
         provider=provider,
-        detail={key: jsonable(value) for key, value in exc.details.items()},
+        detail=redact_details({key: jsonable(value) for key, value in exc.details.items()}),
         suggestions=list(exc.suggestions),
     )
 
@@ -1205,7 +1229,7 @@ def _job_events(job: ScanJob) -> list[StageEventOut]:
         StageEventOut(
             stage=event.stage,
             timestamp=event.timestamp,
-            detail=event.detail,
+            detail=redact(event.detail),
             terminal=event.terminal,
         )
         for event in job.history
@@ -1261,7 +1285,7 @@ def get_scan(scan_id: str, state: State) -> ScanStateResponse:
 
 
 def _sse(payload: Mapping[str, Any]) -> str:
-    return f"event: stage\ndata: {json.dumps(jsonable(payload), sort_keys=True)}\n\n"
+    return f"event: stage\ndata: {json.dumps(redact_details(jsonable(payload)), sort_keys=True)}\n\n"
 
 
 @router.get("/scans/{scan_id}/events")
@@ -1696,11 +1720,16 @@ def _probe_collections(url: str, provider: str, wanted: str) -> _Probe:
             error=f"unexpected catalog response (HTTP {code})",
             capabilities=[],
         )
-    collections = [
-        str(entry.get("id", ""))
-        for entry in payload.get("collections", [])
-        if isinstance(entry, dict)
-    ]
+    raw_collections = payload.get("collections")
+    if not isinstance(raw_collections, list):
+        return _Probe(
+            status=ProviderStatus.UNAVAILABLE,
+            detail=f"{provider} catalog returned an invalid collections document.",
+            latency_ms=latency,
+            error="catalog collections must be an array",
+            capabilities=[],
+        )
+    collections = [str(entry.get("id", "")) for entry in raw_collections if isinstance(entry, dict)]
     if wanted in collections:
         return _Probe(
             status=ProviderStatus.AVAILABLE,

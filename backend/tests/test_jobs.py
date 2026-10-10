@@ -272,6 +272,41 @@ def test_worker_exception_fails_job_and_keeps_progress() -> None:
     assert job.finished_at is not None
 
 
+def test_worker_failure_redacts_credentials_from_state_events_and_logs(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failing provider may include signed access details in its exception text."""
+    marker = "SIGNED_SOURCE_CANARY_DO_NOT_EXPOSE"
+
+    def failed_provider() -> Iterator[tuple[ScanStage, str]]:
+        yield ScanStage.SEARCHING_SCENE, "search attempted"
+        raise RuntimeError(
+            f"catalog refused https://storage.invalid/blob?sig={marker}&access_token={marker}; "
+            f"Authorization: Bearer {marker}; body={{\"apiKey\":\"{marker}\"}}"
+        )
+
+    caplog.set_level(logging.DEBUG, logger="darkfleet")
+    runner = ScanRunner(tmp_path)
+    job = _run_to_end(runner, failed_provider)
+
+    assert job.stage is ScanStage.FAILED
+    assert job.failed_at is ScanStage.READING_SAR
+    assert job.error is not None and job.error.startswith("RuntimeError: catalog refused")
+    assert job.history[-1].stage is ScanStage.FAILED
+    assert "READING_SAR aborted: catalog refused" in job.history[-1].detail
+    assert marker not in job.error
+    assert marker not in job.history[-1].detail
+    assert marker not in (tmp_path / "jobs" / f"{job.scan_id}.json").read_text(encoding="utf-8")
+    assert marker not in "\n".join(record.getMessage() for record in caplog.records)
+    assert marker not in "\n".join(event.detail for event in _drain(runner.subscribe(job.scan_id)))
+
+    recovered = ScanRunner(tmp_path).get(job.scan_id)
+    assert recovered is not None
+    assert recovered.stage is ScanStage.FAILED
+    assert recovered.failed_at is ScanStage.READING_SAR
+    assert recovered.error == job.error
+
+
 def test_illegal_transition_from_worker_fails_the_job() -> None:
     runner = ScanRunner()
     job = _run_to_end(runner, _skipping_work)

@@ -25,7 +25,7 @@ from darkfleet.api.local_sar_routes import router as local_sar_router
 from darkfleet.api.maritime_routes import router as maritime_router
 from darkfleet.api.missions import router as missions_router
 from darkfleet.api.report_routes import router as reports_router
-from darkfleet.api.routes import ApiState, liveness_router, router
+from darkfleet.api.routes import ApiState, liveness_router, redact, redact_details, router
 from darkfleet.api.sar_compare_routes import router as sar_compare_router
 from darkfleet.api.sar_imagery_routes import router as sar_imagery_router
 from darkfleet.api.views import router as saved_views_router
@@ -46,8 +46,8 @@ DEFAULT_CORS_ORIGINS: tuple[str, ...] = (
 def _error_body(detail: object, http_code: int) -> dict[str, Any]:
     """Render an error body. Structured API errors are returned unwrapped."""
     if isinstance(detail, dict) and "error" in detail:
-        return {str(key): value for key, value in detail.items()}
-    return {"error": "HTTP_ERROR", "status": f"HTTP_{http_code}", "message": str(detail)}
+        return redact_details({str(key): value for key, value in detail.items()})
+    return {"error": "HTTP_ERROR", "status": f"HTTP_{http_code}", "message": redact(str(detail))}
 
 
 def create_app(
@@ -130,10 +130,10 @@ def create_app(
             content={
                 "error": "REAL_DATA_UNAVAILABLE",
                 "status": provider_status,
-                "message": str(exc),
-                "provider": str(exc.details.get("provider", "")) or None,
-                "detail": exc.details,
-                "suggestions": list(exc.suggestions),
+                "message": redact(str(exc)),
+                "provider": redact(str(exc.details.get("provider", ""))) or None,
+                "detail": redact_details(exc.details),
+                "suggestions": [redact(item) for item in exc.suggestions],
             },
         )
 
@@ -146,7 +146,7 @@ def create_app(
             content={
                 "error": "INVALID_REQUEST",
                 "status": "INVALID_REQUEST",
-                "message": str(exc),
+                "message": redact(str(exc)),
             },
         )
 
