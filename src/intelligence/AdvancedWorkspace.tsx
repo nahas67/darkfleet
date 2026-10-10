@@ -119,7 +119,7 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
           ("RevisitMultipassPatternsDetector"). Reusing the real pattern also
           brings the arrow-key navigation the target panel already has. */}
       <div
-        className="flex shrink-0 items-center gap-1 px-2 py-1.5"
+        className="df-scroll-x flex w-full min-w-0 shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5"
         role="tablist"
         aria-label="Advanced analysis"
       >
@@ -130,17 +130,25 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
             role="tab"
             id={`advanced-tab-${id}`}
             aria-selected={tab === id}
-            aria-controls={`advanced-panel-${id}`}
+            aria-controls={tab === id ? `advanced-panel-${id}` : undefined}
             tabIndex={tab === id ? 0 : -1}
-            className="df-btn"
+            className="df-btn shrink-0 whitespace-nowrap"
             data-df-advanced-tab={id}
             onClick={() => setTab(id)}
             onKeyDown={(event) => {
-              const index = TABS.findIndex(([tid]) => tid === tab);
-              if (event.key === 'ArrowRight') setTab(TABS[(index + 1) % TABS.length][0]);
-              if (event.key === 'ArrowLeft') {
-                setTab(TABS[(index - 1 + TABS.length) % TABS.length][0]);
-              }
+              const index = TABS.findIndex(([tid]) => tid === id);
+              const nextIndex = event.key === 'ArrowRight' ? (index + 1) % TABS.length
+                : event.key === 'ArrowLeft' ? (index - 1 + TABS.length) % TABS.length
+                  : event.key === 'Home' ? 0
+                    : event.key === 'End' ? TABS.length - 1 : null;
+              if (nextIndex === null) return;
+              event.preventDefault();
+              const next = TABS[nextIndex][0];
+              setTab(next);
+              const nextButton = event.currentTarget.parentElement
+                ?.querySelector<HTMLButtonElement>(`#advanced-tab-${next}`);
+              nextButton?.focus();
+              nextButton?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
             }}
           >
             {label}
@@ -148,7 +156,8 @@ export function AdvancedWorkspace({ bbox }: { bbox: readonly number[] | null }) 
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2"
+        role="tabpanel" id={`advanced-panel-${tab}`} aria-labelledby={`advanced-tab-${tab}`} tabIndex={0}>
         {tab === 'REVISIT' ? (
           <RevisitPanel
             state={plan}

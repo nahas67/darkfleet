@@ -79,6 +79,29 @@ describe('DF-X10 local-only SAR import console', () => {
     expect(() => readLocalSarStatus({ ...status, enabled: false })).toThrow(/Contradictory/);
   });
 
+  it('surfaces the safe actual FastAPI refusal status rather than only HTTP 404', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({
+      detail: {
+        error: 'LOCAL_SAR_IMPORT_ERROR',
+        status: 'SOURCE_NOT_FOUND',
+        message: 'internal-path-details-must-not-be-rendered',
+      },
+    }, 404));
+    vi.stubGlobal('fetch', fetchMock);
+    let received: unknown;
+    try {
+      await submitLocalSarImport({ relative_path: 'missing.tif', product: 'RTC' });
+    } catch (cause) { received = cause; }
+    expect(received).toBeInstanceOf(ApiError);
+    expect((received as ApiError).detail).toEqual({
+      error: 'LOCAL_SAR_IMPORT_ERROR', status: 'SOURCE_NOT_FOUND',
+      message: 'internal-path-details-must-not-be-rendered',
+    });
+    expect(explainLocalSarError(received)).toBe('Local SAR request refused: SOURCE_NOT_FOUND.');
+    expect(explainLocalSarError(received)).not.toContain('internal-path');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts only one safe GeoTIFF basename; validates timezone and calibration before POST', () => {
     expect(validateLocalSarPath('sar_scene_01.TIFF')).toBe('sar_scene_01.TIFF');
     for (const value of [

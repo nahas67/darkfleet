@@ -88,7 +88,10 @@ export function validateLocalSarPath(input: string): string {
 export function explainLocalSarError(cause: unknown): string {
   if (cause instanceof ApiError) {
     const outer = cause.detail && typeof cause.detail === 'object' ? cause.detail as Record<string, unknown> : null;
-    const detail = outer?.detail && typeof outer.detail === 'object' ? outer.detail as Record<string, unknown> : null;
+    // request() already unwraps FastAPI's {detail:{...}} into ApiError.detail.
+    // Also tolerate a manually constructed ApiError carrying the outer envelope.
+    const detail = outer?.detail && typeof outer.detail === 'object'
+      ? outer.detail as Record<string, unknown> : outer;
     if (detail && typeof detail.status === 'string' && /^[A-Z0-9_]{1,80}$/.test(detail.status)) {
       return `Local SAR request refused: ${detail.status}.`;
     }
