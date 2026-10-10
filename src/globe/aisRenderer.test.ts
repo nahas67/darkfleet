@@ -20,9 +20,10 @@ import {
   decideContactGlyph,
   isContactAboveHorizon,
   selectGlyph,
+  updateRetainedAisLabel,
   type GlyphDecision,
 } from './aisRenderer';
-import { Cartesian3 } from 'cesium';
+import { Cartesian3, Color, type Label } from 'cesium';
 import { cameraFrameFromViewer, glyphScreenRotation, localFrameDeg } from './glyphGeometry';
 import {
   MAX_INTERPOLATION_INTERVAL_S,
@@ -120,6 +121,55 @@ describe('AIS label horizon visibility', () => {
 });
 
 describe('collection ownership', () => {
+  it('reuses keyed label objects rather than removing every label on every temporal tick', () => {
+    const labelBody = AIS_RENDERER_CODE.slice(
+      AIS_RENDERER_CODE.indexOf('  #renderLabels('),
+      AIS_RENDERER_CODE.indexOf('  #project('),
+    );
+    expect(labelBody).toContain('this.#labelsByMmsi.get(claim.id)');
+    expect(labelBody).toContain('this.#labels.remove(label)');
+    expect(labelBody).toContain('if (this.#labelsByMmsi.size) this.#labels.removeAll()');
+    expect(labelBody).not.toMatch(/^\s*this\.#labels\.removeAll\(\);\s*\/\/\s*per-tick/m);
+  });
+
+  it('writes zero Cesium label properties for an unchanged frame, and only changed properties on motion', () => {
+    const samePosition = Cartesian3.fromDegrees(103.8, 1.23);
+    const initialColor = Color.fromCssColorString('#ffffff');
+    let position = samePosition;
+    let text = '257000001 · 8.0 kn';
+    let fillColor = initialColor;
+    const writes: string[] = [];
+    const retained = {
+      get position() { return position; },
+      set position(value: Cartesian3) { writes.push('position'); position = value; },
+      get text() { return text; },
+      set text(value: string) { writes.push('text'); text = value; },
+      get fillColor() { return fillColor; },
+      set fillColor(value: Color) { writes.push('fillColor'); fillColor = value; },
+    } as Pick<Label, 'position' | 'text' | 'fillColor'>;
+    updateRetainedAisLabel(retained, {
+      position: Cartesian3.fromDegrees(103.8, 1.23),
+      text: '257000001 · 8.0 kn',
+      fillColor: Color.fromCssColorString('#ffffff'),
+    });
+    expect(writes).toEqual([]);
+
+    updateRetainedAisLabel(retained, {
+      position: Cartesian3.fromDegrees(103.801, 1.231),
+      text: '257000001 · 8.0 kn',
+      fillColor: Color.fromCssColorString('#ffffff'),
+    });
+    expect(writes).toEqual(['position']);
+
+    updateRetainedAisLabel(retained, {
+      position: Cartesian3.fromDegrees(103.801, 1.231),
+      text: '257000001 · 9.0 kn',
+      fillColor: Color.fromCssColorString('#f0f000'),
+    });
+    expect(writes).toEqual(['position', 'text', 'fillColor']);
+    expect(text).toBe('257000001 · 9.0 kn');
+    expect(fillColor.equals(Color.fromCssColorString('#f0f000'))).toBe(true);
+  });
   it('the renderer declares five separate collections, one per AIS layer concern', () => {
     // DF-X9 section 23. Contacts, labels, observation markers, tracks and predicted markers each
     // get their own. Sharing is what made `AIS_PREDICTED` inseparable from `AIS_TRACKS` before.

@@ -46,6 +46,7 @@ import {
   PolylineCollection,
   VerticalOrigin,
   type Billboard,
+  type Label,
   type Viewer,
 } from 'cesium';
 
@@ -387,10 +388,27 @@ export function decideContactGlyph(input: {
  * THE RENDERER
  * ============================================================================================== */
 
+/**
+ * Keep an existing Cesium Label without provoking glyph-atlas and vertex-buffer
+ * churn for identical frames. This is deliberately separate from arbitration:
+ * only a label that was actually selected by the current camera frame reaches it.
+ * Exported for focused setter-level regressions without pretending Node has WebGL.
+ */
+export function updateRetainedAisLabel(
+  label: Pick<Label, 'position' | 'text' | 'fillColor'>,
+  next: { position: Cartesian3; text: string; fillColor: Color },
+): void {
+  if (!Cartesian3.equals(label.position, next.position)) label.position = next.position;
+  if (label.text !== next.text) label.text = next.text;
+  if (!Color.equals(label.fillColor, next.fillColor)) label.fillColor = next.fillColor;
+}
+
 export class AisContactRenderer {
   #viewer: Viewer;
   #contacts: BillboardCollection;
   #labels: LabelCollection;
+  /** Stable label objects: arbitration decides membership; motion does not rebuild glyph atlases. */
+  #labelsByMmsi = new Map<string, Label>();
   #observations: BillboardCollection;
   #track: PolylineCollection;
   #predicted: BillboardCollection;
@@ -690,11 +708,16 @@ export class AisContactRenderer {
     frame: ReturnType<typeof cameraFrameFromViewer>,
     stats: ContactRenderStats,
   ): void {
-    this.#labels.removeAll();
     // No camera frame means no screen position, and a label whose position cannot be computed is a
     // label that would have to be faked somewhere. Before the first render Cesium reports zero
     // camera axes, and projecting then yields NaN rather than a position.
-    if (frame === null) return;
+    if (frame === null) {
+      // Invalidate ALL retained identities when the camera loses its reference frame.
+      // Never leave labels from a former view floating in the current scene.
+      if (this.#labelsByMmsi.size) this.#labels.removeAll();
+      this.#labelsByMmsi.clear();
+      return;
+    }
 
     const claims: LabelClaim[] = [];
     const contactsByMmsi = new Map<string, RenderableContact>();
@@ -726,15 +749,31 @@ export class AisContactRenderer {
     stats.labelsShown = decision.shown.length;
     stats.labelsSuppressed = decision.suppressed.length;
 
+    const shown = new Set<string>();
+
     for (const claim of decision.shown) {
       const contact = contactsByMmsi.get(claim.id);
       if (!contact) continue;
       const state = contact.state;
-      this.#labels.add({
-        position: Cartesian3.fromDegrees(state.lon as number, state.lat as number),
-        text: labelTextFor(contact),
+      shown.add(claim.id);
+      const position = Cartesian3.fromDegrees(state.lon as number, state.lat as number);
+      const text = labelTextFor(contact);
+      const fillColor = colourFor(contact, state.freshness.tier);
+      const retained = this.#labelsByMmsi.get(claim.id);
+      if (retained) {
+        // Cesium's LabelCollection.removeAll() on every temporal tick destroys
+        // each label and its backing glyph/background billboards, then uploads
+        // the same up-to-120 labels again. Preserve the actual Label identity.
+        // Camera projection and arbitration above still run every frame, so
+        // priority, collision, horizon and selection changes remain authoritative.
+        updateRetainedAisLabel(retained, { position, text, fillColor });
+        continue;
+      }
+      const added = this.#labels.add({
+        position,
+        text,
         font: LABEL_FONT,
-        fillColor: colourFor(contact, state.freshness.tier),
+        fillColor,
         // The label carries its contact's tag (DF-X9 §17): clicking the name selects the
         // vessel. Never the label text -- parsing display format back into identity would
         // couple picking to typography.
@@ -764,6 +803,15 @@ export class AisContactRenderer {
           LABEL_SCALE_FAR_VALUE,
         ),
       });
+      this.#labelsByMmsi.set(claim.id, added);
+    }
+
+    // Only genuinely suppressed, departed, or off-screen MMSIs lose labels.
+    // Do not retain stale text/geometry when the arbitration winner changes.
+    for (const [mmsi, label] of this.#labelsByMmsi) {
+      if (shown.has(mmsi)) continue;
+      this.#labels.remove(label);
+      this.#labelsByMmsi.delete(mmsi);
     }
   }
 
@@ -1135,6 +1183,7 @@ export class AisContactRenderer {
       if (!primitive.isDestroyed()) primitive.destroy();
     }
     this.#billboards.clear();
+    this.#labelsByMmsi.clear();
     // All THREE per-contact maps, not two. A first version cleared `#billboards` and
     // `#drawnRotation` and left `#glyphKind`, while the engine's own teardown comment justifies
     // explicit destruction precisely by "a per-contact Map".
