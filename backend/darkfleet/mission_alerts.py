@@ -30,7 +30,11 @@ def _safe_value(value: object) -> str | None:
     if (isinstance(value, str) and 0 < len(value) <= 200
             and all(32 <= ord(ch) != 127 for ch in value)
             and "://" not in value and "\\" not in value
-            and re.search(r"(?:^|[?&])(?:token|sig|signature|secret|password|api[_-]?key|auth(?:orization)?)=", value, re.IGNORECASE) is None):
+            and re.search(r"(?:^|[?&])(?:token|sig|signature|secret|password|api[_-]?key|auth(?:orization)?)=", value, re.IGNORECASE) is None
+            and re.search(
+                r"(?i)\bauthorization\s*[:=]\s*(?:bearer|basic)\s+\S+",
+                value,
+            ) is None):
         return value
     return None
 
