@@ -70,7 +70,7 @@ import {
   type CfarConfig,
 } from '../analysis/cfar';
 import type { AisContact, BBox, Coverage, SarTarget, VesselTrack } from '../state/store';
-import { store } from '../state/store';
+import { store, toBBox } from '../state/store';
 
 /**
  * The real-data guard.
@@ -658,6 +658,42 @@ export async function loadRaster(
 
 /* ------------------------------------------------------- catalogue + health */
 
+/**
+ * Do not interpret a successful HTTP status as a verified empty catalogue.
+ * `/api/scenes` returns `UNAVAILABLE` with this specific note for a genuine
+ * spatial zero. Any other unavailable status or malformed body cannot establish
+ * absence. TypeScript interfaces alone do not check a response at runtime.
+ */
+function verifiedSceneCatalogue(value: unknown): SceneListResponse {
+  const fail = (): never => {
+    throw new ContractViolation('SceneListResponse', 'The scene catalogue response is not verifiable.');
+  };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail();
+  const payload = value as Record<string, unknown>;
+  if (payload.runtime_mode !== 'REAL' || payload.synthetic !== false ||
+      typeof payload.provider !== 'string' || !payload.provider.trim() ||
+      !Array.isArray(payload.scenes) || !Number.isSafeInteger(payload.count) ||
+      (payload.count as number) < 0 || payload.count !== payload.scenes.length) return fail();
+
+  if (payload.scenes.length === 0) {
+    // The backend intentionally assigns UNAVAILABLE to a *verified zero*.
+    // It supplies this note only after a successful, real provider query.
+    if (payload.status !== 'UNAVAILABLE' ||
+        payload.note !== 'no scene coverage for the requested area/time') return fail();
+  } else if (payload.status !== 'AVAILABLE') return fail();
+
+  for (const item of payload.scenes) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return fail();
+    const scene = item as Record<string, unknown>;
+    if (scene.runtime_mode !== 'REAL' || scene.synthetic !== false ||
+        scene.provider !== payload.provider ||
+        ['id', 'platform', 'product', 'polarization', 'acquisition_time']
+          .some((key) => typeof scene[key] !== 'string' || !(scene[key] as string).trim()) ||
+        !Array.isArray(scene.bbox) || !toBBox(scene.bbox)) return fail();
+  }
+  return payload as unknown as SceneListResponse;
+}
+
 // The catalogue list is shared by TACTICAL/TASKING and any other scene
 // consumer. Component-local request queues cannot prevent an older caller's
 // response from overwriting a newer caller's AOI.
@@ -669,7 +705,7 @@ export function invalidateSceneCatalogue(): void {
   scenesGeneration++;
   scenesController?.abort();
   scenesController = null;
-  store.set({ scenes: [], scenesLoading: false });
+  store.set({ scenes: [], scenesLoading: false, scenesChecked: false, sceneError: null });
 }
 
 /**
@@ -690,6 +726,8 @@ export async function loadScenes(bbox?: BBox | null): Promise<void> {
     store.set({
       scenes: [],
       scenesLoading: false,
+      scenesChecked: false,
+      sceneError: null,
     });
     return;
   }
@@ -697,19 +735,23 @@ export async function loadScenes(bbox?: BBox | null): Promise<void> {
   scenesController = controller;
   // A pending catalogue belongs to a particular area. Retaining an earlier
   // area during a new request would display stale candidate acquisitions.
-  store.set({ scenes: [], scenesLoading: true });
+  store.set({ scenes: [], scenesLoading: true, scenesChecked: false, sceneError: null });
   const query = bbox.map((v) => v.toFixed(6)).join(',');
   try {
-    const payload = await api.get<SceneListResponse>(
+    const raw = await api.get<unknown>(
       `/api/scenes?bbox=${encodeURIComponent(query)}`, controller.signal,
     );
     if (controller.signal.aborted || generation !== scenesGeneration) return;
-    store.set({ scenes: payload.scenes ?? [], scenesLoading: false });
+    const payload = verifiedSceneCatalogue(raw);
+    store.set({ scenes: payload.scenes ?? [], scenesLoading: false, scenesChecked: true, sceneError: null });
   } catch (error) {
     if (controller.signal.aborted || generation !== scenesGeneration) return;
-    // A failed catalogue load is not a scan failure. It used to overwrite
-    // `scanError`, so a scene-search 400 surfaced as the analysis having failed.
-    store.set({ scenes: [], scenesLoading: false });
+    // Failure is NOT measured zero coverage. Keep it distinct from scanError
+    // and do not relay arbitrary provider/contract error details or local paths.
+    const sceneError = error instanceof ContractViolation
+      ? 'Scene catalogue response failed verification. No acquisitions can be trusted. Retry the search.'
+      : 'Scene catalogue unavailable. The provider search failed; scene availability is not established. Retry the search.';
+    store.set({ scenes: [], scenesLoading: false, scenesChecked: false, sceneError });
   } finally {
     if (generation === scenesGeneration) scenesController = null;
   }

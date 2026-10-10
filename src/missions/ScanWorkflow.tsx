@@ -71,7 +71,12 @@ export function ScanWorkflow() {
    * exists can be in flight.
    */
   const scanInFlight = state.scanId !== null && !terminalStage(state.scanStage);
-  const canRun = parsed !== null && !busy && !scanInFlight;
+  // A plausible default scene is not evidence of a checked provider query.
+  // Fail closed on network/contract refusal and on verified zero coverage.
+  const hasVerifiedScene = state.scenesChecked && !state.sceneError && state.scenes.length > 0;
+  const selectedScenePresent = !sceneId || state.scenes.some((scene) => scene.id === sceneId);
+  const canRun = parsed !== null && hasVerifiedScene && selectedScenePresent &&
+    !state.scenesLoading && !busy && !scanInFlight;
 
   const run = async () => {
     if (!parsed) return;
@@ -130,7 +135,7 @@ export function ScanWorkflow() {
             id="df-scan-scene"
             className="df-input w-full"
             value={sceneId}
-            disabled={!parsed || state.scenesLoading}
+            disabled={!parsed || state.scenesLoading || !hasVerifiedScene}
             onChange={(event) => setSceneId(event.target.value)}
           >
             <option value="">Newest acquisition covering the AOI</option>
@@ -141,6 +146,25 @@ export function ScanWorkflow() {
             ))}
           </select>
           {state.scenesLoading ? <p role="status" className="df-note">Searching acquisitions for this area…</p> : null}
+          {parsed && state.sceneError ? (
+            <div role="alert" data-df-scene-error className="space-y-1 text-[11px] text-fault">
+              <p>{state.sceneError} Scene selection and analysis are disabled until a verified catalogue is available.</p>
+              <button type="button" className="df-btn" data-df-scene-retry
+                onClick={() => void loadScenes(parsed)}>
+                Retry scene search
+              </button>
+            </div>
+          ) : null}
+          {parsed && !state.scenesLoading && !state.sceneError && state.scenesChecked && state.scenes.length === 0 ? (
+            <p data-df-scene-empty className="df-note">
+              No Sentinel-1 acquisitions were found for this area in the checked provider catalogue. Analysis is disabled for this AOI; choose another area or retry later.
+            </p>
+          ) : null}
+          {parsed && !state.scenesLoading && !state.sceneError && !state.scenesChecked ? (
+            <p data-df-scene-unchecked className="df-note">
+              Scene availability has not been verified for this area. Analysis is disabled until the catalogue search succeeds.
+            </p>
+          ) : null}
           {state.scenes.length > 0 ? (
             <ul className="df-scroll mt-2 max-h-40 space-y-1 overflow-y-auto">
               {state.scenes.map((scene) => (

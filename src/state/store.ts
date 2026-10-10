@@ -368,6 +368,10 @@ export type State = {
   /* --- catalogue --- */
   scenes: SceneSummary[];
   scenesLoading: boolean;
+  /** True only after a structurally valid REAL provider catalogue response, including zero scenes. */
+  scenesChecked: boolean;
+  /** Provider/contract search failure. Never reuse scanError for catalogue failures. */
+  sceneError: string | null;
 
   /* --- system --- */
   providers: ProviderHealthEntry[];
@@ -464,6 +468,8 @@ const initialState: State = {
 
   scenes: [],
   scenesLoading: false,
+  scenesChecked: false,
+  sceneError: null,
 
   providers: [],
   providersLoading: false,

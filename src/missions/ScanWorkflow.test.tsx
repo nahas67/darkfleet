@@ -4,7 +4,8 @@ import { ScanWorkflow, parseBbox } from './ScanWorkflow';
 import { store } from '../state/store';
 
 afterEach(() => {
-  store.set({ aoiText: '', scenes: [], scenesLoading: false, scanId: null, scanStage: 'QUEUED' });
+  store.set({ aoiText: '', scenes: [], scenesLoading: false, sceneError: null,
+    scenesChecked: false, scanId: null, scanStage: 'QUEUED' });
 });
 
 describe('Operator-selected scan AOI', () => {
@@ -24,7 +25,11 @@ describe('Operator-selected scan AOI', () => {
     expect(invalid).toMatch(/disabled=""[^>]*data-df-run-scan/);
     expect(invalid).toContain('longitude');
 
-    store.set({ aoiText: '0, 0, 2, 2', scanId: null });
+    store.set({ aoiText: '0, 0, 2, 2', scanId: null, scenesChecked: true, scenes: [{
+      id: 'VALID', provider: 'planetary-computer', platform: 'sentinel-1a',
+      product: 'RTC', polarization: 'VV', acquisition_time: '2026-10-01T00:00:00Z',
+      bbox: [0, 0, 2, 2], runtime_mode: 'REAL', synthetic: false,
+    }] });
     const valid = renderToStaticMarkup(<ScanWorkflow />);
     expect(valid).toMatch(/data-df-run-scan/);
     expect(valid).not.toMatch(/disabled=""[^>]*data-df-run-scan/);
@@ -44,5 +49,31 @@ describe('Operator-selected scan AOI', () => {
     expect(html).toContain('RTC');
     expect(html).toContain('VH');
     expect(html).toContain('sentinel-1a');
+  });
+
+  it('shows unavailable alert and disables the scan/selector after a provider failure', () => {
+    store.set({
+      aoiText: '100, 0, 101, 1', scenes: [], scenesLoading: false,
+      scenesChecked: false,
+      sceneError: 'Scene catalogue unavailable. Provider search failed; retry.',
+    });
+    const html = renderToStaticMarkup(<ScanWorkflow />);
+    expect(html).toContain('data-df-scene-error');
+    expect(html).toContain('role="alert"');
+    expect(html).toMatch(/disabled=""[^>]*data-df-run-scan/);
+    expect(html).toMatch(/id="df-scan-scene"[^>]*disabled=""/);
+    expect(html).toContain('data-df-scene-retry');
+    expect(html).not.toContain('No Sentinel-1 acquisition');
+  });
+
+  it('shows a verified empty-catalogue explanation, not an unavailable alert', () => {
+    store.set({
+      aoiText: '100, 0, 101, 1', scenes: [], scenesLoading: false,
+      scenesChecked: true, sceneError: null,
+    });
+    const html = renderToStaticMarkup(<ScanWorkflow />);
+    expect(html).toContain('data-df-scene-empty');
+    expect(html).not.toContain('data-df-scene-error');
+    expect(html).toMatch(/disabled=""[^>]*data-df-run-scan/);
   });
 });
