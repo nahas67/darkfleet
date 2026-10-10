@@ -14,6 +14,7 @@ export type WorkspaceId =
   | 'SEARCH'
   | 'INTELLIGENCE'
   | 'TASKING'
+  | 'MISSIONS'
   | 'LAYERS'
   | 'ANALYTICS'
   | 'ADVANCED'
@@ -32,6 +33,7 @@ export const RAIL: readonly Entry[] = [
   { id: 'SEARCH', label: 'Search', glyph: '⌕' },
   { id: 'INTELLIGENCE', label: 'Intel', glyph: '◈' },
   { id: 'TASKING', label: 'Tasking', glyph: '⇄' },
+  { id: 'MISSIONS', label: 'Missions', glyph: '◇' },
   { id: 'LAYERS', label: 'Layers', glyph: '▤' },
   { id: 'ANALYTICS', label: 'Analytics', glyph: '∿' },
   // Revisit planning, multi-pass hypotheses, longitudinal patterns and detector

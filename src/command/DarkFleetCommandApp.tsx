@@ -35,6 +35,7 @@ import { ContactList } from '../contacts/ContactList';
 import { DossierWorkspace } from '../dossier/DossierWorkspace';
 import { LayerConsole } from '../sensors/LayerConsole';
 import { ScanWorkflow } from '../missions/ScanWorkflow';
+import { MissionWorkspace } from '../missions/MissionWorkspace';
 import { SceneBrowser } from '../scenes/SceneBrowser';
 import { SystemPanel } from '../command/SystemPanel';
 import { ReportsWorkspace } from '../reports/ReportsWorkspace';
@@ -252,6 +253,7 @@ export function DarkFleetCommandApp() {
             </>
           ) : null}
           {activeWorkspace === 'TASKING' ? <ScanWorkflow /> : null}
+          {activeWorkspace === 'MISSIONS' ? <MissionWorkspace /> : null}
           {activeWorkspace === 'LAYERS' ? <LayerConsole /> : null}
           {activeWorkspace === 'ANALYTICS' ? <AnalyticsWorkspace /> : null}
           {activeWorkspace === 'ADVANCED' ? <AdvancedWorkspace bbox={state.aoi} /> : null}
